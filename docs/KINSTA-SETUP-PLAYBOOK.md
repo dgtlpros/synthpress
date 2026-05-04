@@ -1,6 +1,6 @@
 # Kinsta MSN Autopilot Site — Setup Playbook
 
-> **Purpose**: This document is the complete setup guide for building one "golden template" WordPress site on Kinsta that connects Confleko (AI publishing) to MSN Partner Hub (syndication). Once this site is working end-to-end, it gets cloned 19 times.
+> **Purpose**: This document is the complete setup guide for building one "golden template" WordPress site on Kinsta that connects the SynthPress Dashboard (AI publishing) to MSN Partner Hub (syndication). Once this site is working end-to-end, it gets cloned 19 times.
 >
 > **Who this is for**: An AI assistant in a new Cursor workspace (the DevKinsta local copy of the Kinsta site). Give it this file as context so it knows what to build.
 
@@ -9,14 +9,14 @@
 ## The Goal
 
 ```
-Confleko (AI SaaS) → WordPress on Kinsta → MSN Partner Hub
-                                          → Public visitors via WP theme
+SynthPress Dashboard (Next.js) → WordPress on Kinsta → MSN Partner Hub
+                                                      → Public visitors via WP theme
 ```
 
 - **20 posts/day** across the network (starts with 1 site)
-- Standard WordPress frontend (NOT headless — no Next.js)
+- Standard WordPress frontend (NOT headless)
 - MSN auto-publishes from our RSS feed
-- Confleko handles AI content generation and pushes via REST API
+- SynthPress Dashboard handles AI content generation and pushes via REST API
 - Minimal plugin footprint — only what's needed for the pipeline
 
 ---
@@ -31,7 +31,7 @@ Confleko (AI SaaS) → WordPress on Kinsta → MSN Partner Hub
    - Site name: whatever your first niche is (e.g. `petmojo-v2` or your actual domain name)
    - Data center: closest to your audience (or US Central for MSN)
    - WordPress version: latest
-   - Admin username: your personal admin (NOT the one Confleko will use)
+   - Admin username: your personal admin (NOT the bot user)
    - Admin email: your email
    - PHP version: 8.2+
 4. Once created, go to **Domains → Add Domain** and point your first custom domain
@@ -57,28 +57,27 @@ Confleko (AI SaaS) → WordPress on Kinsta → MSN Partner Hub
 
 ## Phase 2: Plugin Installation
 
-### Required plugins (6 total)
+### Required plugins (5 total)
 
 | Plugin | Source | How to install |
 |---|---|---|
-| **confleko-2** | Copy from pet-mojo reference site | Upload ZIP or copy folder |
-| **msn-syndication-2** | Copy from pet-mojo reference site | Upload ZIP or copy folder |
+| **msn-syndication-2** | This repo: `wordpress/wp-content/plugins/msn-syndication-2/` | Copy folder to site's `wp-content/plugins/` |
 | **Rank Math SEO** | WordPress.org (free) | Install from WP Admin → Plugins → Add New |
 | **Auto Image Attributes From Filename** | WordPress.org (free) | Install from WP Admin → Plugins → Add New |
 | **Disable Comments** | WordPress.org (free) | Install from WP Admin → Plugins → Add New |
 | **User Role Editor** | WordPress.org (free) | Install from WP Admin → Plugins → Add New |
 
-### Plugin source files (from the reference site)
+### Plugin source files
 
-The two custom plugins live in the reference repo at:
+The custom plugin and all mu-plugins live in this monorepo at:
 ```
-/path/to/pet-mojo/app/public/wp-content/plugins/confleko-2/
-/path/to/pet-mojo/app/public/wp-content/plugins/msn-syndication-2/
+synthpress/wordpress/wp-content/plugins/msn-syndication-2/
+synthpress/wordpress/wp-content/mu-plugins/
 ```
 
-Copy these entire folders into the new site's `wp-content/plugins/` directory.
+Copy the entire `wp-content` boilerplate into the new site, or cherry-pick the folders you need.
 
-### After installing — activate all 6 plugins
+### After installing — activate all 5 plugins
 
 ---
 
@@ -89,7 +88,6 @@ Copy these entire folders into the new site's `wp-content/plugins/` directory.
 Recommended options (all free, fast, MSN-compatible):
 - **GeneratePress** — lightweight, fast, good for content sites
 - **Flavor** — minimal, block-based
-- **Flavor** — clean starter theme
 - **Twenty Twenty-Five** (WordPress default) — zero dependencies
 
 For MSN compatibility, the theme just needs to output clean HTML with proper heading hierarchy. Any of these work.
@@ -176,7 +174,7 @@ add_action('admin_notices', 'display_missing_featured_image_notice');
 
 ### 3.6 Child theme: `inc/restrict-author-login.php`
 
-Prevents the Confleko bot user (Author role) from accessing wp-admin unless explicitly allowed.
+Prevents the bot user (Author role) from accessing wp-admin unless explicitly allowed.
 
 ```php
 <?php
@@ -234,23 +232,22 @@ function restrict_author_login_on_login($user_login, $user) {
 
 ## Phase 4: WordPress Configuration
 
-### 4.1 Create the Confleko bot user
+### 4.1 Create the bot user
 
 1. **Users → Add New**
-   - Username: `confleko-bot` (or similar)
+   - Username: `synthpress-bot` (or similar)
    - Email: a dedicated email for this
    - Role: **Editor** (needs `edit_posts`, `publish_posts`, `upload_files`, `edit_others_posts`)
    - Password: anything (won't use password login)
 
-2. **Why Editor and not Author?** Confleko needs to be able to set post meta fields (like `syndication_tool_enabled`) which requires `edit_others_posts` or a custom capability. Editor covers this.
+2. **Why Editor and not Author?** The bot needs to be able to set post meta fields (like `syndication_tool_enabled`) which requires `edit_others_posts` or a custom capability. Editor covers this.
 
-### 4.2 Connect Confleko
+### 4.2 Create Application Password for SynthPress
 
-1. Log in as the `confleko-bot` user (or your admin)
-2. Go to **Settings → Confleko**
-3. Click **"Connect your website to Confleko"**
-4. Copy the returned credentials (username, app password, domain)
-5. Paste into your Confleko dashboard under this site's connection
+1. Go to **Users → your bot user → Application Passwords**
+2. Enter a name (e.g. "SynthPress Dashboard") and click **Add New Application Password**
+3. Copy the generated password — you'll store this in the SynthPress Dashboard project settings
+4. The dashboard will use HTTP Basic auth: `synthpress-bot:{app-password}`
 
 ### 4.3 Configure MSN Syndication
 
@@ -283,7 +280,7 @@ Visit: `https://your-domain.com/feed/msn:article`
 
 1. **Settings → Image Attributes**
 2. Enable: auto-fill alt text from filename on upload
-3. This ensures any image Confleko uploads via the REST API gets proper alt text
+3. This ensures any image uploaded via the REST API gets proper alt text
 
 ### 4.8 Configure Disable Comments
 
@@ -304,68 +301,36 @@ Visit: `https://your-domain.com/feed/msn:article`
 ### 5.1 How a post flows (the full lifecycle)
 
 ```
-1. You create/approve an article in Confleko's dashboard
-2. Confleko POSTs to: https://your-domain.com/wp-json/wp/v2/posts
-   - Body: { title, content, status: "publish", featured_media: <id>, meta: {...} }
-   - Auth: HTTP Basic (confleko-bot : app-password)
-3. WordPress saves the post
-4. confleko-2 plugin fires on save_post:
-   - Downloads all external images → Media Library
-   - Rewrites <img src="..."> to local URLs
-   - Strips srcset/sizes
-   - Fills missing alt/title attributes
+1. SynthPress Dashboard generates an article via AI
+2. Dashboard POSTs to: https://your-domain.com/wp-json/wp/v2/media (featured image)
+3. Dashboard POSTs to: https://your-domain.com/wp-json/wp/v2/posts
+   - Body: { title, content, status: "publish", featured_media: <id> }
+   - Auth: HTTP Basic (synthpress-bot : app-password)
+4. WordPress saves the post
 5. featured-image-requirement.php checks for thumbnail
    - No thumbnail → reverts to draft (safety net)
-6. Kinsta's cache auto-purges → post is live on the public site
-7. MSN's crawler hits /feed/msn:article (every few minutes)
+6. auto-enable-msn-syndication.php sets syndication meta automatically
+7. Kinsta's cache auto-purges → post is live on the public site
+8. MSN's crawler hits /feed/msn:article (every few minutes)
    - Picks up the new post (if syndication_tool_enabled = true)
    - Validates images, metadata, AI disclosure
    - Auto-publishes to MSN.com / Edge / Bing
 ```
 
-### 5.2 Making Confleko set the MSN meta fields automatically
+### 5.2 MSN meta fields (handled automatically)
 
-For TRUE autopilot, Confleko needs to set these meta fields when creating the post:
+The `auto-enable-msn-syndication.php` mu-plugin sets these on every new publish:
 
 ```json
 {
-  "title": "Your Article Title",
-  "content": "<p>Article body...</p>",
-  "status": "publish",
-  "meta": {
-    "syndication_tool_enabled": true,
-    "syndication_tool_schema_types": ["article"],
-    "syndication_tool_ai_disclosure_enable": true,
-    "syndication_tool_backlink_enable": true
-  }
+  "syndication_tool_enabled": true,
+  "syndication_tool_schema_types": ["article"],
+  "syndication_tool_ai_disclosure_enable": true,
+  "syndication_tool_backlink_enable": true
 }
 ```
 
-**Ask Confleko support**: "Can I include custom post meta fields in the publish payload? Specifically, I need `syndication_tool_enabled`, `syndication_tool_schema_types`, `syndication_tool_ai_disclosure_enable`, and `syndication_tool_backlink_enable` to be set automatically when you publish."
-
-If Confleko can't set meta directly, you have two fallback options:
-1. Write a small `mu-plugin` that auto-enables syndication on every new `publish` post
-2. Use a WordPress hook to default those meta fields
-
-**Fallback mu-plugin** (put in `wp-content/mu-plugins/auto-enable-msn-syndication.php`):
-
-```php
-<?php
-/**
- * Auto-enable MSN syndication for all newly published posts.
- * Drop this in wp-content/mu-plugins/
- */
-add_action('transition_post_status', function($new_status, $old_status, $post) {
-    if ($new_status === 'publish' && $old_status !== 'publish' && $post->post_type === 'post') {
-        update_post_meta($post->ID, 'syndication_tool_enabled', 1);
-        update_post_meta($post->ID, 'syndication_tool_schema_types', ['article']);
-        update_post_meta($post->ID, 'syndication_tool_ai_disclosure_enable', 1);
-        update_post_meta($post->ID, 'syndication_tool_backlink_enable', 1);
-    }
-}, 10, 3);
-```
-
-This means: every post that transitions to "publish" for the first time automatically gets MSN syndication enabled. Zero manual clicks needed.
+The SynthPress Dashboard does NOT need to send these — the mu-plugin handles it. Zero manual clicks needed.
 
 ---
 
@@ -411,14 +376,13 @@ MSN will crawl your feed and validate. Common checks:
 5. Visit `https://your-domain.com/feed/msn:article` — confirm the post appears in the XML
 6. Confirm the feed has `<media:content>`, `<dc:creator>`, AI disclosure text
 
-### Test 2: Confleko-published post
+### Test 2: REST API publish (simulating SynthPress Dashboard)
 
-1. In Confleko's dashboard, generate an article for this site
-2. Publish it
-3. Check WP Admin → Posts — confirm it arrived as "Published"
-4. Check Media Library — confirm external images were re-hosted locally
-5. Check `https://your-domain.com/feed/msn:article` — confirm it's in the feed
-6. If using the mu-plugin, syndication should be auto-enabled
+1. Use curl or the SynthPress Dashboard to POST a new article via REST API
+2. Check WP Admin → Posts — confirm it arrived as "Published"
+3. Check Media Library — confirm external images were re-hosted locally
+4. Check `https://your-domain.com/feed/msn:article` — confirm it's in the feed
+5. Syndication meta should be auto-enabled by the mu-plugin
 
 ### Test 3: Safety net check
 
@@ -438,14 +402,15 @@ Once everything works on the golden template:
 2. Or use **Kinsta API** for bulk operations
 3. Each clone gets:
    - New domain pointed
-   - New Confleko bot user + App Password
+   - New bot user + App Password
    - New MSN Partner Hub feed registered
    - Fresh content (delete the test posts)
 
 ### Per-clone checklist:
 
 - [ ] Domain pointed and HTTPS enabled
-- [ ] Confleko connected (new App Password)
+- [ ] Bot user created with Application Password
+- [ ] App Password stored in SynthPress Dashboard project settings
 - [ ] MSN Partner Hub feed registered
 - [ ] Permalinks saved (flush rewrite rules)
 - [ ] Test post → appears in feed
@@ -459,22 +424,18 @@ Once everything works on the golden template:
 ```
 wp-content/
 ├── mu-plugins/
-│   └── auto-enable-msn-syndication.php    ← auto-enables MSN on every publish
+│   ├── auto-enable-msn-syndication.php    ← auto-enables MSN on every publish
+│   ├── featured-image-requirement.php     ← blocks publish without featured image
+│   └── restrict-author-login.php          ← blocks bot from wp-admin
 ├── plugins/
-│   ├── confleko-2/                        ← AI image rehosting + auth
 │   ├── msn-syndication-2/                 ← MSN RSS feed generator
 │   ├── seo-by-rank-math/                  ← SEO (free from wp.org)
 │   ├── auto-image-attributes.../          ← alt text filler (free from wp.org)
 │   ├── disable-comments/                  ← spam prevention (free from wp.org)
 │   └── user-role-editor/                  ← capability control (free from wp.org)
 └── themes/
-    ├── {parent-theme}/
-    └── {parent-theme}-child/
-        ├── style.css
-        ├── functions.php
-        └── inc/
-            ├── featured-image-requirement.php
-            └── restrict-author-login.php
+    ├── twentytwentyfive/                  ← active theme
+    └── twentytwentyfour/                  ← fallback theme
 ```
 
 ---
@@ -488,9 +449,7 @@ wp-content/
 | REST API (posts) | `https://your-domain.com/wp-json/wp/v2/posts` |
 | MSN Article Feed | `https://your-domain.com/feed/msn:article` |
 | MSN Gallery Feed | `https://your-domain.com/feed/msn:gallery` |
-| Confleko settings | `https://your-domain.com/wp-admin/options-general.php?page=confleko-settings` |
 | Syndication settings | `https://your-domain.com/wp-admin/options-general.php?page=syndication_tool` |
-| Import logs | `https://your-domain.com/wp-admin/options-general.php?page=confleko-import-logs` |
 
 ---
 
@@ -499,8 +458,8 @@ wp-content/
 | Issue | Fix |
 |---|---|
 | 404 on `/feed/msn:article` | Re-save permalinks (Settings → Permalinks → Save) |
-| Confleko gets 401 | Re-run the "Connect" flow in Settings → Confleko |
-| Images not being re-hosted | Check that `confleko-2` is activated and the import log table exists |
+| REST API gets 401 | Check bot user Application Password — regenerate if needed |
+| Images not being re-hosted | SynthPress Dashboard should upload images via REST API before creating the post — ensure images are uploaded to `/wp-json/wp/v2/media` first |
 | Post stuck in draft | Missing featured image — set one and re-publish |
 | MSN rejects feed | Check the feed XML manually; ensure AI disclosure is present and images have alt text |
 | Feed shows 0 items | Posts need `syndication_tool_enabled = true` — check the mu-plugin is active |

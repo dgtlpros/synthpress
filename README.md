@@ -3,11 +3,11 @@
 Monorepo for the SynthPress platform — AI-powered content generation and publishing across a network of WordPress sites syndicated to MSN.
 
 ```
-Confleko / SynthPress Dashboard (AI)
-  │
+SynthPress Dashboard (Next.js)
+  │  generates AI articles, uploads images, publishes via REST API
   ▼
 WordPress on Kinsta (20 sites)
-  │
+  │  auto-syndicates via MSN-compliant RSS feed
   ▼
 MSN Partner Hub → MSN.com / Edge / Bing
 ```
@@ -31,7 +31,7 @@ synthpress/
 
 ### [`apps/web/`](apps/web/) — SynthPress Dashboard
 
-The Next.js application that replaces Confleko as the AI content engine. Generates articles, manages WordPress connections, and publishes to the site network from a single dashboard.
+The Next.js application that powers the entire content pipeline. Generates AI articles, manages WordPress site connections, uploads featured images, and publishes across the network from a single dashboard.
 
 - **Stack**: Next.js 16, React 19, TypeScript, Tailwind CSS 4
 - **Run locally**: `pnpm dev` from the repo root
@@ -50,7 +50,8 @@ Reserved for shared code across the monorepo (UI components, utility libraries, 
 
 | Doc | What it covers |
 |---|---|
-| [Dashboard Build Spec](docs/SYNTHPRESS-DASHBOARD-SPEC.md) | Full spec for the Next.js dashboard — data model, routes, AI pipeline, WordPress REST API integration, and MVP scope |
+| [Publishing API Spec](docs/PUBLISHING-API-SPEC.md) | Exactly how SynthPress publishes to WordPress — every API call, content rules, image handling, and what WordPress automates |
+| [Dashboard Build Spec](docs/SYNTHPRESS-DASHBOARD-SPEC.md) | Full spec for the Next.js dashboard — data model, routes, AI pipeline, and MVP scope |
 | [Kinsta Setup Playbook](docs/KINSTA-SETUP-PLAYBOOK.md) | Step-by-step guide to build the golden template WordPress site on Kinsta and clone it across the network |
 | [WordPress Content](wordpress/wp-content/README.md) | What lives in the `wp-content` boilerplate — themes, plugins, mu-plugins |
 
@@ -60,20 +61,18 @@ Reserved for shared code across the monorepo (UI components, utility libraries, 
 
 The platform has two halves that work together:
 
-**WordPress sites (Kinsta)** — 20 identical WordPress installs, each targeting a different niche. They handle publishing, MSN syndication, image rehosting, SEO, and feed generation automatically via plugins and mu-plugins.
+**SynthPress Dashboard (Next.js)** — The content engine. Connects to every WordPress site via REST API, generates AI articles with configurable prompts per niche, uploads featured images, and publishes on a per-project schedule. This is what we build and maintain in `apps/web/`.
 
-**SynthPress Dashboard (Next.js)** — The content engine. Connects to every WordPress site via REST API, generates AI articles, uploads featured images, and publishes on a per-project schedule.
+**WordPress sites (Kinsta)** — 20 identical WordPress installs, each targeting a different niche. Once the dashboard publishes a post, the WordPress side handles everything else automatically: MSN syndication meta, feed generation, SEO, and cache purging.
 
 ```
 SynthPress Dashboard                    WordPress Site (Kinsta)
 ┌──────────────────┐                    ┌──────────────────────────────┐
-│ Generate article │                    │ confleko-2 plugin            │
-│ Generate image   │───POST /media───▶  │  └─ rehost images locally   │
-│ Publish post     │───POST /posts───▶  │ auto-enable-msn mu-plugin   │
-│ Track status     │                    │  └─ set syndication meta     │
-└──────────────────┘                    │ featured-image-requirement   │
-                                        │  └─ block publish w/o image │
-                                        │ msn-syndication-2 plugin    │
+│ Generate article │                    │ auto-enable-msn mu-plugin   │
+│ Upload image     │───POST /media───▶  │  └─ set syndication meta     │
+│ Publish post     │───POST /posts───▶  │ featured-image-requirement   │
+│ Track status     │                    │  └─ block publish w/o image │
+└──────────────────┘                    │ msn-syndication-2 plugin    │
                                         │  └─ /feed/msn:article       │
                                         └──────────────┬───────────────┘
                                                        │

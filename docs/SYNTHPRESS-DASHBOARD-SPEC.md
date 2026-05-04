@@ -1,6 +1,6 @@
 # SynthPress Dashboard — Build Spec
 
-> **Purpose**: This document describes a Next.js application that replaces Confleko as the AI content generation and publishing platform for a network of 20 WordPress sites syndicated to MSN. Give this file to an AI assistant in a new workspace so it knows exactly what to build.
+> **Purpose**: This document describes the SynthPress Dashboard — a Next.js application that serves as the AI content generation and publishing platform for a network of 20 WordPress sites syndicated to MSN. Give this file to an AI assistant so it knows exactly what to build.
 
 ---
 
@@ -13,9 +13,7 @@ We have a network of WordPress sites hosted on Kinsta. Each site:
 - Has mu-plugins that auto-enable MSN syndication meta on every new publish
 - Has a safety net that blocks publishing without a featured image
 
-The sites are fully configured and working. What we need now is **the content engine** — a dashboard that generates AI articles and publishes them to any of our WordPress sites automatically.
-
-Previously, we used Confleko (a SaaS tool) for this, but it only supports one WordPress connection per project. We need to manage 20 sites from one place.
+The sites are fully configured and working. What we need is **the content engine** — a dashboard that generates AI articles and publishes them to any of our WordPress sites automatically, all managed from one place.
 
 ---
 
@@ -54,7 +52,7 @@ SynthPress Dashboard (Next.js)
 
 ## The WordPress REST API (how publishing works)
 
-Each WordPress site has a bot user (`confleko-bot`, role: Editor) with an Application Password. Publishing is 2 HTTP calls:
+Each WordPress site has a bot user (`synthpress-bot`, role: Editor) with an Application Password. Publishing is 2 HTTP calls:
 
 ### Step 1: Upload featured image
 
@@ -93,7 +91,6 @@ You don't need to do anything else. The WordPress site handles the rest:
 
 - **`auto-enable-msn-syndication.php` (mu-plugin)** — auto-sets `syndication_tool_enabled`, schema types, AI disclosure, and backlink meta on every new publish
 - **`featured-image-requirement.php` (mu-plugin)** — if no featured image, reverts to draft (safety net)
-- **confleko-2 plugin** — downloads any external images in the post body to the local Media Library, rewrites img src URLs, fills alt/title attributes
 - **msn-syndication-2 plugin** — includes the post in the MSN RSS feed at `/feed/msn:article`
 - **Kinsta cache** — auto-purges so the post is live immediately
 - **MSN crawler** — picks up the post from the feed every few minutes
@@ -111,7 +108,7 @@ You don't need to do anything else. The WordPress site handles the rest:
 | slug | string | URL-safe identifier |
 | niche | string | Topic/niche (e.g. "fitness", "tech", "pets") |
 | wp_url | string | WordPress site URL (e.g. "https://synthpress01.kinsta.cloud") |
-| wp_username | string | Bot username (e.g. "confleko-bot") |
+| wp_username | string | Bot username (e.g. "synthpress-bot") |
 | wp_app_password | string (encrypted) | WordPress Application Password |
 | ai_prompt_template | text | System prompt for AI article generation |
 | keywords | string[] | Target keywords/topics for this niche |
@@ -207,7 +204,7 @@ Options for implementation:
 
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | **Next.js 14+ (App Router)** | Full-stack, server components, API routes |
+| Framework | **Next.js 16 (App Router)** | Full-stack, server components, API routes |
 | Database | **PostgreSQL** (via Supabase or Neon) | Relational, good for structured project/article data |
 | ORM | **Prisma** or **Drizzle** | Type-safe queries |
 | Auth | **NextAuth.js** or **Clerk** | Simple, supports email + password |
@@ -234,13 +231,12 @@ Options for implementation:
 The WordPress sites are fully configured. The Next.js app does NOT need to handle:
 
 - MSN syndication (the WordPress plugin handles this automatically)
-- Image rehosting (the confleko-2 plugin handles this automatically)
 - SEO/schema (Rank Math handles this automatically)
 - Alt text (Auto Image Attributes plugin handles this automatically)
 - AI disclosure for MSN (mu-plugin handles this automatically)
 - Cache purging (Kinsta handles this automatically)
 
-The app only needs to: **generate content, upload image, create post, track status**.
+The app only needs to: **generate content, upload image (locally via REST API), create post, track status**.
 
 ---
 
@@ -273,7 +269,7 @@ The app only needs to: **generate content, upload image, create post, track stat
 | REST API base | `/wp-json/wp/v2/` |
 | MSN feed | `/feed/msn:article` |
 | Bot user role | Editor |
-| Plugins | confleko-2, msn-syndication-2, Rank Math, Auto Image Attributes, Disable Comments, User Role Editor |
+| Plugins | msn-syndication-2, Rank Math, Auto Image Attributes, Disable Comments, User Role Editor |
 | MU-Plugins | auto-enable-msn-syndication.php, featured-image-requirement.php, restrict-author-login.php |
 
 ---

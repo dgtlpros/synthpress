@@ -37,7 +37,8 @@ yarn-error.log*
 pnpm-debug.log*
 
 # WordPress uploads (user-generated, not tracked)
-wordpress/wp-content/uploads/
+wordpress/wp-content/uploads/*
+!wordpress/wp-content/uploads/.gitkeep
 
 # Vercel
 .vercel
