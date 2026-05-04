@@ -26,4 +26,11 @@ describe("Card", () => {
     expect(screen.getByText("Body")).toBeInTheDocument();
     expect(screen.getByText("Footer")).toBeInTheDocument();
   });
+
+  it("renders ghost variant without border/shadow", () => {
+    render(<Card variant="ghost">Ghost card</Card>);
+    const card = screen.getByText("Ghost card");
+    expect(card.className).toContain("bg-transparent");
+    expect(card.className).not.toContain("border");
+  });
 });

@@ -16,4 +16,19 @@ describe("IconButton", () => {
     fireEvent.click(screen.getByLabelText("Close"));
     expect(onClick).toHaveBeenCalledOnce();
   });
+
+  it("renders all variants", () => {
+    const variants = ["default", "ghost", "brand"] as const;
+    variants.forEach((variant) => {
+      const { unmount } = render(<IconButton label="Test" variant={variant}>X</IconButton>);
+      expect(screen.getByLabelText("Test")).toBeInTheDocument();
+      unmount();
+    });
+  });
+
+  it("applies disabled styling", () => {
+    render(<IconButton label="Disabled" disabled>X</IconButton>);
+    expect(screen.getByLabelText("Disabled")).toBeDisabled();
+    expect(screen.getByLabelText("Disabled").className).toContain("opacity-50");
+  });
 });

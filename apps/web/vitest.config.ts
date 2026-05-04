@@ -9,6 +9,30 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,
+    coverage: {
+      provider: "v8",
+      include: [
+        "src/components/**/*.{ts,tsx}",
+        "src/lib/**/*.{ts,tsx}",
+        "src/hooks/**/*.{ts,tsx}",
+        "src/services/**/*.{ts,tsx}",
+        "src/connectors/**/*.{ts,tsx}",
+      ],
+      exclude: [
+        "**/*.stories.{ts,tsx}",
+        "**/*.test.{ts,tsx}",
+        "**/index.ts",
+        "src/test/**",
+        "src/types/**",
+      ],
+      thresholds: {
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+      },
+      reporter: ["text", "html", "lcov"],
+    },
   },
   resolve: {
     alias: {

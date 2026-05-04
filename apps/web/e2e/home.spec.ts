@@ -5,7 +5,12 @@ test("homepage loads successfully", async ({ page }) => {
   await expect(page).toHaveTitle(/SynthPress/i);
 });
 
-test("homepage has visible content", async ({ page }) => {
+test("homepage shows hero headline", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("body")).toBeVisible();
+  await expect(page.locator("h1")).toContainText("AI-Powered Blog Publishing");
+});
+
+test("homepage has pricing section", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#pricing")).toBeVisible();
 });

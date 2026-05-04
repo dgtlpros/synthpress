@@ -33,3 +33,6 @@ export type { SelectProps } from "./Select";
 
 export { Text } from "./Text";
 export type { TextProps, TextVariant, TextColor } from "./Text";
+
+export { Link } from "./Link";
+export type { LinkProps, LinkVariant } from "./Link";
