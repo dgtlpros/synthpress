@@ -17,9 +17,15 @@ describe("Navbar", () => {
     expect(screen.getByText("Pricing")).toBeInTheDocument();
   });
 
-  it("renders CTA button linking to pricing", () => {
+  it("renders Log In link pointing to /login", () => {
     render(<Navbar />);
-    const cta = screen.getByText("Get Started");
-    expect(cta).toHaveAttribute("href", "#pricing");
+    const loginLink = screen.getByText("Log In");
+    expect(loginLink).toHaveAttribute("href", "/login");
+  });
+
+  it("renders Sign Up button pointing to /signup", () => {
+    render(<Navbar />);
+    const signUpBtn = screen.getByText("Sign Up");
+    expect(signUpBtn).toHaveAttribute("href", "/signup");
   });
 });

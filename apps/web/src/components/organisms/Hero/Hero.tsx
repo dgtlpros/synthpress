@@ -18,7 +18,7 @@ export function Hero() {
 
         <div className="mt-10 flex items-center justify-center gap-4">
           <a
-            href="#pricing"
+            href="/signup"
             className="inline-flex h-12 items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-6 text-base font-medium text-white shadow-md transition-all hover:brightness-110 hover:shadow-lg"
           >
             Get Started

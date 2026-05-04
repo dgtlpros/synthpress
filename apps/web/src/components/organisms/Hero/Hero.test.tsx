@@ -17,7 +17,7 @@ describe("Hero", () => {
 
   it("renders CTA buttons with correct hrefs", () => {
     render(<Hero />);
-    expect(screen.getByText("Get Started")).toHaveAttribute("href", "#pricing");
+    expect(screen.getByText("Get Started")).toHaveAttribute("href", "/signup");
     expect(screen.getByText("See How It Works")).toHaveAttribute("href", "#how-it-works");
   });
 

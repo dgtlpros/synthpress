@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { Link } from "@/components/atoms/Link";
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -27,12 +28,17 @@ export function Navbar({ className }: { className?: string }) {
           ))}
         </div>
 
-        <a
-          href="#pricing"
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110"
-        >
-          Get Started
-        </a>
+        <div className="flex items-center gap-4">
+          <Link href="/login" variant="nav">
+            Log In
+          </Link>
+          <a
+            href="/signup"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110"
+          >
+            Sign Up
+          </a>
+        </div>
       </div>
     </nav>
   );
