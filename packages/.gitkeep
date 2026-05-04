@@ -1,0 +1,5 @@
+# Shared Packages
+
+This directory is reserved for shared packages across the monorepo (e.g., shared UI components, utility functions, TypeScript configs).
+
+Create a new package by adding a directory with its own `package.json`.

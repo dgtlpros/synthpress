@@ -1,0 +1,20 @@
+{
+  "name": "synthpress",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "unrs-resolver"]
+  },
+  "devDependencies": {
+    "turbo": "^2.9.8"
+  }
+}
