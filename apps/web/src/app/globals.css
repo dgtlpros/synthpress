@@ -1,26 +1,127 @@
 @import "tailwindcss";
 
+/*
+ * SynthPress Design Tokens
+ * Extracted from the brand logo: indigo→blue→cyan body, purple→magenta accents
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand palette */
+  --sp-navy: #0f172a;
+  --sp-navy-light: #1e293b;
+
+  --sp-indigo: #4338ca;
+  --sp-blue: #2563eb;
+  --sp-cyan: #06b6d4;
+  --sp-purple: #7c3aed;
+  --sp-magenta: #d946ef;
+  --sp-pink: #ec4899;
+
+  /* Semantic colors */
+  --sp-success: #10b981;
+  --sp-warning: #f59e0b;
+  --sp-error: #ef4444;
+
+  /* Surface colors */
+  --background: #fafafa;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-hover: #f1f5f9;
+  --surface-active: #e2e8f0;
+  --border: #e2e8f0;
+  --border-hover: #cbd5e1;
+  --muted: #64748b;
+  --muted-foreground: #94a3b8;
+
+  /* Gradients */
+  --sp-gradient-brand: linear-gradient(135deg, #4338ca 0%, #2563eb 50%, #06b6d4 100%);
+  --sp-gradient-accent: linear-gradient(135deg, #2563eb 0%, #7c3aed 50%, #d946ef 100%);
+  --sp-gradient-glow: linear-gradient(135deg, #7c3aed 0%, #d946ef 100%);
+
+  /* Shadows */
+  --sp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --sp-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+  --sp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --sp-shadow-glow: 0 0 20px rgb(99 102 241 / 0.15);
+
+  /* Radius */
+  --sp-radius-sm: 0.375rem;
+  --sp-radius-md: 0.5rem;
+  --sp-radius-lg: 0.75rem;
+  --sp-radius-xl: 1rem;
+  --sp-radius-full: 9999px;
+}
+
+.dark {
+  --background: #030712;
+  --foreground: #f8fafc;
+  --surface: #0f172a;
+  --surface-hover: #1e293b;
+  --surface-active: #334155;
+  --border: #1e293b;
+  --border-hover: #334155;
+  --muted: #94a3b8;
+  --muted-foreground: #64748b;
+  --sp-shadow-glow: 0 0 20px rgb(99 102 241 / 0.25);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-hover);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-brand-navy: var(--sp-navy);
+  --color-brand-navy-light: var(--sp-navy-light);
+  --color-brand-indigo: var(--sp-indigo);
+  --color-brand-blue: var(--sp-blue);
+  --color-brand-cyan: var(--sp-cyan);
+  --color-brand-purple: var(--sp-purple);
+  --color-brand-magenta: var(--sp-magenta);
+  --color-brand-pink: var(--sp-pink);
+
+  --color-success: var(--sp-success);
+  --color-warning: var(--sp-warning);
+  --color-error: var(--sp-error);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+/* Utility classes for brand gradients */
+.bg-gradient-brand {
+  background: var(--sp-gradient-brand);
+}
+
+.bg-gradient-accent {
+  background: var(--sp-gradient-accent);
+}
+
+.bg-gradient-glow {
+  background: var(--sp-gradient-glow);
+}
+
+.text-gradient-brand {
+  background: var(--sp-gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-accent {
+  background: var(--sp-gradient-accent);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
