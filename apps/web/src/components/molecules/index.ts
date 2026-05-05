@@ -1,4 +1,5 @@
 export { Navbar } from "./Navbar";
+export type { NavbarProps } from "./Navbar";
 export { FeatureCard } from "./FeatureCard";
 export type { FeatureCardProps } from "./FeatureCard";
 export { PricingCard } from "./PricingCard";

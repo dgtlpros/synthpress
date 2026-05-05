@@ -1,3 +1,5 @@
+import { cn } from "@/lib/cn";
+
 const steps = [
   {
     number: "1",
@@ -16,9 +18,13 @@ const steps = [
   },
 ];
 
-export function HowItWorks() {
+export interface HowItWorksProps {
+  className?: string;
+}
+
+export function HowItWorks({ className }: HowItWorksProps) {
   return (
-    <section id="how-it-works" className="px-6 py-24">
+    <section id="how-it-works" className={cn("px-6 py-24", className)}>
       <div className="mx-auto max-w-6xl">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">

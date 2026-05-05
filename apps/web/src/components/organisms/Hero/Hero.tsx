@@ -1,6 +1,13 @@
-export function Hero() {
+import NextLink from "next/link";
+import { cn } from "@/lib/cn";
+
+export interface HeroProps {
+  className?: string;
+}
+
+export function Hero({ className }: HeroProps) {
   return (
-    <section className="relative overflow-hidden px-6 py-24 sm:py-32">
+    <section className={cn("relative overflow-hidden px-6 py-24 sm:py-32", className)}>
       <div className="mx-auto max-w-6xl text-center">
         <div className="mx-auto mb-8 flex justify-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -17,15 +24,15 @@ export function Hero() {
         </p>
 
         <div className="mt-10 flex items-center justify-center gap-4">
-          <a
+          <NextLink
             href="/signup"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-6 text-base font-medium text-white shadow-md transition-all hover:brightness-110 hover:shadow-lg"
+            className="inline-flex h-12 cursor-pointer items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-6 text-base font-medium text-white shadow-md transition-all hover:brightness-110 hover:shadow-lg"
           >
             Get Started
-          </a>
+          </NextLink>
           <a
             href="#how-it-works"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] border border-border bg-surface px-6 text-base font-medium text-foreground shadow-sm transition-all hover:bg-surface-hover"
+            className="inline-flex h-12 cursor-pointer items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] border border-border bg-surface px-6 text-base font-medium text-foreground shadow-sm transition-all hover:bg-surface-hover"
           >
             See How It Works
           </a>

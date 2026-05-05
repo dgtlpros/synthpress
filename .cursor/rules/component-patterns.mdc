@@ -1,0 +1,83 @@
+---
+description: Atomic design component patterns — file structure, props, exports, composition
+globs: apps/web/src/components/**/*.tsx
+alwaysApply: false
+---
+
+# Component Patterns
+
+## File Structure
+
+Every component folder MUST contain all four files:
+
+```
+atoms/Button/
+  Button.tsx          # Implementation
+  Button.test.tsx     # Tests
+  Button.stories.tsx  # Storybook
+  index.ts            # Barrel exports
+```
+
+## Implementation Pattern
+
+```tsx
+import { type ButtonHTMLAttributes } from "react";
+import { cn } from "@/lib/cn";
+
+const variantStyles = {
+  primary: "bg-gradient-accent text-white shadow-md hover:brightness-110",
+  secondary: "bg-surface text-foreground border border-border",
+} as const;
+
+export type ButtonVariant = keyof typeof variantStyles;
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant;
+  className?: string;
+}
+
+export function Button({ variant = "primary", className, children, ...props }: ButtonProps) {
+  return (
+    <button className={cn("base-styles", variantStyles[variant], className)} {...props}>
+      {children}
+    </button>
+  );
+}
+```
+
+## Barrel Export Pattern
+
+```ts
+// index.ts
+export { Button } from "./Button";
+export type { ButtonProps, ButtonVariant } from "./Button";
+```
+
+Layer-level barrels (`atoms/index.ts`) re-export ALL components and types from that layer.
+
+## Composition Rules
+
+| Layer | Imports from | Never imports from |
+|-------|-------------|-------------------|
+| Atoms | Nothing (standalone) | Molecules, Organisms, Templates |
+| Molecules | Atoms | Organisms, Templates |
+| Organisms | Atoms, Molecules | Templates |
+| Templates | Atoms, Molecules, Organisms | — |
+
+## Key Conventions
+
+- Components are **dumb/presentational** — no `"use client"` unless handling browser events. No API calls.
+- Always accept `className?: string` and merge via `cn()` on the root element.
+- Use **named exports** only — never `export default`. Both `export function Name(...)` and `export const Name = forwardRef(...)` are acceptable named exports.
+- Extend native HTML element attributes for atoms (`ButtonHTMLAttributes`, `InputHTMLAttributes`, etc.).
+- Use `as const` for variant/size style maps and export the `keyof typeof` type.
+- Components that need ref forwarding use `forwardRef`:
+
+```tsx
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ className, error, ...props }, ref) => (
+    <input ref={ref} className={cn("base-styles", className)} {...props} />
+  ),
+);
+Input.displayName = "Input";
+```

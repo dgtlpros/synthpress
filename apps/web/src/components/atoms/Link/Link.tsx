@@ -1,3 +1,4 @@
+import NextLink from "next/link";
 import { type AnchorHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
 
@@ -11,12 +12,33 @@ export type LinkVariant = keyof typeof variantStyles;
 
 export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   variant?: LinkVariant;
+  href: string;
 }
 
-export function Link({ variant = "default", className, children, ...props }: LinkProps) {
+export function Link({ variant = "default", className, href, children, ...props }: LinkProps) {
+  const isExternal = href.startsWith("http") || href.startsWith("//");
+  const isAnchor = href.startsWith("#");
+
+  if (isExternal || isAnchor) {
+    return (
+      <a
+        href={href}
+        className={cn("cursor-pointer text-sm", variantStyles[variant], className)}
+        {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+
   return (
-    <a className={cn("text-sm", variantStyles[variant], className)} {...props}>
+    <NextLink
+      href={href}
+      className={cn("cursor-pointer text-sm", variantStyles[variant], className)}
+      {...props}
+    >
       {children}
-    </a>
+    </NextLink>
   );
 }

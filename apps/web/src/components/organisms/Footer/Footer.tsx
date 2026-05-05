@@ -1,3 +1,5 @@
+import { cn } from "@/lib/cn";
+
 const footerLinks = {
   Product: [
     { label: "Features", href: "#features" },
@@ -15,9 +17,13 @@ const footerLinks = {
   ],
 };
 
-export function Footer() {
+export interface FooterProps {
+  className?: string;
+}
+
+export function Footer({ className }: FooterProps) {
   return (
-    <footer className="border-t border-border px-6 py-16">
+    <footer className={cn("border-t border-border px-6 py-16", className)}>
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-12 sm:grid-cols-4">
           <div>
@@ -34,7 +40,7 @@ export function Footer() {
               <ul className="space-y-2">
                 {links.map((link) => (
                   <li key={link.label}>
-                    <a href={link.href} className="text-sm text-muted hover:text-foreground transition-colors">
+                    <a href={link.href} className="cursor-pointer text-sm text-muted hover:text-foreground transition-colors">
                       {link.label}
                     </a>
                   </li>

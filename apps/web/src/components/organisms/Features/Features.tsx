@@ -1,3 +1,4 @@
+import { cn } from "@/lib/cn";
 import { FeatureCard } from "@/components/molecules/FeatureCard";
 
 const features = [
@@ -9,9 +10,13 @@ const features = [
   { icon: "📊", title: "SEO Optimized", description: "Clean HTML, proper schema markup, and meta descriptions generated out of the box." },
 ];
 
-export function Features() {
+export interface FeaturesProps {
+  className?: string;
+}
+
+export function Features({ className }: FeaturesProps) {
   return (
-    <section id="features" className="px-6 py-24">
+    <section id="features" className={cn("px-6 py-24", className)}>
       <div className="mx-auto max-w-6xl">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">

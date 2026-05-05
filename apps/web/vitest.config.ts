@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    setupFiles: ["./src/test/setup.tsx"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,
     coverage: {
@@ -17,6 +17,8 @@ export default defineConfig({
         "src/hooks/**/*.{ts,tsx}",
         "src/services/**/*.{ts,tsx}",
         "src/connectors/**/*.{ts,tsx}",
+        "src/stores/**/*.{ts,tsx}",
+        "src/actions/**/*.{ts,tsx}",
       ],
       exclude: [
         "**/*.stories.{ts,tsx}",
@@ -24,6 +26,7 @@ export default defineConfig({
         "**/index.ts",
         "src/test/**",
         "src/types/**",
+        "src/lib/supabase/database.types.ts",
       ],
       thresholds: {
         statements: 100,

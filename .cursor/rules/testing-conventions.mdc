@@ -1,0 +1,184 @@
+---
+description: Vitest unit tests and Playwright e2e test patterns
+globs: "**/*.test.{ts,tsx},e2e/**/*.spec.ts"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Unit Tests (Vitest + React Testing Library)
+
+Every component MUST have a co-located `Name.test.tsx`.
+
+### Structure
+
+```tsx
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { Button } from "./Button";
+
+afterEach(cleanup);
+
+describe("Button", () => {
+  it("renders with text", () => {
+    render(<Button>Click me</Button>);
+    expect(screen.getByRole("button", { name: "Click me" })).toBeInTheDocument();
+  });
+
+  it("handles click events", () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Click me</Button>);
+    fireEvent.click(screen.getByRole("button"));
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+});
+```
+
+### Rules
+
+- Import `cleanup` and call `afterEach(cleanup)` at the top level of every test file.
+- Use `screen` queries — prefer `getByRole`, `getByText`, `getByAltText` over `getByTestId`.
+- Use `vi.fn()` for mocks, `vi.mock()` for module mocks.
+- Test all variants/sizes with a loop: `variants.forEach(v => { const { unmount } = render(...); unmount(); })`.
+- Test interactive behavior (clicks, disabled state, loading state).
+- Test accessibility: check `aria-*` attributes, `disabled`, roles.
+
+### What to Test per Layer
+
+| Layer | Test focus |
+|-------|-----------|
+| Atoms | Renders, props, variants, sizes, disabled, events, a11y |
+| Molecules | Renders children, composition, links/hrefs |
+| Organisms | Section renders, all content visible, correct structure |
+| Templates | Renders children, includes expected sub-components |
+
+## Hook Tests
+
+Controller hooks and utility hooks get their own test files in `src/hooks/`.
+
+### Controller Hook Test Pattern
+
+```tsx
+import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useProjectList } from "./useProjectList";
+
+vi.mock("@/actions/projects", () => ({
+  deleteProject: vi.fn().mockResolvedValue({ error: null }),
+}));
+
+describe("useProjectList", () => {
+  const initialProjects = [
+    { id: "1", name: "Project A" },
+    { id: "2", name: "Project B" },
+  ];
+
+  it("initializes with provided projects", () => {
+    const { result } = renderHook(() => useProjectList(initialProjects));
+    expect(result.current.projects).toHaveLength(2);
+  });
+
+  it("removes project on delete", async () => {
+    const { result } = renderHook(() => useProjectList(initialProjects));
+    await act(() => result.current.onDelete("1"));
+    expect(result.current.projects).toHaveLength(1);
+  });
+});
+```
+
+### Key rules for hook tests
+
+- Mock server actions with `vi.mock()` — hooks call server actions, never Supabase.
+- Use `renderHook` from `@testing-library/react`.
+- Wrap state-changing calls in `act()`.
+- Test loading states, error states, and optimistic updates.
+- Test that the correct server action is called with expected arguments.
+
+## Server Action Tests
+
+Server actions get co-located test files (e.g., `actions.test.ts` next to `actions.ts`).
+
+### Server Action Test Pattern
+
+```ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(),
+}));
+
+import { createClient } from "@/lib/supabase/server";
+import { createProject } from "./actions";
+
+describe("createProject", () => {
+  const mockSupabase = {
+    auth: { getUser: vi.fn() },
+    from: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    single: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.mocked(createClient).mockResolvedValue(mockSupabase as any);
+    mockSupabase.auth.getUser.mockResolvedValue({
+      data: { user: { id: "user-1" } },
+    });
+  });
+
+  it("creates a project for authenticated user", async () => {
+    mockSupabase.single.mockResolvedValue({ data: { id: "p-1", name: "Test" }, error: null });
+    const result = await createProject("Test");
+    expect(result.data).toEqual({ id: "p-1", name: "Test" });
+    expect(result.error).toBeNull();
+  });
+
+  it("returns error when not authenticated", async () => {
+    mockSupabase.auth.getUser.mockResolvedValue({ data: { user: null } });
+    const result = await createProject("Test");
+    expect(result.error).toBe("Not authenticated");
+  });
+});
+```
+
+### Key rules for server action tests
+
+- Mock `@/lib/supabase/server` — never hit a real database.
+- Test authentication checks (unauthenticated → error).
+- Test validation failures.
+- Test Supabase error propagation.
+- Test the happy path returns expected shape.
+
+## E2E Tests (Playwright)
+
+Located in `apps/web/e2e/`. Named `feature.spec.ts`.
+
+```ts
+import { test, expect } from "@playwright/test";
+
+test("homepage loads successfully", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveTitle(/SynthPress/i);
+});
+
+test("navbar has Sign Up link", async ({ page }) => {
+  await page.goto("/");
+  const signUpLink = page.getByRole("link", { name: "Sign Up" });
+  await expect(signUpLink).toBeVisible();
+  await expect(signUpLink).toHaveAttribute("href", "/signup");
+});
+```
+
+### Rules
+
+- Use `page.getByRole()`, `page.getByText()`, `page.locator()` — prefer semantic selectors.
+- Each test navigates with `page.goto()` independently.
+- Assert visibility with `toBeVisible()`, content with `toContainText()`, attributes with `toHaveAttribute()`.
+- Test critical user flows: auth, CRUD operations, navigation guards.
+
+## Coverage
+
+Coverage thresholds are **100%** for statements, branches, functions, and lines across:
+`src/components/`, `src/lib/`, `src/hooks/`, `src/services/`, `src/connectors/`, `src/stores/`, `src/actions/`.
+
+Excluded from coverage: test files, story files, barrel `index.ts` files, `src/test/` setup, `src/types/`, and generated files like `database.types.ts`.

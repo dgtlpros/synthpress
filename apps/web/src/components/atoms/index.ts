@@ -36,3 +36,6 @@ export type { TextProps, TextVariant, TextColor } from "./Text";
 
 export { Link } from "./Link";
 export type { LinkProps, LinkVariant } from "./Link";
+
+export { ConfirmModal } from "./ConfirmModal";
+export type { ConfirmModalProps, ConfirmModalVariant } from "./ConfirmModal";

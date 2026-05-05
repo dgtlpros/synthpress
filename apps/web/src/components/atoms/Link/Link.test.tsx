@@ -20,4 +20,27 @@ describe("Link", () => {
       unmount();
     });
   });
+
+  it("uses next/link for internal routes", () => {
+    render(<Link href="/dashboard">Dashboard</Link>);
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("uses native <a> for anchor links", () => {
+    render(<Link href="#section">Jump</Link>);
+    expect(screen.getByRole("link", { name: "Jump" })).toHaveAttribute("href", "#section");
+  });
+
+  it("uses native <a> with target _blank for external links", () => {
+    render(<Link href="https://example.com">External</Link>);
+    const link = screen.getByRole("link", { name: "External" });
+    expect(link).toHaveAttribute("href", "https://example.com");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("has cursor-pointer class", () => {
+    render(<Link href="/test">Test</Link>);
+    expect(screen.getByRole("link")).toHaveClass("cursor-pointer");
+  });
 });

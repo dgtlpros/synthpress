@@ -1,0 +1,181 @@
+---
+description: SynthPress project architecture, monorepo structure, and core conventions
+alwaysApply: true
+---
+
+# SynthPress Architecture
+
+## Monorepo
+
+- **pnpm workspaces** with **Turborepo**. Primary app lives at `apps/web/` (Next.js 16).
+- Path alias: `@/` maps to `apps/web/src/`.
+- Run scripts via Turbo from root (`pnpm dev`, `pnpm test`) or directly in `apps/web/`.
+
+## Component Architecture (Atomic Design)
+
+All UI components live in `apps/web/src/components/` under four layers. Each component gets its own folder with co-located files:
+
+```
+components/
+  foundations/          # Design token documentation (stories only, no components)
+  atoms/Name/           # Smallest building blocks (Button, Input, Badge, etc.)
+    Name.tsx            # Component implementation (dumb, stateless, no data fetching)
+    Name.test.tsx       # Vitest + React Testing Library tests
+    Name.stories.tsx    # Storybook CSF3 story
+    index.ts            # Barrel: re-exports component + types
+  molecules/Name/       # Compositions of atoms (Navbar, FeatureCard, PricingCard)
+  organisms/Name/       # Page sections composed of molecules/atoms (Hero, Pricing, Footer)
+  templates/Name/       # Page layouts that compose organisms (LandingLayout)
+```
+
+Layer barrel files (`atoms/index.ts`, `molecules/index.ts`, etc.) re-export all components and their types.
+
+## Component Rules
+
+- **All components are dumb/presentational.** No data fetching, no hooks that call APIs, no server imports.
+- **Props include `className?: string`** for composability. Merge with `cn()` from `@/lib/cn`.
+- **Named exports only.** `export function Button(...)` — never default exports.
+- **Variant patterns:** Define `const variantStyles = { ... } as const` and export `type ButtonVariant = keyof typeof variantStyles`.
+- **Every new component MUST have:** `Name.tsx`, `index.ts`, `Name.test.tsx`, and `Name.stories.tsx`.
+
+## Data Flow Architecture
+
+```
+Page (Server Component)
+  ├─ Option A: Fetch data server-side → pass as props to dumb component
+  └─ Option B: Render a Connector for interactive features
+       └─ Connector ("use client", calls controller hook)
+            └─ Controller hook (calls server actions for mutations, manages state)
+                 ├─ Uses smaller utility hooks for reusable logic
+                 └─ Calls server actions (NEVER Supabase directly)
+                      └─ Server action → Service (optional) → Supabase
+```
+
+### Server Actions (the ONLY way to talk to Supabase)
+
+Client code NEVER imports Supabase. All backend interactions go through server actions.
+
+- **Location:** Route-group action files (`(auth)/actions.ts`, `(dashboard)/actions.ts`) or `src/actions/` for shared actions.
+- **Pattern:** `"use server"` → validate input → create server Supabase client → perform operation → return `{ data, error }`.
+- **Rule:** Server actions are thin wrappers. Extract complex multi-step logic into services.
+
+### Services (`src/services/`)
+
+Reusable backend logic that multiple server actions or route handlers might need.
+
+- Pure functions that receive a Supabase client or create their own.
+- Handle complex multi-step operations, cross-table logic, or business rules.
+- Naming: `project-service.ts`, `article-service.ts`, `billing-service.ts`.
+
+```ts
+// src/services/project-service.ts
+import { createClient } from "@/lib/supabase/server";
+
+export async function createProjectWithDefaults(name: string, userId: string) {
+  const supabase = await createClient();
+  const { data: project } = await supabase.from("projects").insert({ name, owner_id: userId }).select().single();
+  // create default settings, add initial content, etc.
+  return project;
+}
+```
+
+### Connector Components (`src/connectors/`)
+
+Thin `"use client"` wrappers that bridge server data into interactive client components.
+
+- Call a controller hook.
+- Pass hook results as props to a dumb component.
+- Accept `initialData` from a Server Component parent.
+- No business logic — just the glue.
+
+```tsx
+// src/connectors/ProjectListConnector.tsx
+"use client";
+import { useProjectList } from "@/hooks/useProjectList";
+import { ProjectList } from "@/components/organisms/ProjectList";
+
+export function ProjectListConnector({ initialProjects }: { initialProjects: Project[] }) {
+  const props = useProjectList(initialProjects);
+  return <ProjectList {...props} />;
+}
+```
+
+### Controller Hooks (`src/hooks/use[Feature].ts`)
+
+One controller hook per feature/page section. Encapsulates all client-side logic for that feature.
+
+- Named after the feature: `useProjectList`, `useArticleEditor`, `useOnboarding`.
+- Returns a props-shaped object that a dumb component can spread.
+- Calls **server actions** for mutations (never Supabase).
+- Manages local UI state (loading, optimistic updates, form state).
+- Composes smaller utility hooks for shared logic.
+
+```tsx
+// src/hooks/useProjectList.ts
+"use client";
+import { useState, useTransition } from "react";
+import { deleteProject } from "@/actions/projects";
+import { useOptimisticList } from "@/hooks/useOptimisticList";
+
+export function useProjectList(initialProjects: Project[]) {
+  const [isPending, startTransition] = useTransition();
+  const { items, removeItem } = useOptimisticList(initialProjects);
+
+  function handleDelete(id: string) {
+    startTransition(async () => {
+      removeItem(id);
+      await deleteProject(id);
+    });
+  }
+
+  return { projects: items, onDelete: handleDelete, isLoading: isPending };
+}
+```
+
+### Utility Hooks (`src/hooks/use[Capability].ts`)
+
+Small, reusable hooks that controller hooks compose. Each does one thing well.
+
+- `useOptimisticList` — optimistic add/remove/reorder for any list
+- `useFormState` — form field state + validation + submission
+- `useDebounce` — debounced values
+- `useMediaQuery` — responsive breakpoint detection
+
+These hooks never call server actions or Supabase. They manage pure client-side logic.
+
+## State Management
+
+- **Zustand** for client-side UI state (`src/stores/`). Typed interfaces, `create<State>()`.
+- Prefer server state (Supabase queries in Server Components / server actions) over client state.
+- Auth state comes from the server (middleware + Server Component `getUser()` checks). No client-side auth store needed.
+
+## Styling
+
+- **Tailwind CSS v4** configured via `globals.css` with `@theme inline` — no `tailwind.config.js`.
+- Design tokens are CSS custom properties (`--sp-*`). Use semantic Tailwind classes (`bg-surface`, `text-foreground`, `border-border`).
+- Brand gradients: `bg-gradient-accent`, `bg-gradient-brand`, `text-gradient-accent`.
+- Border radius via CSS vars: `rounded-[var(--sp-radius-lg)]`.
+- `cn()` is a zero-dependency class joiner — NOT `clsx`/`tailwind-merge`.
+
+## Testing Requirements
+
+- **Every component** gets a co-located `Name.test.tsx` (Vitest + React Testing Library).
+- **Every component** gets a co-located `Name.stories.tsx` (Storybook CSF3).
+- **Controller hooks** get `useFeature.test.ts` files — mock server actions, test state transitions.
+- **Server actions** get `actions.test.ts` files — mock Supabase client, test validation and error paths.
+- **E2E tests** in `apps/web/e2e/` (Playwright) — test critical user flows end-to-end.
+- Coverage targets: 100% for `src/components/`, `src/lib/`, `src/hooks/`, `src/services/`, `src/connectors/`, `src/stores/`, `src/actions/`.
+
+## Directory Overview
+
+```
+apps/web/src/
+  app/                   # Next.js App Router pages, layouts, route handlers, server actions
+  components/            # Dumb UI components (atomic design layers)
+  connectors/            # "use client" wrappers that connect hooks to components
+  hooks/                 # Controller hooks + utility hooks
+  actions/               # Shared server actions (domain-specific)
+  services/              # Reusable backend logic
+  stores/                # Zustand stores (client UI state only)
+  lib/                   # Utilities (cn, supabase clients, etc.)
+```

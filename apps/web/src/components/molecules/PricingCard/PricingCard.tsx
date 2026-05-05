@@ -1,3 +1,4 @@
+import NextLink from "next/link";
 import { cn } from "@/lib/cn";
 
 export interface PricingCardProps {
@@ -58,17 +59,17 @@ export function PricingCard({
         ))}
       </ul>
 
-      <a
+      <NextLink
         href={ctaHref}
         className={cn(
-          "inline-flex h-11 w-full items-center justify-center rounded-[var(--sp-radius-lg)] text-sm font-medium transition-all",
+          "inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-[var(--sp-radius-lg)] text-sm font-medium transition-all",
           popular
             ? "bg-gradient-accent text-white shadow-md hover:brightness-110"
             : "border border-border bg-surface text-foreground hover:bg-surface-hover",
         )}
       >
         {ctaLabel}
-      </a>
+      </NextLink>
     </div>
   );
 }

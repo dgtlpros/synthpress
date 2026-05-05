@@ -42,7 +42,7 @@ export function LoginForm() {
         <button
           type="button"
           onClick={() => setSent(false)}
-          className="text-sm font-medium text-brand-blue hover:text-brand-indigo transition-colors"
+          className="cursor-pointer text-sm font-medium text-brand-blue hover:text-brand-indigo transition-colors"
         >
           Use a different email
         </button>
@@ -74,7 +74,7 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-md transition-all hover:brightness-110 disabled:opacity-50 disabled:pointer-events-none"
+        className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-md transition-all hover:brightness-110 disabled:opacity-50 disabled:pointer-events-none"
       >
         {loading ? "Sending link..." : "Send Magic Link"}
       </button>

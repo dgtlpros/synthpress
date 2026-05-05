@@ -1,0 +1,169 @@
+---
+description: Next.js 16 App Router patterns, Supabase auth, server rendering conventions
+globs: apps/web/src/app/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Next.js + Supabase Patterns
+
+## CRITICAL: Next.js 16
+
+This project uses **Next.js 16** which has breaking changes. Before writing any App Router code, read `node_modules/next/dist/docs/` for current API reference. Do not assume APIs from Next.js 14/15 still work.
+
+## CRITICAL: No Browser-Side Supabase
+
+**Supabase must NEVER be called from the browser.** There is no browser client — `@/lib/supabase/client` does not exist.
+
+All Supabase interactions go through one of these server-side paths:
+
+| Context | How to access Supabase |
+|---------|----------------------|
+| Server Components | `await createClient()` from `@/lib/supabase/server` |
+| Server Actions | `await createClient()` from `@/lib/supabase/server` |
+| Route Handlers | `await createClient()` from `@/lib/supabase/server` |
+| Middleware | `updateSession()` from `@/lib/supabase/middleware` |
+| Client Components | **Call a server action.** Never import Supabase. |
+
+If a client component needs data or needs to trigger a mutation, it calls a **server action**. The server action creates a server Supabase client, performs the operation, and returns the result.
+
+```tsx
+// ❌ NEVER — no browser Supabase client
+"use client";
+import { createClient } from "@/lib/supabase/client"; // DOES NOT EXIST
+
+// ✅ CORRECT — client component calls a server action
+"use client";
+import { signInWithMagicLink } from "@/app/(auth)/actions";
+
+const result = await signInWithMagicLink(email);
+```
+
+## Server-First Rendering
+
+- **Default to Server Components.** Every `page.tsx` and `layout.tsx` is a Server Component.
+- Use `export const dynamic = "force-dynamic"` on layouts/pages that need fresh data per request.
+- Only add `"use client"` for components that need browser APIs, event handlers, or hooks.
+
+## Route Groups
+
+```
+app/
+  (auth)/actions.ts         # Server actions for auth
+  (dashboard)/              # Authenticated app shell
+    layout.tsx              # Server Component: getUser() → redirect if unauthenticated
+    dashboard/page.tsx
+    projects/page.tsx
+    articles/page.tsx
+  auth/callback/route.ts    # PKCE code exchange (Route Handler)
+  auth/confirm/route.ts     # Magic link token_hash verification (Route Handler)
+  login/page.tsx            # Public auth pages
+  signup/page.tsx
+```
+
+## Auth Flow (Magic Link)
+
+1. Client form calls a **server action** (`signInWithMagicLink` / `signUpWithMagicLink`).
+2. Server action calls `supabase.auth.signInWithOtp({ email })`.
+3. Custom email template sends user to `/auth/confirm?token_hash=xxx&type=magiclink`.
+4. Route Handler at `/auth/confirm` calls `supabase.auth.verifyOtp({ token_hash, type })`.
+5. On success → redirect to `/dashboard`.
+
+## Middleware
+
+- `middleware.ts` at `apps/web/` root refreshes session via `updateSession()`.
+- Protects `/dashboard`, `/projects`, `/articles` — redirects to `/login` if unauthenticated.
+- Redirects `/login`, `/signup` to `/dashboard` if already authenticated.
+- Middleware handles session token refresh — client components do NOT need `onAuthStateChange`.
+
+## Server Actions
+
+### Location & Conventions
+
+- Organized by domain in route group files or `src/actions/` for shared actions.
+- Auth actions: `(auth)/actions.ts`. Future domains: `(dashboard)/actions.ts`, `src/actions/projects.ts`, etc.
+- Always `"use server"` at top of file.
+- Return typed result objects — never throw. Let the client handle display.
+
+### Pattern
+
+```ts
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+
+export async function createProject(name: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: null, error: "Not authenticated" };
+  }
+
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({ name, owner_id: user.id })
+    .select()
+    .single();
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  return { data, error: null };
+}
+```
+
+### When to Use Services
+
+For complex business logic that spans multiple Supabase calls or needs reuse across multiple server actions, extract into a **service** (`src/services/`). Server actions stay thin — they validate input, call the service, and return the result.
+
+```ts
+// src/services/project-service.ts
+import { createClient } from "@/lib/supabase/server";
+
+export async function createProjectWithDefaults(name: string, userId: string) {
+  const supabase = await createClient();
+  // complex multi-step logic here
+}
+
+// (dashboard)/actions.ts
+"use server";
+import { createProjectWithDefaults } from "@/services/project-service";
+
+export async function createProject(name: string) {
+  // validate, get user, call service, return result
+}
+```
+
+## Data Fetching Pattern
+
+```tsx
+// page.tsx (Server Component) — fetches directly
+export default async function ProjectsPage() {
+  const supabase = await createClient();
+  const { data } = await supabase.from("projects").select("*");
+  return <ProjectList projects={data ?? []} />;
+}
+```
+
+For interactive features needing client-side state, use a **Connector + Controller Hook** where the hook calls server actions (never Supabase directly):
+
+```tsx
+// connectors/ProjectListConnector.tsx
+"use client";
+import { useProjectList } from "@/hooks/useProjectList";
+import { ProjectList } from "@/components/organisms/ProjectList";
+
+export function ProjectListConnector({ initialProjects }: { initialProjects: Project[] }) {
+  const props = useProjectList(initialProjects);
+  return <ProjectList {...props} />;
+}
+
+// hooks/useProjectList.ts — calls server actions, never Supabase
+"use client";
+import { deleteProject, reorderProjects } from "@/actions/projects";
+
+export function useProjectList(initialProjects: Project[]) {
+  // state, handlers that call server actions, return props
+}
+```

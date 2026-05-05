@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,15 +24,18 @@ export default async function DashboardLayout({
           <img src="/logo.png" alt="SynthPress" className="h-8 w-auto" />
         </div>
         <nav className="p-4 space-y-1">
-          <a href="/dashboard" className="flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
+          <Link href="/dashboard" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
             Dashboard
-          </a>
-          <a href="/projects" className="flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
+          </Link>
+          <Link href="/projects" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
             Projects
-          </a>
-          <a href="/articles" className="flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
+          </Link>
+          <Link href="/articles" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
             Articles
-          </a>
+          </Link>
+          <Link href="/account" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
+            Account
+          </Link>
         </nav>
       </aside>
       <main className="flex-1">

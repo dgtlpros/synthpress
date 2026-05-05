@@ -1,3 +1,4 @@
+import { cn } from "@/lib/cn";
 import { PricingCard } from "@/components/molecules/PricingCard";
 
 const tiers = [
@@ -22,9 +23,13 @@ const tiers = [
   },
 ];
 
-export function Pricing() {
+export interface PricingProps {
+  className?: string;
+}
+
+export function Pricing({ className }: PricingProps) {
   return (
-    <section id="pricing" className="px-6 py-24">
+    <section id="pricing" className={cn("px-6 py-24", className)}>
       <div className="mx-auto max-w-6xl">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
