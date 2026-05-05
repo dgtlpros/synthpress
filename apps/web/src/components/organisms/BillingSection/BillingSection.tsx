@@ -10,7 +10,9 @@ const formatter = new Intl.NumberFormat("en-US");
 export interface BillingSectionPlan {
   name: string;
   description?: string;
-  monthlyPriceCents: number;
+  /** Price for the user's current cycle in cents (monthly or annual). */
+  priceCents: number;
+  /** Tokens granted per monthly cycle. Used by the token-balance card. */
   monthlyTokens: number;
 }
 
@@ -18,6 +20,8 @@ export interface BillingSectionSubscription {
   status: SubscriptionStatus;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  /** Cadence of the current subscription. Defaults to "month" for legacy rows. */
+  interval?: "month" | "year";
 }
 
 export interface BillingSectionTransaction {
@@ -93,7 +97,8 @@ export function BillingSection({
         <SubscriptionStatusCard
           planName={plan?.name ?? "Free"}
           planDescription={plan?.description}
-          monthlyPriceCents={plan?.monthlyPriceCents}
+          priceCents={plan?.priceCents}
+          interval={subscription?.interval ?? "month"}
           status={status}
           currentPeriodEnd={subscription?.currentPeriodEnd ?? null}
           cancelAtPeriodEnd={subscription?.cancelAtPeriodEnd}

@@ -72,15 +72,37 @@ export const ActivePro: Story = {
     plan: {
       name: "Pro",
       description: "For growing networks",
-      monthlyPriceCents: 7900,
+      priceCents: 7900,
       monthlyTokens: 5000,
     },
     subscription: {
       status: "active",
       currentPeriodEnd: "2026-06-01T00:00:00Z",
       cancelAtPeriodEnd: false,
+      interval: "month",
     },
     balance: 5100,
+    transactions: sampleTransactions,
+    topUpPacks: samplePacks,
+    subscriptionActions: <Button variant="secondary">Manage subscription</Button>,
+  },
+};
+
+export const ActiveAnnualPro: Story = {
+  args: {
+    plan: {
+      name: "Pro",
+      description: "For growing networks",
+      priceCents: 79000,
+      monthlyTokens: 5000,
+    },
+    subscription: {
+      status: "active",
+      currentPeriodEnd: "2027-05-05T00:00:00Z",
+      cancelAtPeriodEnd: false,
+      interval: "year",
+    },
+    balance: 60000,
     transactions: sampleTransactions,
     topUpPacks: samplePacks,
     subscriptionActions: <Button variant="secondary">Manage subscription</Button>,
@@ -92,7 +114,7 @@ export const PastDue: Story = {
     plan: {
       name: "Pro",
       description: "For growing networks",
-      monthlyPriceCents: 7900,
+      priceCents: 7900,
       monthlyTokens: 5000,
     },
     subscription: {

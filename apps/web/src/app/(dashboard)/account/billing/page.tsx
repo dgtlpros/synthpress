@@ -144,6 +144,24 @@ export default async function AccountBillingPage() {
   const plan: Plan | null = current?.plan ?? null;
   const subscription: Subscription | null = current?.subscription ?? null;
 
+  // Derive the cadence (monthly vs annual) from the subscription's current
+  // price id. Stripe sends `customer.subscription.updated` whenever a user
+  // flips cadence in the Customer Portal, so this is always up to date.
+  const interval: "month" | "year" =
+    subscription &&
+    plan?.stripe_annual_price_id &&
+    subscription.stripe_price_id === plan.stripe_annual_price_id
+      ? "year"
+      : "month";
+
+  // Pick the right price-cents column for the cadence the user is actually
+  // on. Falls back to monthly_price_cents when there's no annual price yet
+  // for this plan.
+  const planPriceCents =
+    interval === "year" && plan?.annual_price_cents
+      ? plan.annual_price_cents
+      : (plan?.monthly_price_cents ?? 0);
+
   const packs = (packsResult.data ?? []).map((pack) => ({
     key: pack.key,
     name: pack.name,
@@ -212,7 +230,7 @@ export default async function AccountBillingPage() {
             ? {
                 name: plan.name,
                 description: plan.description,
-                monthlyPriceCents: plan.monthly_price_cents,
+                priceCents: planPriceCents,
                 monthlyTokens: plan.monthly_tokens,
               }
             : null
@@ -223,6 +241,7 @@ export default async function AccountBillingPage() {
                 status: normalizeStatus(subscription.status),
                 currentPeriodEnd: subscription.current_period_end,
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
+                interval,
               }
             : null
         }

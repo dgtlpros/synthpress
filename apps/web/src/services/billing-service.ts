@@ -584,11 +584,12 @@ export async function handleInvoicePaymentSucceeded(
     if (delta <= 0) return;
 
     const formatted = new Intl.NumberFormat("en-US").format(delta);
+    const cadenceSuffix = interval === "year" ? " (annual)" : "";
     await grantTokens({
       userId: ctx.userId,
       amount: delta,
       type: "subscription_grant",
-      description: `Upgraded to ${plan.name} — ${formatted} tokens added`,
+      description: `Upgraded to ${plan.name}${cadenceSuffix} — ${formatted} tokens added`,
       stripeEventId: event.id,
       metadata: {
         stripe_subscription_id: stripeSub.id,

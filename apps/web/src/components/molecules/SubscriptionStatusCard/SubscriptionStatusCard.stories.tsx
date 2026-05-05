@@ -20,13 +20,26 @@ export const Free: Story = {
   },
 };
 
-export const ActivePro: Story = {
+export const ActiveMonthly: Story = {
   args: {
     planName: "Pro",
     planDescription: "For growing networks",
     status: "active",
-    monthlyPriceCents: 7900,
+    priceCents: 7900,
+    interval: "month",
     currentPeriodEnd: "2026-06-01T00:00:00Z",
+    actions: <Button variant="secondary">Manage subscription</Button>,
+  },
+};
+
+export const ActiveAnnual: Story = {
+  args: {
+    planName: "Pro",
+    planDescription: "For growing networks",
+    status: "active",
+    priceCents: 79000,
+    interval: "year",
+    currentPeriodEnd: "2027-05-05T00:00:00Z",
     actions: <Button variant="secondary">Manage subscription</Button>,
   },
 };
@@ -35,7 +48,8 @@ export const Trialing: Story = {
   args: {
     planName: "Pro",
     status: "trialing",
-    monthlyPriceCents: 7900,
+    priceCents: 7900,
+    interval: "month",
     currentPeriodEnd: "2026-05-15T00:00:00Z",
   },
 };
@@ -44,7 +58,8 @@ export const CancelingAtPeriodEnd: Story = {
   args: {
     planName: "Pro",
     status: "active",
-    monthlyPriceCents: 7900,
+    priceCents: 7900,
+    interval: "month",
     currentPeriodEnd: "2026-06-01T00:00:00Z",
     cancelAtPeriodEnd: true,
     actions: <Button variant="secondary">Resume subscription</Button>,
@@ -55,7 +70,8 @@ export const PastDue: Story = {
   args: {
     planName: "Pro",
     status: "past_due",
-    monthlyPriceCents: 7900,
+    priceCents: 7900,
+    interval: "month",
     currentPeriodEnd: "2026-06-01T00:00:00Z",
     actions: <Button>Update card</Button>,
   },

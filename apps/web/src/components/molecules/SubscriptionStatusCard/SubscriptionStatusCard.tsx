@@ -4,10 +4,15 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { PlanBadge, type SubscriptionStatus } from "@/components/atoms/PlanBadge";
 import { PriceTag } from "@/components/atoms/PriceTag";
 
+export type SubscriptionInterval = "month" | "year";
+
 export interface SubscriptionStatusCardProps {
   planName: string;
   planDescription?: string;
-  monthlyPriceCents?: number;
+  /** The price for the current billing cycle in cents (monthly or annual). */
+  priceCents?: number;
+  /** Cadence the user is currently being billed at. Defaults to "month". */
+  interval?: SubscriptionInterval;
   status: SubscriptionStatus;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
@@ -29,7 +34,8 @@ function formatDate(value?: string | null) {
 export function SubscriptionStatusCard({
   planName,
   planDescription,
-  monthlyPriceCents,
+  priceCents,
+  interval = "month",
   status,
   currentPeriodEnd,
   cancelAtPeriodEnd = false,
@@ -46,11 +52,19 @@ export function SubscriptionStatusCard({
       ? "canceling"
       : status;
 
+  const isAnnual = interval === "year";
+  const period = isAnnual ? "/yr" : "/mo";
+  const cadenceLabel = isAnnual ? "Billed annually" : "Billed monthly";
+
   let footnote: string | null = null;
   if (!isFree && renewalDate) {
-    footnote = cancelAtPeriodEnd
-      ? `Subscription ends on ${renewalDate}.`
-      : `Renews on ${renewalDate}.`;
+    if (cancelAtPeriodEnd) {
+      footnote = `Subscription ends on ${renewalDate}.`;
+    } else {
+      footnote = isAnnual
+        ? `Renews annually on ${renewalDate}.`
+        : `Renews on ${renewalDate}.`;
+    }
   } else if (status === "canceled") {
     footnote = "Subscription canceled.";
   } else if (isFree) {
@@ -70,8 +84,11 @@ export function SubscriptionStatusCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {!isFree && monthlyPriceCents !== undefined && (
-          <PriceTag cents={monthlyPriceCents} period="/mo" size="lg" />
+        {!isFree && priceCents !== undefined && (
+          <div className="space-y-1">
+            <PriceTag cents={priceCents} period={period} size="lg" />
+            <p className="text-xs uppercase tracking-wide text-muted">{cadenceLabel}</p>
+          </div>
         )}
         {footnote && <p className="text-sm text-muted">{footnote}</p>}
       </CardContent>

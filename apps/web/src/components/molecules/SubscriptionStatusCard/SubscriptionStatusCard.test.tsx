@@ -5,13 +5,14 @@ import { SubscriptionStatusCard } from "./SubscriptionStatusCard";
 afterEach(cleanup);
 
 describe("SubscriptionStatusCard", () => {
-  it("renders an active plan with renewal date and price", () => {
+  it("renders a monthly plan with renewal date, price, and 'Billed monthly' tag", () => {
     render(
       <SubscriptionStatusCard
         planName="Pro"
         planDescription="For growing networks"
         status="active"
-        monthlyPriceCents={7900}
+        priceCents={7900}
+        interval="month"
         currentPeriodEnd="2026-06-01T00:00:00Z"
       />,
     );
@@ -19,7 +20,27 @@ describe("SubscriptionStatusCard", () => {
     expect(screen.getByText("Pro")).toBeInTheDocument();
     expect(screen.getByText("For growing networks")).toBeInTheDocument();
     expect(screen.getByText("$79")).toBeInTheDocument();
-    expect(screen.getByText(/Renews on/)).toBeInTheDocument();
+    expect(screen.getByText("/mo")).toBeInTheDocument();
+    expect(screen.getByText("Billed monthly")).toBeInTheDocument();
+    expect(screen.getByText(/^Renews on/)).toBeInTheDocument();
+  });
+
+  it("renders an annual plan with annual price, '/yr' period, and 'Billed annually' tag", () => {
+    render(
+      <SubscriptionStatusCard
+        planName="Pro"
+        planDescription="For growing networks"
+        status="active"
+        priceCents={79000}
+        interval="year"
+        currentPeriodEnd="2027-05-05T00:00:00Z"
+      />,
+    );
+
+    expect(screen.getByText("$790")).toBeInTheDocument();
+    expect(screen.getByText("/yr")).toBeInTheDocument();
+    expect(screen.getByText("Billed annually")).toBeInTheDocument();
+    expect(screen.getByText(/Renews annually on/)).toBeInTheDocument();
   });
 
   it("renders cancellation note and Canceling badge when cancel_at_period_end is true", () => {
@@ -27,7 +48,8 @@ describe("SubscriptionStatusCard", () => {
       <SubscriptionStatusCard
         planName="Pro"
         status="active"
-        monthlyPriceCents={7900}
+        priceCents={7900}
+        interval="month"
         currentPeriodEnd="2026-06-01T00:00:00Z"
         cancelAtPeriodEnd
       />,
@@ -41,7 +63,8 @@ describe("SubscriptionStatusCard", () => {
       <SubscriptionStatusCard
         planName="Pro"
         status="past_due"
-        monthlyPriceCents={7900}
+        priceCents={7900}
+        interval="month"
         currentPeriodEnd="2026-06-01T00:00:00Z"
       />,
     );
@@ -53,7 +76,8 @@ describe("SubscriptionStatusCard", () => {
       <SubscriptionStatusCard
         planName="Pro"
         status="trialing"
-        monthlyPriceCents={7900}
+        priceCents={7900}
+        interval="month"
         currentPeriodEnd="2026-06-01T00:00:00Z"
         cancelAtPeriodEnd
       />,
@@ -66,12 +90,29 @@ describe("SubscriptionStatusCard", () => {
       <SubscriptionStatusCard
         planName="Pro"
         status="past_due"
-        monthlyPriceCents={7900}
+        priceCents={7900}
+        interval="month"
         currentPeriodEnd="2026-06-01T00:00:00Z"
         cancelAtPeriodEnd
       />,
     );
     expect(screen.getByText("Pro · Past due")).toBeInTheDocument();
+  });
+
+  it("uses the cancellation copy on annual subs too", () => {
+    render(
+      <SubscriptionStatusCard
+        planName="Pro"
+        status="active"
+        priceCents={79000}
+        interval="year"
+        currentPeriodEnd="2027-05-05T00:00:00Z"
+        cancelAtPeriodEnd
+      />,
+    );
+    // Cancellation copy wins over the cadence-aware "Renews annually" copy.
+    expect(screen.getByText(/Subscription ends on/)).toBeInTheDocument();
+    expect(screen.queryByText(/Renews annually/)).not.toBeInTheDocument();
   });
 
   it("shows the canceled note for canceled status", () => {
@@ -105,5 +146,6 @@ describe("SubscriptionStatusCard", () => {
       />,
     );
     expect(screen.queryByText(/Renews on/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Renews annually/)).not.toBeInTheDocument();
   });
 });
