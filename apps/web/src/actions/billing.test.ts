@@ -16,6 +16,7 @@ vi.mock("@/services/billing-service", () => ({
   getActiveSubscription: vi.fn(),
   getOrCreateStripeCustomer: vi.fn(),
   getPlanByKey: vi.fn(),
+  syncSubscriptionFromStripe: vi.fn(),
 }));
 
 vi.mock("@/services/stripe-service", () => ({
@@ -25,6 +26,10 @@ vi.mock("@/services/stripe-service", () => ({
   resumeSubscription: vi.fn(),
 }));
 
+vi.mock("@/services/token-service", () => ({
+  recordSubscriptionEvent: vi.fn(),
+}));
+
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -32,6 +37,7 @@ import {
   getActiveSubscription,
   getOrCreateStripeCustomer,
   getPlanByKey,
+  syncSubscriptionFromStripe,
 } from "@/services/billing-service";
 import {
   createSubscriptionCheckoutSession,
@@ -39,6 +45,7 @@ import {
   createPortalSession,
   resumeSubscription as stripeResumeSubscription,
 } from "@/services/stripe-service";
+import { recordSubscriptionEvent } from "@/services/token-service";
 import {
   createSubscriptionCheckout,
   createTopUpCheckout,
@@ -56,6 +63,8 @@ const mockedSubCheckout = vi.mocked(createSubscriptionCheckoutSession);
 const mockedTopUpCheckout = vi.mocked(createTopUpCheckoutSession);
 const mockedPortal = vi.mocked(createPortalSession);
 const mockedStripeResume = vi.mocked(stripeResumeSubscription);
+const mockedSyncSub = vi.mocked(syncSubscriptionFromStripe);
+const mockedRecordEvent = vi.mocked(recordSubscriptionEvent);
 
 function mockSupabase(user: { id: string; email: string } | null) {
   mockedCreateClient.mockResolvedValue({
@@ -294,19 +303,62 @@ describe("resumeSubscription", () => {
     expect(mockedStripeResume).not.toHaveBeenCalled();
   });
 
-  it("calls Stripe and revalidates the billing pages on success", async () => {
+  it("calls Stripe, syncs the DB, logs the activity row, and revalidates", async () => {
     mockSupabase({ id: "u1", email: "u@test.com" });
     mockedGetActiveSub.mockResolvedValue({
       stripe_subscription_id: "sub_1",
       cancel_at_period_end: true,
+      plan_key: "pro",
+      current_period_end: "2026-06-05T22:34:52.000Z",
     } as never);
-    mockedStripeResume.mockResolvedValue();
+    const updatedSub = {
+      id: "sub_1",
+      cancel_at_period_end: false,
+    } as never;
+    mockedStripeResume.mockResolvedValue(updatedSub);
 
     const result = await resumeSubscription();
+
     expect(result).toEqual({ ok: true });
     expect(mockedStripeResume).toHaveBeenCalledWith("sub_1");
+    expect(mockedSyncSub).toHaveBeenCalledWith({
+      stripeSub: updatedSub,
+      client: expect.any(Object),
+    });
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        type: "subscription_resumed",
+        description: expect.stringContaining("Subscription resumed"),
+        stripeEventId: expect.stringContaining("manual::u1::sub_1::resumed::"),
+        metadata: expect.objectContaining({
+          stripe_subscription_id: "sub_1",
+          plan_key: "pro",
+          source: "in_app_resume_action",
+        }),
+      }),
+    );
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/account/billing");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/account");
+  });
+
+  it("falls back to a date-less description when current_period_end is null", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue({
+      stripe_subscription_id: "sub_1",
+      cancel_at_period_end: true,
+      plan_key: "pro",
+      current_period_end: null,
+    } as never);
+    mockedStripeResume.mockResolvedValue({} as never);
+
+    await resumeSubscription();
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Subscription resumed",
+      }),
+    );
   });
 
   it("returns error message on Stripe failure", async () => {
@@ -319,6 +371,8 @@ describe("resumeSubscription", () => {
 
     const result = await resumeSubscription();
     expect(result).toEqual({ error: "stripe down" });
+    expect(mockedSyncSub).not.toHaveBeenCalled();
+    expect(mockedRecordEvent).not.toHaveBeenCalled();
   });
 
   it("returns generic error on non-Error rejection", async () => {

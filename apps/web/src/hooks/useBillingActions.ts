@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createBillingPortal, resumeSubscription } from "@/actions/billing";
 
 export interface UseBillingActionsResult {
@@ -13,6 +14,8 @@ export interface UseBillingActionsResult {
 }
 
 export function useBillingActions(): UseBillingActionsResult {
+  const router = useRouter();
+
   const [isOpeningPortal, startPortalTransition] = useTransition();
   const [portalError, setPortalError] = useState<string | null>(null);
 
@@ -37,7 +40,12 @@ export function useBillingActions(): UseBillingActionsResult {
       const result = await resumeSubscription();
       if (!result.ok) {
         setResumeError(result.error ?? "Could not resume subscription.");
+        return;
       }
+      // The action already revalidated the cache; this re-fetches the
+      // current route's server components into the running client tree so
+      // the user sees the updated state without a manual refresh.
+      router.refresh();
     });
   }
 

@@ -134,6 +134,57 @@ export async function recordTokenRefund(params: {
   return result;
 }
 
+export type SubscriptionEventType =
+  | "subscription_canceled"
+  | "subscription_resumed"
+  | "plan_downgraded";
+
+/**
+ * Records a non-token subscription lifecycle event (cancel / resume /
+ * downgrade) so it shows up in the Recent Activity feed alongside actual
+ * token operations. The row has `amount: 0` — these are purely informational
+ * audit entries. Idempotent on `stripeEventId`; callers should compose a
+ * per-transition suffix (e.g. `evt_xxx::canceled`) so several transitions
+ * driven by the same Stripe event each get their own row.
+ *
+ * Returns `true` when a row was inserted, `false` when the event was already
+ * processed (idempotent skip).
+ */
+export async function recordSubscriptionEvent(params: {
+  userId: string;
+  type: SubscriptionEventType;
+  description: string;
+  stripeEventId: string;
+  metadata?: Record<string, unknown>;
+  client?: Client;
+}): Promise<boolean> {
+  const supabase = params.client ?? createAdminClient();
+
+  const { data: existing } = await supabase
+    .from("token_transactions")
+    .select("id")
+    .eq("stripe_event_id", params.stripeEventId)
+    .maybeSingle();
+
+  if (existing) return false;
+
+  const { error } = await supabase.from("token_transactions").insert({
+    user_id: params.userId,
+    amount: 0,
+    type: params.type,
+    description: params.description,
+    stripe_event_id: params.stripeEventId,
+    metadata: (params.metadata ?? {}) as Tables<"token_transactions">["metadata"],
+  });
+
+  if (error) {
+    if (error.code === "23505") return false;
+    throw error;
+  }
+
+  return true;
+}
+
 /**
  * Atomically deducts tokens via the consume_tokens Postgres function.
  * Throws "insufficient_tokens" when the balance is too low.

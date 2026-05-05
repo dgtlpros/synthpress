@@ -11,11 +11,16 @@ vi.mock("./stripe-service", () => ({
 vi.mock("./token-service", () => ({
   grantTokens: vi.fn(),
   recordTokenRefund: vi.fn(),
+  recordSubscriptionEvent: vi.fn(),
 }));
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateCustomer } from "./stripe-service";
-import { grantTokens, recordTokenRefund } from "./token-service";
+import {
+  grantTokens,
+  recordSubscriptionEvent,
+  recordTokenRefund,
+} from "./token-service";
 import {
   getOrCreateStripeCustomer,
   getActiveSubscription,
@@ -36,6 +41,7 @@ const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedFindOrCreate = vi.mocked(findOrCreateCustomer);
 const mockedGrantTokens = vi.mocked(grantTokens);
 const mockedRecordRefund = vi.mocked(recordTokenRefund);
+const mockedRecordEvent = vi.mocked(recordSubscriptionEvent);
 
 type ChainResult<T> = { data: T; error: { code?: string; message?: string } | null };
 
@@ -458,6 +464,57 @@ describe("syncSubscriptionFromStripe", () => {
 
     const result = await syncSubscriptionFromStripe({ stripeSub: sub as never });
     expect(result).toBeNull();
+  });
+
+  it("flags cancel_at_period_end when stripe.cancel_at_period_end is true", async () => {
+    const sub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: true,
+    };
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await syncSubscriptionFromStripe({ stripeSub: sub as never });
+    expect(client.__tables.subscriptions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ cancel_at_period_end: true }),
+      expect.any(Object),
+    );
+  });
+
+  it("flags cancel_at_period_end when modern Stripe sets cancel_at instead", async () => {
+    // Customer Portal in Stripe API 2024-11+ schedules end-of-period
+    // cancellation by setting `cancel_at` (timestamp) and leaving the legacy
+    // boolean at false. We must treat that as canceling.
+    const sub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: false,
+      cancel_at: 1780698892,
+    };
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await syncSubscriptionFromStripe({ stripeSub: sub as never });
+    expect(client.__tables.subscriptions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ cancel_at_period_end: true }),
+      expect.any(Object),
+    );
+  });
+
+  it("does not flag cancel_at_period_end when neither signal is set", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await syncSubscriptionFromStripe({ stripeSub: baseStripeSub as never });
+    expect(client.__tables.subscriptions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ cancel_at_period_end: false }),
+      expect.any(Object),
+    );
   });
 
   it("converts canceled_at timestamps", async () => {
@@ -998,15 +1055,389 @@ describe("handleSubscriptionUpdated", () => {
   it("syncs subscription state", async () => {
     const client = makeClient();
     client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const event = {
+      id: "evt_sync_only",
       type: "customer.subscription.updated",
       data: { object: baseStripeSub },
     };
 
     await handleSubscriptionUpdated(event as never);
     expect(client.__tables.subscriptions.upsert).toHaveBeenCalled();
+    // No previous row → no transitions logged.
+    expect(mockedRecordEvent).not.toHaveBeenCalled();
+  });
+
+  it("logs subscription_canceled when cancel_at_period_end flips false → true", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: false,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const cancelingSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: true,
+    };
+    const event = {
+      id: "evt_cancel",
+      type: "customer.subscription.updated",
+      data: { object: cancelingSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        type: "subscription_canceled",
+        stripeEventId: "evt_cancel::canceled",
+        description: expect.stringContaining("Subscription scheduled to end"),
+        metadata: expect.objectContaining({
+          stripe_subscription_id: "sub_1",
+          plan_key: "pro",
+        }),
+      }),
+    );
+  });
+
+  it("logs subscription_canceled when modern Stripe sets cancel_at instead of the boolean", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: false,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const cancelingSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: false,
+      cancel_at: 1780698892,
+    };
+    const event = {
+      id: "evt_cancel_modern",
+      type: "customer.subscription.updated",
+      data: { object: cancelingSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscription_canceled",
+        stripeEventId: "evt_cancel_modern::canceled",
+      }),
+    );
+  });
+
+  it("logs subscription_resumed when cancel_at_period_end flips true → false", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: true,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_resume",
+      type: "customer.subscription.updated",
+      data: { object: baseStripeSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscription_resumed",
+        stripeEventId: "evt_resume::resumed",
+        description: expect.stringContaining("Subscription resumed"),
+      }),
+    );
+  });
+
+  it("doesn't log a transition when canceling state hasn't changed", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: true,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const stillCancelingSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: true,
+    };
+    const event = {
+      id: "evt_still_canceling",
+      type: "customer.subscription.updated",
+      data: { object: stillCancelingSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+    expect(mockedRecordEvent).not.toHaveBeenCalled();
+  });
+
+  it("logs plan_downgraded when the new tier has fewer monthly tokens", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "scale",
+        cancel_at_period_end: false,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    let lookups = 0;
+    client.__tables.plans = {
+      ...makeChain(),
+      maybeSingle: vi.fn().mockImplementation(() => {
+        lookups += 1;
+        if (lookups === 1) {
+          // resolveSubscriptionContext: lookup by current price → Pro
+          return Promise.resolve({
+            data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+            error: null,
+          });
+        }
+        if (lookups === 2) {
+          // recordSubscriptionTransitions: lookup of previous plan_key (scale)
+          return Promise.resolve({
+            data: { key: "scale", name: "Scale", monthly_tokens: 20000 },
+            error: null,
+          });
+        }
+        // recordSubscriptionTransitions: lookup of new plan_key (pro)
+        return Promise.resolve({
+          data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+          error: null,
+        });
+      }),
+    } as never;
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const downgradedSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+    const event = {
+      id: "evt_downgrade",
+      type: "customer.subscription.updated",
+      data: { object: downgradedSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "plan_downgraded",
+        stripeEventId: "evt_downgrade::downgraded",
+        description: "Plan changed from Scale to Pro",
+        metadata: expect.objectContaining({
+          from_plan_key: "scale",
+          to_plan_key: "pro",
+        }),
+      }),
+    );
+  });
+
+  it("uses a fallback description when no period_end is available", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: false,
+        current_period_end: null,
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    // current_period_end is missing on the items, so formatLongDate gives null
+    // and the handler picks the period-less fallback string.
+    const cancelingNoEnd = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: true,
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: null,
+          },
+        ],
+      },
+    };
+    const event = {
+      id: "evt_no_end",
+      type: "customer.subscription.updated",
+      data: { object: cancelingNoEnd },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscription_canceled",
+        description: "Subscription scheduled for cancellation",
+      }),
+    );
+  });
+
+  it("uses a fallback description on resume when no period_end is available", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: true,
+        current_period_end: null,
+      },
+      error: null,
+    });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const resumingNoEnd = {
+      ...(baseStripeSub as Record<string, unknown>),
+      cancel_at_period_end: false,
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: null,
+          },
+        ],
+      },
+    };
+    const event = {
+      id: "evt_resume_no_end",
+      type: "customer.subscription.updated",
+      data: { object: resumingNoEnd },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscription_resumed",
+        description: "Subscription resumed",
+      }),
+    );
+  });
+
+  it("ignores transition logging when syncSubscriptionFromStripe returns null", async () => {
+    // Subscription with no metadata + no matching plan means
+    // syncSubscriptionFromStripe returns null. The handler must early-return
+    // and never log transitions.
+    const sub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      metadata: {},
+    };
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_ctx",
+      type: "customer.subscription.updated",
+      data: { object: sub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+    expect(mockedRecordEvent).not.toHaveBeenCalled();
+  });
+
+  it("does NOT log plan_downgraded on an upgrade (new tier has more tokens)", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({
+      data: {
+        plan_key: "pro",
+        cancel_at_period_end: false,
+        current_period_end: "2026-06-05T00:00:00Z",
+      },
+      error: null,
+    });
+    let lookups = 0;
+    client.__tables.plans = {
+      ...makeChain(),
+      maybeSingle: vi.fn().mockImplementation(() => {
+        lookups += 1;
+        if (lookups === 1) {
+          return Promise.resolve({
+            data: { key: "scale", name: "Scale", monthly_tokens: 20000 },
+            error: null,
+          });
+        }
+        if (lookups === 2) {
+          return Promise.resolve({
+            data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: { key: "scale", name: "Scale", monthly_tokens: 20000 },
+          error: null,
+        });
+      }),
+    } as never;
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const upgradedSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_scale", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+    const event = {
+      id: "evt_upgrade_no_log",
+      type: "customer.subscription.updated",
+      data: { object: upgradedSub },
+    };
+
+    await handleSubscriptionUpdated(event as never);
+
+    expect(mockedRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "plan_downgraded" }),
+    );
   });
 });
 

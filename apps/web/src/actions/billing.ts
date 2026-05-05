@@ -6,6 +6,7 @@ import {
   getActiveSubscription,
   getOrCreateStripeCustomer,
   getPlanByKey,
+  syncSubscriptionFromStripe,
 } from "@/services/billing-service";
 import {
   createPortalSession,
@@ -13,6 +14,7 @@ import {
   createTopUpCheckoutSession,
   resumeSubscription as stripeResumeSubscription,
 } from "@/services/stripe-service";
+import { recordSubscriptionEvent } from "@/services/token-service";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export interface CheckoutSessionResult {
@@ -174,7 +176,46 @@ export async function resumeSubscription(): Promise<ResumeSubscriptionResult> {
       return { error: "This subscription is not scheduled for cancellation." };
     }
 
-    await stripeResumeSubscription(subscription.stripe_subscription_id);
+    // Stripe call returns the updated subscription. Sync our DB row from the
+    // returned state immediately so the page re-renders correctly without
+    // waiting for the webhook (which arrives asynchronously ~500ms later).
+    const updatedStripeSub = await stripeResumeSubscription(
+      subscription.stripe_subscription_id,
+    );
+    await syncSubscriptionFromStripe({ stripeSub: updatedStripeSub, client: admin });
+
+    // Log the resume in the activity feed eagerly so the user sees the row
+    // on next render. The webhook's transition detector will read the
+    // already-synced DB state (was=false, now=false) and silently skip
+    // logging again — no duplication.
+    const periodEndIso = subscription.current_period_end
+      ? new Date(subscription.current_period_end).toISOString()
+      : null;
+    const periodEndLabel = periodEndIso
+      ? new Date(periodEndIso).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : null;
+    await recordSubscriptionEvent({
+      userId: user.id,
+      type: "subscription_resumed",
+      description: periodEndLabel
+        ? `Subscription resumed — renews on ${periodEndLabel}`
+        : "Subscription resumed",
+      // Synthetic, deterministic-per-call key. The webhook for the same
+      // resume uses `${event.id}::resumed` so the keys never collide.
+      stripeEventId: `manual::${user.id}::${subscription.stripe_subscription_id}::resumed::${Date.now()}`,
+      metadata: {
+        stripe_subscription_id: subscription.stripe_subscription_id,
+        plan_key: subscription.plan_key,
+        period_end: periodEndIso,
+        source: "in_app_resume_action",
+      },
+      client: admin,
+    });
+
     revalidatePath("/account/billing");
     revalidatePath("/account");
     return { ok: true };

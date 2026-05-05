@@ -375,11 +375,27 @@ What the user sees on `/account/billing`:
   `Pro · Canceling` (warning variant) and the footnote reads
   *"Subscription ends on June 5, 2026."*
 - The action row offers both **Resume subscription** and **Manage subscription**.
+- A new row in **Recent activity**: *"Subscription canceled — Subscription
+  scheduled to end on June 5, 2026"* (0 tokens, paper-trail only).
 
 After the period ends, Stripe sends `customer.subscription.deleted`, our
 handler syncs `status: 'canceled'`, `getActiveSubscription` filters them out,
 and the page falls back to the free state with a **Choose a plan** CTA. The
 user's leftover tokens stay in their balance — they can keep using them.
+
+If the user clicks **Resume subscription** before the period ends, the
+banner clears and a *"Subscription resumed"* row appears in the activity
+feed. Plan downgrades through the portal also emit a *"Plan downgraded"*
+audit row so the timeline is complete; upgrades already surface via the
+matching `subscription_grant` row from the proration invoice.
+
+These three lifecycle events (`subscription_canceled`, `subscription_resumed`,
+`plan_downgraded`) are 0-amount entries in `token_transactions`, written
+by `recordSubscriptionEvent` from
+[`token-service.ts`](../apps/web/src/services/token-service.ts). They're
+idempotent on a per-transition suffix of the Stripe event id (e.g.
+`evt_xxx::canceled`), so a single Stripe event can fire multiple
+transitions and replays never duplicate.
 
 ### Failed payment on renewal
 
@@ -458,15 +474,26 @@ We track this in two webhooks:
 The upgrade grant is idempotent on `event.id` like every other grant, so
 replays are safe.
 
-### Stripe invoice subscription field
+### Stripe API field migrations to be aware of
 
-Stripe API version `2024-11-20.acacia` and later moved
-`invoice.subscription` into `invoice.parent.subscription_details.subscription`.
-[`extractSubscriptionIdFromInvoice`](../apps/web/src/services/billing-service.ts)
-reads from the new location and falls back to the legacy field, so both
-modern and older API versions resolve the subscription correctly. If you
-ever upgrade the SDK and a webhook handler suddenly returns 200 but does
-nothing, this helper is the first thing to check.
+Stripe API version `2024-11-20.acacia` and later quietly moved a few fields
+that our handlers used to read directly. Each is a "webhook returns 200 but
+nothing happens" class of bug. Fixed here so the codebase reads both the
+new and legacy shapes:
+
+- **`invoice.subscription`** → `invoice.parent.subscription_details.subscription`.
+  Read by [`extractSubscriptionIdFromInvoice`](../apps/web/src/services/billing-service.ts).
+  Affects every `invoice.payment_succeeded` and `invoice.payment_failed`
+  handler.
+- **`subscription.cancel_at_period_end`** (boolean) → `subscription.cancel_at`
+  (timestamp). The Customer Portal in modern API leaves the boolean at
+  `false` and sets `cancel_at` to the period-end timestamp instead. Read by
+  [`isScheduledToCancel`](../apps/web/src/services/billing-service.ts).
+  Affects whether the billing page shows "Subscription ends on …" + the
+  Resume button.
+
+If you ever upgrade the SDK and notice a webhook handler returns 200 but
+the user-facing state isn't changing, **check these two helpers first**.
 
 ### Initial payment incomplete
 

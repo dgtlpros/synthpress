@@ -141,9 +141,15 @@ export async function retrieveCheckoutSession(sessionId: string) {
   return stripe.checkout.sessions.retrieve(sessionId);
 }
 
-export async function resumeSubscription(subscriptionId: string): Promise<void> {
+/**
+ * Reverses an end-of-period cancellation. Returns the updated subscription
+ * object so callers can sync our DB without a second round-trip — important
+ * because we want `/account/billing` to render the resumed state immediately
+ * after the action returns instead of waiting on the Stripe webhook.
+ */
+export async function resumeSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
   const stripe = getStripe();
-  await stripe.subscriptions.update(subscriptionId, {
+  return stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: false,
   });
 }

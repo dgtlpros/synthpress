@@ -60,6 +60,17 @@ await grantTokens({ ..., stripeEventId: event.id });  // returns null on dup
 If you add a new webhook handler, write it to short-circuit on the unique
 constraint, not just the pre-check — see `grant_tokens` for the pattern.
 
+When **a single Stripe event triggers multiple writes** (e.g. one
+`customer.subscription.updated` event that should record both a
+cancellation log AND a downgrade log), suffix the event id per transition
+so each write has its own idempotency key:
+
+```ts
+// ✅ each transition logs once and replays are still no-ops
+await recordSubscriptionEvent({ ..., stripeEventId: `${event.id}::canceled` });
+await recordSubscriptionEvent({ ..., stripeEventId: `${event.id}::downgraded` });
+```
+
 ## RLS performance: wrap `auth.uid()` in a subquery
 
 ```sql

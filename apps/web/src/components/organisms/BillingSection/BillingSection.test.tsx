@@ -44,6 +44,13 @@ const sampleTransactions = [
     description: "Manual",
     created_at: "not-a-date",
   },
+  {
+    id: "t4",
+    amount: 0,
+    type: "subscription_canceled",
+    description: "Subscription scheduled to end on June 5, 2026",
+    created_at: "2026-05-03T00:00:00Z",
+  },
 ];
 
 describe("BillingSection", () => {
@@ -136,7 +143,13 @@ describe("BillingSection", () => {
     expect(screen.getByText("AI usage")).toBeInTheDocument();
     expect(screen.getByText("custom_kind")).toBeInTheDocument();
     expect(screen.getByText("not-a-date")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // Two "—" cells: one for the null description on the usage row, one for
+    // the 0-amount lifecycle row.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Subscription canceled")).toBeInTheDocument();
+    expect(
+      screen.getByText("Subscription scheduled to end on June 5, 2026"),
+    ).toBeInTheDocument();
   });
 
   it("falls back to 'active' status when plan is set but subscription is null", () => {

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 
+const mockRouterRefresh = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mockRouterRefresh }),
+}));
+
 vi.mock("@/actions/billing", () => ({
   createBillingPortal: vi.fn(),
   resumeSubscription: vi.fn(),
@@ -81,7 +87,7 @@ describe("useBillingActions — openPortal", () => {
 });
 
 describe("useBillingActions — resume", () => {
-  it("calls the server action and clears any prior error on success", async () => {
+  it("calls the server action and refreshes the route on success", async () => {
     mockedResume.mockResolvedValue({ ok: true });
     const { result } = renderHook(() => useBillingActions());
 
@@ -90,16 +96,18 @@ describe("useBillingActions — resume", () => {
     await waitFor(() => {
       expect(mockedResume).toHaveBeenCalledTimes(1);
       expect(result.current.resumeError).toBeNull();
+      expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
     });
   });
 
-  it("surfaces server-action errors", async () => {
+  it("does NOT refresh the route when the server action errors", async () => {
     mockedResume.mockResolvedValue({ error: "boom" });
     const { result } = renderHook(() => useBillingActions());
 
     act(() => result.current.resume());
 
     await waitFor(() => expect(result.current.resumeError).toBe("boom"));
+    expect(mockRouterRefresh).not.toHaveBeenCalled();
   });
 
   it("falls back to a generic error when neither ok nor error is returned", async () => {

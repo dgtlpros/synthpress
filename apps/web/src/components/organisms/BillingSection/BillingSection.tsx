@@ -55,6 +55,9 @@ const typeLabels: Record<string, string> = {
   usage: "AI usage",
   refund: "Refund",
   adjustment: "Adjustment",
+  subscription_canceled: "Subscription canceled",
+  subscription_resumed: "Subscription resumed",
+  plan_downgraded: "Plan downgraded",
 };
 
 function formatDate(value: string) {
@@ -69,6 +72,7 @@ function formatDate(value: string) {
 
 function formatAmount(amount: number) {
   if (amount > 0) return `+${formatter.format(amount)}`;
+  if (amount === 0) return "—";
   return `${formatter.format(amount)}`;
 }
 

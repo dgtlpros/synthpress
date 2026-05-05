@@ -4,7 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateCustomer } from "./stripe-service";
-import { grantTokens, recordTokenRefund } from "./token-service";
+import {
+  grantTokens,
+  recordSubscriptionEvent,
+  recordTokenRefund,
+} from "./token-service";
 
 type Client = SupabaseClient<Database>;
 
@@ -178,6 +182,19 @@ function extractSubscriptionIdFromInvoice(invoice: Stripe.Invoice): string | nul
   return null;
 }
 
+/**
+ * Modern Stripe API (2024-11+) deprecated the boolean `cancel_at_period_end`
+ * in favour of the timestamp field `cancel_at`. The Customer Portal in
+ * particular sets `cancel_at` (== `current_period_end`) and leaves the
+ * boolean at `false`, so we must consider both signals to know whether a
+ * subscription is scheduled for cancellation.
+ */
+function isScheduledToCancel(stripeSub: Stripe.Subscription): boolean {
+  if (stripeSub.cancel_at_period_end) return true;
+  const cancelAt = (stripeSub as unknown as { cancel_at?: number | null }).cancel_at ?? null;
+  return cancelAt !== null;
+}
+
 function buildSubscriptionRow(params: {
   stripeSub: Stripe.Subscription;
   userId: string;
@@ -192,7 +209,7 @@ function buildSubscriptionRow(params: {
     status: params.stripeSub.status,
     current_period_start: timestampToIso(item.current_period_start),
     current_period_end: timestampToIso(item.current_period_end),
-    cancel_at_period_end: params.stripeSub.cancel_at_period_end,
+    cancel_at_period_end: isScheduledToCancel(params.stripeSub),
     canceled_at: timestampToIso(params.stripeSub.canceled_at),
   };
 }
@@ -347,6 +364,113 @@ export async function handleCheckoutCompleted(
   }
 }
 
+function formatLongDate(value: string | null): string | null {
+  if (!value) return null;
+  // `value` always comes from `timestampToIso`, which returns null or a
+  // well-formed ISO string, so we don't need to defend against parse errors.
+  return new Date(value).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+/**
+ * Detects subscription lifecycle transitions (cancel / resume / downgrade)
+ * by comparing the previous DB row to the freshly synced Stripe state, and
+ * writes a 0-amount audit row to `token_transactions` so the Recent
+ * Activity feed surfaces them. Each transition uses a per-transition
+ * suffix on the Stripe event id (e.g. `evt_xxx::canceled`) for
+ * idempotency, so a single Stripe event can fire multiple transition rows
+ * if needed and replays never duplicate.
+ */
+async function recordSubscriptionTransitions(params: {
+  event:
+    | Stripe.CustomerSubscriptionUpdatedEvent
+    | Stripe.CustomerSubscriptionCreatedEvent
+    | Stripe.CustomerSubscriptionDeletedEvent;
+  previous: {
+    plan_key: string | null;
+    cancel_at_period_end: boolean | null;
+    current_period_end: string | null;
+  } | null;
+  ctx: { userId: string; planKey: string };
+  stripeSub: Stripe.Subscription;
+  client: Client;
+}): Promise<void> {
+  const { event, previous, ctx, stripeSub, client } = params;
+
+  const wasCanceling = previous?.cancel_at_period_end ?? false;
+  const isCanceling = isScheduledToCancel(stripeSub);
+  const item = stripeSub.items.data[0];
+  const periodEndIso = timestampToIso(item?.current_period_end);
+  const periodEndLabel = formatLongDate(periodEndIso);
+
+  if (!wasCanceling && isCanceling) {
+    await recordSubscriptionEvent({
+      userId: ctx.userId,
+      type: "subscription_canceled",
+      description: periodEndLabel
+        ? `Subscription scheduled to end on ${periodEndLabel}`
+        : "Subscription scheduled for cancellation",
+      stripeEventId: `${event.id}::canceled`,
+      metadata: {
+        stripe_subscription_id: stripeSub.id,
+        plan_key: ctx.planKey,
+        period_end: periodEndIso,
+        stripe_event_id: event.id,
+      },
+      client,
+    });
+  } else if (wasCanceling && !isCanceling) {
+    await recordSubscriptionEvent({
+      userId: ctx.userId,
+      type: "subscription_resumed",
+      description: periodEndLabel
+        ? `Subscription resumed — renews on ${periodEndLabel}`
+        : "Subscription resumed",
+      stripeEventId: `${event.id}::resumed`,
+      metadata: {
+        stripe_subscription_id: stripeSub.id,
+        plan_key: ctx.planKey,
+        period_end: periodEndIso,
+        stripe_event_id: event.id,
+      },
+      client,
+    });
+  }
+
+  // Plan changed AND new tier has fewer monthly tokens → downgrade.
+  // Upgrades are already surfaced via the upgrade-proration grant row, no
+  // need to log them twice.
+  const previousPlanKey = previous?.plan_key ?? null;
+  if (previousPlanKey && previousPlanKey !== ctx.planKey) {
+    const [fromPlan, toPlan] = await Promise.all([
+      getPlanByKey(previousPlanKey, client),
+      getPlanByKey(ctx.planKey, client),
+    ]);
+    if (
+      fromPlan &&
+      toPlan &&
+      toPlan.monthly_tokens < fromPlan.monthly_tokens
+    ) {
+      await recordSubscriptionEvent({
+        userId: ctx.userId,
+        type: "plan_downgraded",
+        description: `Plan changed from ${fromPlan.name} to ${toPlan.name}`,
+        stripeEventId: `${event.id}::downgraded`,
+        metadata: {
+          stripe_subscription_id: stripeSub.id,
+          from_plan_key: fromPlan.key,
+          to_plan_key: toPlan.key,
+          stripe_event_id: event.id,
+        },
+        client,
+      });
+    }
+  }
+}
+
 export async function handleSubscriptionUpdated(
   event:
     | Stripe.CustomerSubscriptionUpdatedEvent
@@ -355,8 +479,26 @@ export async function handleSubscriptionUpdated(
   options: { client?: Client } = {},
 ): Promise<void> {
   const supabase = options.client ?? createAdminClient();
-  await syncSubscriptionFromStripe({
-    stripeSub: event.data.object,
+  const stripeSub = event.data.object;
+
+  // Read the existing row BEFORE we upsert, so we can detect transitions.
+  const { data: previous } = await supabase
+    .from("subscriptions")
+    .select("plan_key, cancel_at_period_end, current_period_end")
+    .eq("stripe_subscription_id", stripeSub.id)
+    .maybeSingle();
+
+  const ctx = await syncSubscriptionFromStripe({
+    stripeSub,
+    client: supabase,
+  });
+  if (!ctx) return;
+
+  await recordSubscriptionTransitions({
+    event,
+    previous,
+    ctx,
+    stripeSub,
     client: supabase,
   });
 }

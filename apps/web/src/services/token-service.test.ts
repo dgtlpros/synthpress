@@ -9,6 +9,7 @@ import {
   getBalance,
   getRecentTransactions,
   grantTokens,
+  recordSubscriptionEvent,
   recordTokenRefund,
   consumeTokens,
 } from "./token-service";
@@ -345,6 +346,121 @@ describe("recordTokenRefund", () => {
     await expect(
       recordTokenRefund({ userId: "user-1", amount: 100 }),
     ).rejects.toEqual({ message: "amount_must_be_positive" });
+  });
+});
+
+describe("recordSubscriptionEvent", () => {
+  it("inserts a 0-amount audit row and returns true", async () => {
+    const client = makeClient({
+      token_transactions: { data: null, error: null },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const inserted = await recordSubscriptionEvent({
+      userId: "u1",
+      type: "subscription_canceled",
+      description: "Subscription scheduled to end on June 5, 2026",
+      stripeEventId: "evt_xxx::canceled",
+      metadata: { plan_key: "scale" },
+    });
+
+    expect(inserted).toBe(true);
+    expect(client.__chains.token_transactions.insert).toHaveBeenCalledWith({
+      user_id: "u1",
+      amount: 0,
+      type: "subscription_canceled",
+      description: "Subscription scheduled to end on June 5, 2026",
+      stripe_event_id: "evt_xxx::canceled",
+      metadata: { plan_key: "scale" },
+    });
+  });
+
+  it("skips and returns false when the event was already recorded", async () => {
+    const client = makeClient({
+      token_transactions: { data: { id: "existing" }, error: null },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const inserted = await recordSubscriptionEvent({
+      userId: "u1",
+      type: "subscription_resumed",
+      description: "Subscription resumed",
+      stripeEventId: "evt_dup::resumed",
+    });
+
+    expect(inserted).toBe(false);
+    expect(client.__chains.token_transactions.insert).not.toHaveBeenCalled();
+  });
+
+  it("treats a unique-violation race as an idempotent skip", async () => {
+    const client = makeClient({
+      token_transactions: { data: null, error: null },
+    });
+    client.__chains.token_transactions.insert = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { code: "23505" } });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const inserted = await recordSubscriptionEvent({
+      userId: "u1",
+      type: "plan_downgraded",
+      description: "Plan changed from Scale to Pro",
+      stripeEventId: "evt_race::downgraded",
+    });
+
+    expect(inserted).toBe(false);
+  });
+
+  it("propagates non-23505 insert errors", async () => {
+    const client = makeClient({
+      token_transactions: { data: null, error: null },
+    });
+    client.__chains.token_transactions.insert = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { code: "42601", message: "boom" } });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      recordSubscriptionEvent({
+        userId: "u1",
+        type: "subscription_canceled",
+        description: "X",
+        stripeEventId: "evt_err::canceled",
+      }),
+    ).rejects.toEqual({ code: "42601", message: "boom" });
+  });
+
+  it("uses an empty metadata object when none is provided", async () => {
+    const client = makeClient({
+      token_transactions: { data: null, error: null },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await recordSubscriptionEvent({
+      userId: "u1",
+      type: "subscription_canceled",
+      description: "X",
+      stripeEventId: "evt_no_meta::canceled",
+    });
+
+    expect(client.__chains.token_transactions.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: {} }),
+    );
+  });
+
+  it("uses an injected client when provided", async () => {
+    const injected = makeClient({
+      token_transactions: { data: null, error: null },
+    });
+    await recordSubscriptionEvent({
+      userId: "u1",
+      type: "subscription_resumed",
+      description: "Y",
+      stripeEventId: "evt_inj::resumed",
+      client: injected as never,
+    });
+    expect(injected.__chains.token_transactions.insert).toHaveBeenCalled();
+    expect(mockedCreateAdmin).not.toHaveBeenCalled();
   });
 });
 
