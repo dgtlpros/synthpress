@@ -39,3 +39,12 @@ export type { LinkProps, LinkVariant } from "./Link";
 
 export { ConfirmModal } from "./ConfirmModal";
 export type { ConfirmModalProps, ConfirmModalVariant } from "./ConfirmModal";
+
+export { PriceTag } from "./PriceTag";
+export type { PriceTagProps } from "./PriceTag";
+
+export { TokenBadge } from "./TokenBadge";
+export type { TokenBadgeProps, TokenBadgeVariant } from "./TokenBadge";
+
+export { PlanBadge } from "./PlanBadge";
+export type { PlanBadgeProps, SubscriptionStatus } from "./PlanBadge";

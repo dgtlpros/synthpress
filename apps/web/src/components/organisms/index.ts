@@ -8,3 +8,13 @@ export { Pricing } from "./Pricing";
 export type { PricingProps } from "./Pricing";
 export { Footer } from "./Footer";
 export type { FooterProps } from "./Footer";
+export { CheckoutEmbed } from "./CheckoutEmbed";
+export type { CheckoutEmbedProps } from "./CheckoutEmbed";
+export { BillingSection } from "./BillingSection";
+export type {
+  BillingSectionProps,
+  BillingSectionPlan,
+  BillingSectionSubscription,
+  BillingSectionTransaction,
+  BillingSectionTopUpPack,
+} from "./BillingSection";

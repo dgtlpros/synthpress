@@ -93,6 +93,45 @@ export type Database = {
           },
         ]
       }
+      plans: {
+        Row: {
+          created_at: string
+          description: string
+          features: Json
+          is_popular: boolean
+          key: string
+          monthly_price_cents: number
+          monthly_tokens: number
+          name: string
+          sort_order: number
+          stripe_price_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          features?: Json
+          is_popular?: boolean
+          key: string
+          monthly_price_cents: number
+          monthly_tokens: number
+          name: string
+          sort_order?: number
+          stripe_price_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          features?: Json
+          is_popular?: boolean
+          key?: string
+          monthly_price_cents?: number
+          monthly_tokens?: number
+          name?: string
+          sort_order?: number
+          stripe_price_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -179,12 +218,170 @@ export type Database = {
           },
         ]
       }
+      stripe_customers: {
+        Row: {
+          created_at: string
+          stripe_customer_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          stripe_customer_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          stripe_customer_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          cancel_at_period_end: boolean
+          canceled_at: string | null
+          created_at: string
+          current_period_end: string | null
+          current_period_start: string | null
+          id: string
+          plan_key: string
+          status: string
+          stripe_price_id: string
+          stripe_subscription_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cancel_at_period_end?: boolean
+          canceled_at?: string | null
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          plan_key: string
+          status: string
+          stripe_price_id: string
+          stripe_subscription_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cancel_at_period_end?: boolean
+          canceled_at?: string | null
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          plan_key?: string
+          status?: string
+          stripe_price_id?: string
+          stripe_subscription_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_plan_key_fkey"
+            columns: ["plan_key"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["key"]
+          },
+        ]
+      }
+      token_balances: {
+        Row: {
+          balance: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          balance?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          balance?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      token_packs: {
+        Row: {
+          created_at: string
+          description: string
+          key: string
+          name: string
+          price_cents: number
+          sort_order: number
+          stripe_price_id: string
+          tokens: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          key: string
+          name: string
+          price_cents: number
+          sort_order?: number
+          stripe_price_id: string
+          tokens: number
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          key?: string
+          name?: string
+          price_cents?: number
+          sort_order?: number
+          stripe_price_id?: string
+          tokens?: number
+        }
+        Relationships: []
+      }
+      token_transactions: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string | null
+          id: string
+          metadata: Json
+          stripe_event_id: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json
+          stripe_event_id?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json
+          stripe_event_id?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      consume_tokens: {
+        Args: { p_amount: number; p_description?: string; p_user_id: string }
+        Returns: number
+      }
     }
     Enums: {
       article_status:

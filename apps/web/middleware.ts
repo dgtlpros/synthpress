@@ -3,10 +3,16 @@ import { updateSession } from "@/lib/supabase/middleware";
 
 const protectedRoutes = ["/dashboard", "/projects", "/articles", "/account"];
 const authRoutes = ["/login", "/signup"];
+const middlewareSkipPrefixes = ["/api/webhooks"];
 
 export async function middleware(request: NextRequest) {
-  const { user, supabaseResponse } = await updateSession(request);
   const { pathname } = request.nextUrl;
+
+  if (middlewareSkipPrefixes.some((prefix) => pathname.startsWith(prefix))) {
+    return NextResponse.next({ request });
+  }
+
+  const { user, supabaseResponse } = await updateSession(request);
 
   const isProtected = protectedRoutes.some((route) => pathname.startsWith(route));
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));

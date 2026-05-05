@@ -1,3 +1,4 @@
+import NextLink from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
@@ -16,6 +17,21 @@ export default async function AccountPage() {
         <h1 className="text-2xl font-bold text-foreground">Account</h1>
         <p className="mt-1 text-sm text-muted">Manage your account settings.</p>
       </div>
+
+      <NextLink
+        href="/account/billing"
+        className="block rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)] transition-colors hover:bg-surface-hover"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Billing &amp; synth tokens</h2>
+            <p className="mt-1 text-sm text-muted">
+              View your plan, top up tokens, and manage payment methods.
+            </p>
+          </div>
+          <span className="text-sm text-muted">Manage →</span>
+        </div>
+      </NextLink>
 
       <div className="rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)]">
         <h2 className="text-lg font-semibold text-foreground">Profile</h2>
