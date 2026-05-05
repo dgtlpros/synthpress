@@ -1,3 +1,4 @@
+import "server-only";
 import Stripe from "stripe";
 
 let cachedStripe: Stripe | null = null;
@@ -46,10 +47,12 @@ export async function createSubscriptionCheckoutSession(params: {
   priceId: string;
   userId: string;
   planKey: string;
+  interval?: "month" | "year";
   returnPath?: string;
 }): Promise<{ id: string; clientSecret: string }> {
   const stripe = getStripe();
   const returnPath = params.returnPath ?? "/checkout/return?session_id={CHECKOUT_SESSION_ID}";
+  const interval = params.interval ?? "month";
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
@@ -60,12 +63,14 @@ export async function createSubscriptionCheckoutSession(params: {
     metadata: {
       supabase_user_id: params.userId,
       plan_key: params.planKey,
+      interval,
       checkout_kind: "subscription",
     },
     subscription_data: {
       metadata: {
         supabase_user_id: params.userId,
         plan_key: params.planKey,
+        interval,
       },
     },
   });
@@ -134,6 +139,13 @@ export async function createPortalSession(params: {
 export async function retrieveCheckoutSession(sessionId: string) {
   const stripe = getStripe();
   return stripe.checkout.sessions.retrieve(sessionId);
+}
+
+export async function resumeSubscription(subscriptionId: string): Promise<void> {
+  const stripe = getStripe();
+  await stripe.subscriptions.update(subscriptionId, {
+    cancel_at_period_end: false,
+  });
 }
 
 export async function verifyWebhook(params: {

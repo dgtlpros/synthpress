@@ -134,7 +134,29 @@ export function BillingSection({
         <h2 className="text-xl font-semibold text-foreground">Recent activity</h2>
 
         {transactions.length === 0 ? (
-          <p className="text-sm text-muted">No activity yet.</p>
+          <div className="flex flex-col items-center gap-3 rounded-[var(--sp-radius-xl)] border border-dashed border-border bg-surface/50 p-10 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-hover text-muted">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">No token activity yet</p>
+              <p className="text-xs text-muted">
+                Subscription grants, top-ups, and AI usage will appear here.
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="overflow-hidden rounded-[var(--sp-radius-xl)] border border-border bg-surface shadow-[var(--sp-shadow-sm)]">
             <table className="w-full text-sm">

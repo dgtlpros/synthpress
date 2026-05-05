@@ -10,3 +10,12 @@ export { TokenBalanceCard } from "./TokenBalanceCard";
 export type { TokenBalanceCardProps } from "./TokenBalanceCard";
 export { TopUpCard } from "./TopUpCard";
 export type { TopUpCardProps } from "./TopUpCard";
+export { DashboardSidebar } from "./DashboardSidebar";
+export type { DashboardSidebarProps, SidebarNavItem } from "./DashboardSidebar";
+export { CheckoutSuccessHero } from "./CheckoutSuccessHero";
+export type {
+  CheckoutSuccessHeroProps,
+  CheckoutSuccessHeroVariant,
+} from "./CheckoutSuccessHero";
+export { BillingNotice } from "./BillingNotice";
+export type { BillingNoticeProps, BillingNoticeVariant } from "./BillingNotice";

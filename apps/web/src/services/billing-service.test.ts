@@ -10,11 +10,12 @@ vi.mock("./stripe-service", () => ({
 
 vi.mock("./token-service", () => ({
   grantTokens: vi.fn(),
+  recordTokenRefund: vi.fn(),
 }));
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateCustomer } from "./stripe-service";
-import { grantTokens } from "./token-service";
+import { grantTokens, recordTokenRefund } from "./token-service";
 import {
   getOrCreateStripeCustomer,
   getActiveSubscription,
@@ -26,16 +27,23 @@ import {
   handleSubscriptionUpdated,
   handleInvoicePaymentSucceeded,
   handleInvoicePaymentFailed,
+  handleChargeRefunded,
+  handleChargeDisputeClosed,
   handleWebhookEvent,
 } from "./billing-service";
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedFindOrCreate = vi.mocked(findOrCreateCustomer);
 const mockedGrantTokens = vi.mocked(grantTokens);
+const mockedRecordRefund = vi.mocked(recordTokenRefund);
 
 type ChainResult<T> = { data: T; error: { code?: string; message?: string } | null };
 
 function makeChain(initial: ChainResult<unknown> = { data: null, error: null }) {
+  // Mirror Supabase JS's PostgrestBuilder: every filter method returns the
+  // same chain so callers can compose, AND the chain itself is thenable so
+  // `await chain.filter(...)` resolves directly. Terminal helpers
+  // (`maybeSingle`, `insert`, `upsert`) explicitly resolve too.
   const chain = {
     select: vi.fn().mockReturnThis(),
     insert: vi.fn().mockResolvedValue(initial),
@@ -43,9 +51,14 @@ function makeChain(initial: ChainResult<unknown> = { data: null, error: null }) 
     update: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    gt: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(initial),
+    filter: vi.fn().mockReturnThis(),
+    then: (resolve: (value: ChainResult<unknown>) => unknown) =>
+      Promise.resolve(initial).then(resolve),
   };
   // The .update() chain ends with .eq() returning a Promise. Make eq awaitable.
   // We'll do this by overriding eq dynamically below for update test cases.
@@ -225,13 +238,15 @@ describe("getCurrentPlan", () => {
 });
 
 describe("getPlanByStripePriceId / getPlanByKey", () => {
-  it("queries by price id", async () => {
+  it("queries by price id, matching either monthly or annual column", async () => {
     const client = makeClient({ plans: { data: { key: "pro" }, error: null } });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const plan = await getPlanByStripePriceId("price_1");
     expect(plan).toEqual({ key: "pro" });
-    expect(client.__tables.plans.eq).toHaveBeenCalledWith("stripe_price_id", "price_1");
+    expect(client.__tables.plans.or).toHaveBeenCalledWith(
+      "stripe_price_id.eq.price_1,stripe_annual_price_id.eq.price_1",
+    );
   });
 
   it("queries by key", async () => {
@@ -281,7 +296,7 @@ const baseStripeSub = {
   items: {
     data: [
       {
-        price: { id: "price_pro" },
+        price: { id: "price_pro", recurring: { interval: "month" } },
         current_period_start: 1700000000,
         current_period_end: 1702592000,
       },
@@ -289,10 +304,28 @@ const baseStripeSub = {
   },
 } as unknown;
 
+const annualStripeSub = {
+  id: "sub_y",
+  status: "active",
+  cancel_at_period_end: false,
+  canceled_at: null,
+  metadata: { supabase_user_id: "u1", plan_key: "pro", interval: "year" },
+  items: {
+    data: [
+      {
+        price: { id: "price_pro_year", recurring: { interval: "year" } },
+        current_period_start: 1700000000,
+        current_period_end: 1731536000,
+      },
+    ],
+  },
+} as unknown;
+
 describe("syncSubscriptionFromStripe", () => {
-  it("upserts subscription using metadata for context", async () => {
+  it("upserts subscription using the current price id (not stale metadata)", async () => {
     const client = makeClient();
     client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "pro" }, error: null });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const ctx = await syncSubscriptionFromStripe({
@@ -313,18 +346,68 @@ describe("syncSubscriptionFromStripe", () => {
     );
   });
 
-  it("falls back to plan lookup by price id when metadata.plan_key absent", async () => {
+  it("prefers the current price over stale metadata.plan_key (plan switched in dashboard)", async () => {
+    // User originally subscribed to Pro (so metadata.plan_key === 'pro'),
+    // then switched to Scale via the Stripe Dashboard or Customer Portal.
+    // Stripe doesn't auto-update metadata, so we must trust the price.
+    const switchedSub = {
+      id: "sub_switched",
+      status: "active",
+      cancel_at_period_end: false,
+      canceled_at: null,
+      metadata: { supabase_user_id: "u1", plan_key: "pro" },
+      items: {
+        data: [
+          {
+            price: { id: "price_scale", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({ data: { key: "scale" }, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const ctx = await syncSubscriptionFromStripe({
+      stripeSub: switchedSub as never,
+    });
+
+    expect(ctx).toEqual({ userId: "u1", planKey: "scale" });
+    expect(client.__tables.subscriptions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan_key: "scale",
+        stripe_price_id: "price_scale",
+      }),
+      { onConflict: "stripe_subscription_id" },
+    );
+  });
+
+  it("falls back to metadata.plan_key when the current price isn't a known plan", async () => {
+    // Edge case: a subscription is on a custom one-off price we don't have
+    // a row for. Trust the metadata pointer if present.
     const sub = {
       ...(baseStripeSub as Record<string, unknown>),
-      metadata: { supabase_user_id: "u1" },
+      items: {
+        data: [
+          {
+            price: { id: "price_custom_unknown", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
     };
     const client = makeClient();
     client.__tables.subscriptions = makeChain({ data: null, error: null });
-    client.__tables.plans = makeChain({ data: { key: "starter" }, error: null });
+    client.__tables.plans = makeChain({ data: null, error: null });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const ctx = await syncSubscriptionFromStripe({ stripeSub: sub as never });
-    expect(ctx).toEqual({ userId: "u1", planKey: "starter" });
+    expect(ctx).toEqual({ userId: "u1", planKey: "pro" });
   });
 
   it("returns null when supabase_user_id metadata is missing", async () => {
@@ -429,6 +512,41 @@ describe("handleCheckoutCompleted", () => {
       type: "subscription_grant",
       stripeEventId: "evt_1",
     }));
+  });
+
+  it("grants 12x the monthly tokens for an annual subscription on initial checkout", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_annual",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          mode: "subscription",
+          subscription: "sub_y",
+          metadata: { supabase_user_id: "u1", plan_key: "pro", interval: "year" },
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(annualStripeSub as never);
+
+    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 60000,
+        type: "subscription_grant",
+        description: expect.stringContaining("annual"),
+        metadata: expect.objectContaining({ interval: "year" }),
+      }),
+    );
   });
 
   it("uses session.subscription.id when given an object", async () => {
@@ -659,6 +777,223 @@ describe("handleCheckoutCompleted", () => {
   });
 });
 
+describe("handleCheckoutCompleted - extra coverage", () => {
+  it("falls back to monthly tokens when the price has an unknown interval", async () => {
+    const weeklyStripeSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: { interval: "week" } },
+            current_period_start: 1700000000,
+            current_period_end: 1700604800,
+          },
+        ],
+      },
+    };
+
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_weekly",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          mode: "subscription",
+          subscription: "sub_w",
+          metadata: { supabase_user_id: "u1", plan_key: "pro" },
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(weeklyStripeSub as never);
+    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 5000,
+        metadata: expect.objectContaining({ interval: "month" }),
+      }),
+    );
+  });
+
+  it("extracts latest_invoice when given as a string", async () => {
+    const subWithStringInvoice = {
+      ...(baseStripeSub as Record<string, unknown>),
+      latest_invoice: "in_initial",
+    };
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_initial_string_inv",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          mode: "subscription",
+          subscription: "sub_1",
+          metadata: { supabase_user_id: "u1", plan_key: "pro" },
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(subWithStringInvoice as never);
+    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ stripe_invoice_id: "in_initial" }),
+      }),
+    );
+  });
+
+  it("extracts latest_invoice when given as an expanded object", async () => {
+    const subWithObjectInvoice = {
+      ...(baseStripeSub as Record<string, unknown>),
+      latest_invoice: { id: "in_obj_initial" },
+    };
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_initial_obj_inv",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          mode: "subscription",
+          subscription: "sub_1",
+          metadata: { supabase_user_id: "u1", plan_key: "pro" },
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(subWithObjectInvoice as never);
+    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ stripe_invoice_id: "in_obj_initial" }),
+      }),
+    );
+  });
+
+  it("uses session.payment_intent (object form) on top-up grants", async () => {
+    const client = makeClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_topup_pi_obj",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_obj",
+          mode: "payment",
+          payment_intent: { id: "pi_obj" },
+          metadata: {
+            supabase_user_id: "u1",
+            pack_key: "pack_500",
+            tokens: "500",
+          },
+        },
+      },
+    };
+
+    await handleCheckoutCompleted(event as never);
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ stripe_payment_intent_id: "pi_obj" }),
+      }),
+    );
+  });
+
+  it("uses session.payment_intent (string form) on top-up grants", async () => {
+    const client = makeClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_topup_pi_str",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_str",
+          mode: "payment",
+          payment_intent: "pi_str",
+          metadata: {
+            supabase_user_id: "u1",
+            pack_key: "pack_500",
+            tokens: "500",
+          },
+        },
+      },
+    };
+
+    await handleCheckoutCompleted(event as never);
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ stripe_payment_intent_id: "pi_str" }),
+      }),
+    );
+  });
+
+  it("falls back to monthly tokens when the price has no recurring config", async () => {
+    const noRecurringSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: null },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_recurring",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          mode: "subscription",
+          subscription: "sub_nr",
+          metadata: { supabase_user_id: "u1", plan_key: "pro" },
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
+    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 5000 }),
+    );
+  });
+});
+
 describe("handleSubscriptionUpdated", () => {
   it("syncs subscription state", async () => {
     const client = makeClient();
@@ -709,6 +1044,39 @@ describe("handleInvoicePaymentSucceeded", () => {
     }));
   });
 
+  it("grants 12x monthly tokens on the annual renewal cycle", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_annual_renew",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          billing_reason: "subscription_cycle",
+          subscription: "sub_y",
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(annualStripeSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 60000,
+        description: expect.stringContaining("annual renewal"),
+        metadata: expect.objectContaining({ interval: "year" }),
+      }),
+    );
+  });
+
   it("uses subscription.id when given an object", async () => {
     const client = makeClient();
     client.__tables.subscriptions = makeChain({ data: null, error: null });
@@ -734,18 +1102,20 @@ describe("handleInvoicePaymentSucceeded", () => {
     expect(retrieve).toHaveBeenCalledWith("sub_obj");
   });
 
-  it("skips when billing_reason is not subscription_cycle (e.g. initial create)", async () => {
+  it("skips when billing_reason is unrelated (subscription_create / manual / threshold)", async () => {
     mockedCreateAdmin.mockReturnValue(makeClient() as never);
-    const event = {
-      id: "evt_create",
-      type: "invoice.payment_succeeded",
-      data: {
-        object: { billing_reason: "subscription_create", subscription: "sub_1" },
-      },
-    };
-    await handleInvoicePaymentSucceeded(event as never, {
-      retrieveSubscription: vi.fn(),
-    });
+    for (const reason of ["subscription_create", "manual", "subscription_threshold"]) {
+      const event = {
+        id: `evt_${reason}`,
+        type: "invoice.payment_succeeded",
+        data: {
+          object: { billing_reason: reason, subscription: "sub_1" },
+        },
+      };
+      await handleInvoicePaymentSucceeded(event as never, {
+        retrieveSubscription: vi.fn(),
+      });
+    }
     expect(mockedGrantTokens).not.toHaveBeenCalled();
   });
 
@@ -819,6 +1189,458 @@ describe("handleInvoicePaymentSucceeded", () => {
     });
     expect(mockedGrantTokens).not.toHaveBeenCalled();
   });
+
+  it("grants the token delta on an upgrade (subscription_update)", async () => {
+    // Pro→Scale mid-cycle: previous grant was 5,000 (Pro monthly), new tier
+    // is 20,000 (Scale monthly). Should grant 15,000.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    let planLookups = 0;
+    client.__tables.plans = {
+      ...makeChain(),
+      maybeSingle: vi.fn().mockImplementation(() => {
+        planLookups += 1;
+        return Promise.resolve({
+          data: { key: "scale", name: "Scale", monthly_tokens: 20000 },
+          error: null,
+        });
+      }),
+    } as never;
+    client.__tables.token_transactions = makeChain({
+      data: { amount: 5000, metadata: { plan_key: "pro" } },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_upgrade",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_upgrade_proration",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+
+    const upgradedSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_scale", recurring: { interval: "month" } },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(upgradedSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(planLookups).toBeGreaterThan(0);
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 15000,
+        type: "subscription_grant",
+        description: expect.stringContaining("Upgraded to Scale"),
+        stripeEventId: "evt_upgrade",
+        metadata: expect.objectContaining({
+          grant_kind: "upgrade_proration",
+          previous_plan_key: "pro",
+          previous_cycle_tokens: 5000,
+          new_cycle_tokens: 20000,
+        }),
+      }),
+    );
+  });
+
+  it("scales the upgrade delta correctly for an annual subscription", async () => {
+    // Annual Pro (60,000 prior grant) → Annual Scale (240,000). Delta = 180,000.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = {
+      ...makeChain(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { key: "scale", name: "Scale", monthly_tokens: 20000 },
+        error: null,
+      }),
+    } as never;
+    client.__tables.token_transactions = makeChain({
+      data: { amount: 60000, metadata: { plan_key: "pro" } },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_upgrade_annual",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_annual_upgrade",
+          billing_reason: "subscription_update",
+          subscription: "sub_y",
+        },
+      },
+    };
+
+    const annualScaleSub = {
+      ...(annualStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_scale_year", recurring: { interval: "year" } },
+            current_period_start: 1700000000,
+            current_period_end: 1731536000,
+          },
+        ],
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(annualScaleSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 180000,
+        metadata: expect.objectContaining({
+          interval: "year",
+          previous_cycle_tokens: 60000,
+          new_cycle_tokens: 240000,
+        }),
+      }),
+    );
+  });
+
+  it("skips the grant on a downgrade (subscription_update with negative delta)", async () => {
+    // Scale → Pro mid-cycle: previous grant 20,000, new tier 5,000. No grant.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: { amount: 20000, metadata: { plan_key: "scale" } },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_downgrade",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_downgrade",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    expect(mockedGrantTokens).not.toHaveBeenCalled();
+  });
+
+  it("skips when the upgrade delta is zero (same-tier proration)", async () => {
+    // No-op switch (e.g. price update with same monthly_tokens). Skip grant.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: { amount: 5000, metadata: { plan_key: "pro" } },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_same_tier",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_same",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    expect(mockedGrantTokens).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing previous grant as zero on subscription_update", async () => {
+    // Edge case: subscription_update fires without a prior grant on this sub
+    // (rare; e.g. the initial grant came from checkout.session.completed and
+    // metadata search returned nothing). Treat the previous baseline as zero.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_prior",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_first",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 5000,
+        metadata: expect.objectContaining({
+          previous_plan_key: null,
+          previous_cycle_tokens: 0,
+        }),
+      }),
+    );
+  });
+
+  it("propagates errors from the previous-grant lookup", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: null,
+      error: { message: "lookup failed" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_err_prev",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_err",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+
+    await expect(
+      handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve }),
+    ).rejects.toEqual({ message: "lookup failed" });
+  });
+
+  it("reads subscription id from invoice.parent when given as an expanded object", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_modern_obj",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_modern_obj",
+          billing_reason: "subscription_cycle",
+          parent: {
+            type: "subscription_details",
+            subscription_details: { subscription: { id: "sub_obj_modern" } },
+          },
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
+
+    expect(retrieve).toHaveBeenCalledWith("sub_obj_modern");
+  });
+
+  it("treats a previous grant with null/sparse metadata as zero baseline", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    // Most recent grant has metadata=null and amount=null — exercises both
+    // `(metadata ?? {})` and `typeof amount === "number"` fallbacks.
+    client.__tables.token_transactions = makeChain({
+      data: { amount: null, metadata: null },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_sparse_prev",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_sparse",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 5000,
+        metadata: expect.objectContaining({
+          previous_plan_key: null,
+          previous_cycle_tokens: 0,
+        }),
+      }),
+    );
+  });
+
+  it("uses interval='month' on a subscription_update with no recurring config", async () => {
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const noRecurringSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: null },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+
+    const event = {
+      id: "evt_upgrade_no_recurring",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_no_recurring",
+          billing_reason: "subscription_update",
+          subscription: "sub_1",
+        },
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
+
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ interval: "month" }),
+      }),
+    );
+  });
+
+  it("reads subscription id from invoice.parent.subscription_details (Stripe API 2024-11+)", async () => {
+    // Modern Stripe API moved `invoice.subscription` into
+    // `invoice.parent.subscription_details.subscription`. The handler must
+    // pick it up from there, not from the (now-undefined) legacy field.
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_modern_api",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: {
+          id: "in_modern",
+          billing_reason: "subscription_cycle",
+          // legacy field absent in modern API
+          parent: {
+            type: "subscription_details",
+            subscription_details: { subscription: "sub_modern" },
+          },
+        },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
+
+    expect(retrieve).toHaveBeenCalledWith("sub_modern");
+    expect(mockedGrantTokens).toHaveBeenCalled();
+  });
+
+  it("falls back to interval='month' on a renewal when recurring is missing", async () => {
+    const noRecurringSub = {
+      ...(baseStripeSub as Record<string, unknown>),
+      items: {
+        data: [
+          {
+            price: { id: "price_pro", recurring: null },
+            current_period_start: 1700000000,
+            current_period_end: 1702592000,
+          },
+        ],
+      },
+    };
+
+    const client = makeClient();
+    client.__tables.subscriptions = makeChain({ data: null, error: null });
+    client.__tables.plans = makeChain({
+      data: { key: "pro", name: "Pro", monthly_tokens: 5000 },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_renew_no_recurring",
+      type: "invoice.payment_succeeded",
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: "sub_nr_renew", id: "in_nr" },
+      },
+    };
+
+    const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
+    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 5000,
+        metadata: expect.objectContaining({ interval: "month" }),
+      }),
+    );
+  });
 });
 
 describe("handleInvoicePaymentFailed", () => {
@@ -860,6 +1682,31 @@ describe("handleInvoicePaymentFailed", () => {
     expect(eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_obj");
   });
 
+  it("reads subscription id from invoice.parent on modern Stripe APIs", async () => {
+    const update = vi.fn().mockReturnThis();
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const client = {
+      from: vi.fn().mockReturnValue({ update, eq }),
+    } as unknown as MockClient;
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_fail_modern",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          parent: {
+            type: "subscription_details",
+            subscription_details: { subscription: "sub_modern" },
+          },
+        },
+      },
+    };
+
+    await handleInvoicePaymentFailed(event as never);
+    expect(eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_modern");
+  });
+
   it("does nothing when subscription is missing", async () => {
     const update = vi.fn();
     const client = { from: vi.fn().mockReturnValue({ update }) } as unknown as MockClient;
@@ -889,6 +1736,720 @@ describe("handleInvoicePaymentFailed", () => {
       data: { object: { subscription: "sub_1" } },
     };
     await expect(handleInvoicePaymentFailed(event as never)).rejects.toEqual({ message: "boom" });
+  });
+});
+
+describe("handleChargeRefunded", () => {
+  it("revokes proportional tokens for a subscription invoice refund", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 5000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 100 });
+
+    const event = {
+      id: "evt_refund_full",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_1",
+          customer: "cus_1",
+          invoice: "in_1",
+          payment_intent: "pi_1",
+          amount: 7900,
+          amount_refunded: 7900,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+
+    expect(client.__tables.stripe_customers.eq).toHaveBeenCalledWith(
+      "stripe_customer_id",
+      "cus_1",
+    );
+    expect(client.__tables.token_transactions.filter).toHaveBeenCalledWith(
+      "metadata->>stripe_invoice_id",
+      "eq",
+      "in_1",
+    );
+    expect(mockedRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 5000,
+        stripeEventId: "evt_refund_full",
+        metadata: expect.objectContaining({
+          stripe_charge_id: "ch_1",
+          stripe_invoice_id: "in_1",
+          total_granted: 5000,
+          amount_refunded_cents: 7900,
+        }),
+      }),
+    );
+  });
+
+  it("scales the revocation when the refund is partial", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 5000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 100 });
+
+    const event = {
+      id: "evt_refund_partial",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_partial",
+          customer: "cus_1",
+          invoice: "in_1",
+          amount: 7900,
+          amount_refunded: 1580,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+
+    expect(mockedRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1000 }),
+    );
+  });
+
+  it("uses payment_intent metadata when invoice is missing (top-ups)", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 2000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 2000, deducted: 2000, balance: 0 });
+
+    const event = {
+      id: "evt_refund_topup",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_t",
+          customer: "cus_1",
+          invoice: null,
+          payment_intent: "pi_42",
+          amount: 1000,
+          amount_refunded: 1000,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+
+    expect(client.__tables.token_transactions.filter).toHaveBeenCalledWith(
+      "metadata->>stripe_payment_intent_id",
+      "eq",
+      "pi_42",
+    );
+    expect(mockedRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 2000 }),
+    );
+  });
+
+  it("does nothing when the customer can't be linked to a user", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_user",
+      type: "charge.refunded",
+      data: {
+        object: { id: "ch_x", customer: "cus_unknown", amount: 100, amount_refunded: 100 },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no grants are found for the charge", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: [], error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_grants",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_x",
+          customer: "cus_1",
+          invoice: "in_x",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("ignores events without a customer", async () => {
+    mockedCreateAdmin.mockReturnValue(makeClient() as never);
+
+    const event = {
+      id: "evt_nocust",
+      type: "charge.refunded",
+      data: { object: { id: "ch_n", customer: null, amount: 100, amount_refunded: 100 } },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleChargeRefunded - extra coverage", () => {
+  it("does nothing when the charge has neither invoice nor payment_intent", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_no_link",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_orphan",
+          customer: "cus_1",
+          invoice: null,
+          payment_intent: null,
+          amount: 1000,
+          amount_refunded: 1000,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("treats missing amount fields as zero (and short-circuits)", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 1000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_missing_amounts",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_zero",
+          customer: "cus_1",
+          invoice: "in_x",
+          // amount and amount_refunded omitted entirely
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("propagates errors from the customer lookup", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: null,
+      error: { message: "lookup failed" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_err_cust",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_err",
+          customer: "cus_1",
+          invoice: "in_e",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await expect(handleChargeRefunded(event as never)).rejects.toEqual({
+      message: "lookup failed",
+    });
+  });
+
+  it("propagates errors from the grants sum", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: null,
+      error: { message: "sum failed" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_err_sum",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_err_sum",
+          customer: "cus_1",
+          invoice: "in_x",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await expect(handleChargeRefunded(event as never)).rejects.toEqual({
+      message: "sum failed",
+    });
+  });
+
+  it("treats null sum data and null amount rows as zero", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      // null data simulates a rare PostgREST result with no rows; one row with
+      // a null amount exercises the `(row.amount ?? 0)` fallback.
+      data: [{ amount: null }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_null_data",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_null",
+          customer: "cus_1",
+          invoice: "in_null",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("treats a null filter() data response as an empty grant set", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_null_filter",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_nf",
+          customer: "cus_1",
+          invoice: "in_nf",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when amount_refunded is zero (revoke calculates to zero)", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 5000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_zero_refund",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_zero",
+          customer: "cus_1",
+          invoice: "in_1",
+          amount: 7900,
+          amount_refunded: 0,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("handles charge.invoice given as an expanded object", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 5000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 0 });
+
+    const event = {
+      id: "evt_obj_invoice",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_obj",
+          customer: "cus_1",
+          invoice: { id: "in_obj" },
+          amount: 7900,
+          amount_refunded: 7900,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(client.__tables.token_transactions.filter).toHaveBeenCalledWith(
+      "metadata->>stripe_invoice_id",
+      "eq",
+      "in_obj",
+    );
+  });
+
+  it("handles customer given as an expanded object", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: [], error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const event = {
+      id: "evt_cust_obj",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_co",
+          customer: { id: "cus_1" },
+          invoice: "in_x",
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
+    };
+
+    await handleChargeRefunded(event as never);
+    expect(client.__tables.stripe_customers.eq).toHaveBeenCalledWith(
+      "stripe_customer_id",
+      "cus_1",
+    );
+  });
+});
+
+describe("handleChargeDisputeClosed", () => {
+  it("revokes the full grant when a dispute is lost", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 5000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 0 });
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_1",
+      customer: "cus_1",
+      invoice: "in_1",
+    });
+
+    const event = {
+      id: "evt_dispute_lost",
+      type: "charge.dispute.closed",
+      data: {
+        object: {
+          id: "dp_1",
+          status: "lost",
+          charge: "ch_1",
+        },
+      },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+
+    expect(retrieveCharge).toHaveBeenCalledWith("ch_1");
+    expect(mockedRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 5000,
+        stripeEventId: "evt_dispute_lost",
+        metadata: expect.objectContaining({
+          stripe_dispute_id: "dp_1",
+          dispute_status: "lost",
+        }),
+      }),
+    );
+  });
+
+  it("does nothing when the dispute is won", async () => {
+    mockedCreateAdmin.mockReturnValue(makeClient() as never);
+    const retrieveCharge = vi.fn();
+
+    const event = {
+      id: "evt_dispute_won",
+      type: "charge.dispute.closed",
+      data: {
+        object: { id: "dp_2", status: "won", charge: "ch_2" },
+      },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+
+    expect(retrieveCharge).not.toHaveBeenCalled();
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when retrieveCharge isn't provided", async () => {
+    mockedCreateAdmin.mockReturnValue(makeClient() as never);
+
+    const event = {
+      id: "evt_dispute_norpc",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_3", status: "lost", charge: "ch_3" } },
+    };
+
+    await handleChargeDisputeClosed(event as never);
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the dispute has no charge id", async () => {
+    mockedCreateAdmin.mockReturnValue(makeClient() as never);
+    const retrieveCharge = vi.fn();
+
+    const event = {
+      id: "evt_dispute_nocharge",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_x", status: "lost", charge: null } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(retrieveCharge).not.toHaveBeenCalled();
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the underlying charge has no customer", async () => {
+    mockedCreateAdmin.mockReturnValue(makeClient() as never);
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_orphan",
+      customer: null,
+      invoice: "in_orphan",
+    });
+
+    const event = {
+      id: "evt_dispute_orphan",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_orphan", status: "lost", charge: "ch_orphan" } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the customer can't be linked to a user", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_unlinked",
+      customer: "cus_unlinked",
+      invoice: "in_unlinked",
+    });
+
+    const event = {
+      id: "evt_dispute_unlinked",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_unlinked", status: "lost", charge: "ch_unlinked" } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("falls back to payment_intent linkage when the dispute has no invoice", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 2000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 2000, deducted: 2000, balance: 0 });
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_topup",
+      customer: "cus_1",
+      invoice: null,
+      payment_intent: "pi_topup",
+    });
+
+    const event = {
+      id: "evt_dispute_pi",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_pi", status: "lost", charge: "ch_topup" } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+
+    expect(client.__tables.token_transactions.filter).toHaveBeenCalledWith(
+      "metadata->>stripe_payment_intent_id",
+      "eq",
+      "pi_topup",
+    );
+    expect(mockedRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 2000 }),
+    );
+  });
+
+  it("does nothing when no grants are linked to the disputed charge", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({ data: [], error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_empty",
+      customer: "cus_1",
+      invoice: "in_empty",
+    });
+
+    const event = {
+      id: "evt_dispute_empty",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_empty", status: "lost", charge: "ch_empty" } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the charge has neither invoice nor payment_intent", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_unlinked",
+      customer: "cus_1",
+      invoice: null,
+      payment_intent: null,
+    });
+
+    const event = {
+      id: "evt_dispute_no_link",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_no_link", status: "lost", charge: "ch_unlinked" } },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(mockedRecordRefund).not.toHaveBeenCalled();
+  });
+
+  it("handles dispute.charge given as an expanded object", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 1000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_obj_dispute",
+      customer: { id: "cus_1" },
+      invoice: { id: "in_obj_dispute" },
+    });
+
+    const event = {
+      id: "evt_dispute_full_obj",
+      type: "charge.dispute.closed",
+      data: {
+        object: {
+          id: "dp_obj",
+          status: "lost",
+          charge: { id: "ch_obj_dispute" },
+        },
+      },
+    };
+
+    await handleChargeDisputeClosed(event as never, { retrieveCharge });
+    expect(retrieveCharge).toHaveBeenCalledWith("ch_obj_dispute");
+    expect(mockedRecordRefund).toHaveBeenCalled();
   });
 });
 
@@ -964,6 +2525,66 @@ describe("handleWebhookEvent", () => {
     };
     await handleWebhookEvent(event as never);
     expect(update).toHaveBeenCalledWith({ status: "past_due" });
+  });
+
+  it("dispatches charge.refunded", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 1000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+
+    const event = {
+      id: "evt_refund_dispatch",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_d",
+          customer: "cus_1",
+          invoice: "in_d",
+          amount: 1000,
+          amount_refunded: 1000,
+        },
+      },
+    };
+
+    await handleWebhookEvent(event as never);
+    expect(mockedRecordRefund).toHaveBeenCalled();
+  });
+
+  it("dispatches charge.dispute.closed (lost)", async () => {
+    const client = makeClient();
+    client.__tables.stripe_customers = makeChain({
+      data: { user_id: "u1" },
+      error: null,
+    });
+    client.__tables.token_transactions = makeChain({
+      data: [{ amount: 1000 }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: "ch_lost",
+      customer: "cus_1",
+      invoice: "in_lost",
+    });
+
+    const event = {
+      id: "evt_dispute_dispatch",
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_lost", status: "lost", charge: "ch_lost" } },
+    };
+
+    await handleWebhookEvent(event as never, { retrieveCharge });
+    expect(mockedRecordRefund).toHaveBeenCalled();
   });
 
   it("ignores unknown event types", async () => {

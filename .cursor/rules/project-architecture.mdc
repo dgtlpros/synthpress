@@ -66,9 +66,15 @@ Reusable backend logic that multiple server actions or route handlers might need
 - Pure functions that receive a Supabase client or create their own.
 - Handle complex multi-step operations, cross-table logic, or business rules.
 - Naming: `project-service.ts`, `article-service.ts`, `billing-service.ts`.
+- **Every service file starts with `import "server-only";`** so any client-side
+  import fails at build time. See `nextjs-supabase` rule for the full list.
+- Race-prone read-then-write logic (counters, balances) goes through a
+  Postgres `security definer` RPC, not separate JS queries. See
+  `supabase-database` rule for the atomic RPC pattern.
 
 ```ts
 // src/services/project-service.ts
+import "server-only";
 import { createClient } from "@/lib/supabase/server";
 
 export async function createProjectWithDefaults(name: string, userId: string) {

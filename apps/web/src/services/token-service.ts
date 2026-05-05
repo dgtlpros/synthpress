@@ -1,5 +1,6 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables } from "@/lib/supabase/database.types";
+import type { Database, Tables, Json } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type TokenTransaction = Tables<"token_transactions">;
@@ -9,6 +10,12 @@ export type TokenGrantType =
   | "top_up_purchase"
   | "refund"
   | "adjustment";
+
+/**
+ * Types accepted by the `grant_tokens` Postgres RPC. The DB enforces this
+ * separately, but we keep it in TS too so callers fail at compile time.
+ */
+export type GrantTokensType = Exclude<TokenGrantType, "refund">;
 
 type Client = SupabaseClient<Database>;
 
@@ -42,16 +49,21 @@ export async function getRecentTransactions(
 }
 
 /**
- * Grants tokens to a user, increment-style. Idempotent when stripeEventId is
- * provided: a duplicate event is detected by the unique stripe_event_id index
- * and the balance is not double-incremented.
+ * Grants tokens to a user, increment-style. Atomic: the audit-log insert and
+ * the balance increment happen in a single Postgres transaction inside the
+ * `grant_tokens` RPC, so concurrent webhook deliveries can't lose grants
+ * due to a stale-balance race.
  *
- * Returns the new balance, or null if the grant was skipped due to duplicate.
+ * Idempotent when `stripeEventId` is provided: a duplicate event is detected
+ * by the unique `token_transactions.stripe_event_id` index and the balance
+ * is not double-incremented.
+ *
+ * Returns the new balance, or null when the event was already processed.
  */
 export async function grantTokens(params: {
   userId: string;
   amount: number;
-  type: TokenGrantType;
+  type: GrantTokensType;
   description?: string;
   stripeEventId?: string;
   metadata?: Record<string, unknown>;
@@ -63,49 +75,63 @@ export async function grantTokens(params: {
 
   const supabase = params.client ?? createAdminClient();
 
-  if (params.stripeEventId) {
-    const { data: existing } = await supabase
-      .from("token_transactions")
-      .select("id")
-      .eq("stripe_event_id", params.stripeEventId)
-      .maybeSingle();
-
-    if (existing) {
-      return null;
-    }
-  }
-
-  const { error: txError } = await supabase.from("token_transactions").insert({
-    user_id: params.userId,
-    amount: params.amount,
-    type: params.type,
-    description: params.description ?? null,
-    stripe_event_id: params.stripeEventId ?? null,
-    metadata: (params.metadata ?? {}) as Tables<"token_transactions">["metadata"],
+  const { data, error } = await supabase.rpc("grant_tokens", {
+    p_user_id: params.userId,
+    p_amount: params.amount,
+    p_type: params.type,
+    p_description: params.description ?? undefined,
+    p_stripe_event_id: params.stripeEventId ?? undefined,
+    p_metadata: (params.metadata ?? {}) as Json,
   });
 
-  if (txError) {
-    if (txError.code === "23505") {
-      return null;
-    }
-    throw txError;
+  if (error) throw error;
+  return data ?? null;
+}
+
+/**
+ * Records a refund/chargeback of a previous grant. Atomic: the audit-log
+ * insert, the balance lock, and the decrement all happen in a single
+ * Postgres transaction inside the `record_token_refund` RPC. The balance
+ * is clamped at zero — we never go negative — and the audit row is always
+ * written so the refund is observable even when there's nothing left to
+ * deduct.
+ *
+ * Idempotent on `stripeEventId`. Returns `null` when the event was already
+ * processed; otherwise `{ requested, deducted, balance }` describing what
+ * actually happened.
+ */
+export async function recordTokenRefund(params: {
+  userId: string;
+  amount: number;
+  description?: string;
+  stripeEventId?: string;
+  metadata?: Record<string, unknown>;
+  client?: Client;
+}): Promise<{ requested: number; deducted: number; balance: number } | null> {
+  if (params.amount <= 0) {
+    throw new Error("recordTokenRefund: amount must be positive");
   }
 
-  const { data: existingBalance } = await supabase
-    .from("token_balances")
-    .select("balance")
-    .eq("user_id", params.userId)
-    .maybeSingle();
+  const supabase = params.client ?? createAdminClient();
 
-  const newBalance = (existingBalance?.balance ?? 0) + params.amount;
+  const { data, error } = await supabase.rpc("record_token_refund", {
+    p_user_id: params.userId,
+    p_amount: params.amount,
+    p_stripe_event_id: params.stripeEventId ?? undefined,
+    p_description: params.description ?? undefined,
+    p_metadata: (params.metadata ?? {}) as Json,
+  });
 
-  const { error: balError } = await supabase
-    .from("token_balances")
-    .upsert({ user_id: params.userId, balance: newBalance }, { onConflict: "user_id" });
+  if (error) throw error;
+  if (data === null) return null;
 
-  if (balError) throw balError;
-
-  return newBalance;
+  // The RPC returns `jsonb` shaped as { requested, deducted, balance }.
+  const result = data as {
+    requested: number;
+    deducted: number;
+    balance: number;
+  };
+  return result;
 }
 
 /**

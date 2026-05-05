@@ -40,6 +40,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // `server-only` throws by design when imported outside a React Server
+      // Components environment so Next.js fails the client build if a server
+      // module leaks into the browser. Vitest isn't an RSC env, so we stub it.
+      "server-only": path.resolve(__dirname, "./src/test/server-only-stub.ts"),
     },
   },
 });

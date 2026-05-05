@@ -3,32 +3,43 @@
 import { useBillingActions } from "@/hooks/useBillingActions";
 import { Button } from "@/components/atoms/Button";
 
+export type BillingActionsMode = "manage" | "resume";
+
 export interface BillingActionsConnectorProps {
+  mode?: BillingActionsMode;
   variant?: "primary" | "secondary";
   label?: string;
   className?: string;
 }
 
+const defaultLabels: Record<BillingActionsMode, string> = {
+  manage: "Manage subscription",
+  resume: "Resume subscription",
+};
+
 export function BillingActionsConnector({
-  variant = "secondary",
-  label = "Manage subscription",
+  mode = "manage",
+  variant,
+  label,
   className,
 }: BillingActionsConnectorProps) {
-  const { openPortal, isOpeningPortal, portalError } = useBillingActions();
+  const { openPortal, isOpeningPortal, portalError, resume, isResuming, resumeError } =
+    useBillingActions();
+
+  const buttonLabel = label ?? defaultLabels[mode];
+  const buttonVariant = variant ?? (mode === "resume" ? "primary" : "secondary");
+  const onClick = mode === "resume" ? resume : openPortal;
+  const loading = mode === "resume" ? isResuming : isOpeningPortal;
+  const error = mode === "resume" ? resumeError : portalError;
 
   return (
     <div className={className}>
-      <Button
-        type="button"
-        variant={variant}
-        onClick={openPortal}
-        loading={isOpeningPortal}
-      >
-        {label}
+      <Button type="button" variant={buttonVariant} onClick={onClick} loading={loading}>
+        {buttonLabel}
       </Button>
-      {portalError && (
+      {error && (
         <p className="mt-2 text-xs text-error" role="alert">
-          {portalError}
+          {error}
         </p>
       )}
     </div>

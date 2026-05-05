@@ -28,4 +28,12 @@ describe("TokenBadge", () => {
       unmount();
     }
   });
+
+  it("renders all size variants", () => {
+    for (const size of ["sm", "md", "lg"] as const) {
+      const { unmount } = render(<TokenBadge balance={100} size={size} />);
+      expect(screen.getByText(/tokens/)).toBeInTheDocument();
+      unmount();
+    }
+  });
 });

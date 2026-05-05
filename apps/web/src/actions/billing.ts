@@ -1,11 +1,17 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getOrCreateStripeCustomer, getPlanByKey } from "@/services/billing-service";
+import {
+  getActiveSubscription,
+  getOrCreateStripeCustomer,
+  getPlanByKey,
+} from "@/services/billing-service";
 import {
   createPortalSession,
   createSubscriptionCheckoutSession,
   createTopUpCheckoutSession,
+  resumeSubscription as stripeResumeSubscription,
 } from "@/services/stripe-service";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -19,7 +25,17 @@ export interface PortalSessionResult {
   error?: string;
 }
 
-export async function createSubscriptionCheckout(planKey: string): Promise<CheckoutSessionResult> {
+export interface ResumeSubscriptionResult {
+  ok?: true;
+  error?: string;
+}
+
+export type CheckoutInterval = "month" | "year";
+
+export async function createSubscriptionCheckout(
+  planKey: string,
+  interval: CheckoutInterval = "month",
+): Promise<CheckoutSessionResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -34,7 +50,12 @@ export async function createSubscriptionCheckout(planKey: string): Promise<Check
   if (!plan) {
     return { error: `Unknown plan: ${planKey}` };
   }
-  if (!plan.stripe_price_id) {
+
+  const priceId = interval === "year" ? plan.stripe_annual_price_id : plan.stripe_price_id;
+  if (!priceId) {
+    if (interval === "year") {
+      return { error: `Plan "${plan.name}" doesn't have an annual price.` };
+    }
     return { error: `Plan "${plan.name}" is not currently for sale.` };
   }
 
@@ -47,9 +68,10 @@ export async function createSubscriptionCheckout(planKey: string): Promise<Check
 
     const session = await createSubscriptionCheckoutSession({
       customerId,
-      priceId: plan.stripe_price_id,
+      priceId,
       userId: user.id,
       planKey: plan.key,
+      interval,
     });
 
     return { clientSecret: session.clientSecret };
@@ -127,6 +149,38 @@ export async function createBillingPortal(): Promise<PortalSessionResult> {
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Could not open billing portal.",
+    };
+  }
+}
+
+export async function resumeSubscription(): Promise<ResumeSubscriptionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "You must be signed in to resume a subscription." };
+  }
+
+  const admin = createAdminClient();
+
+  try {
+    const subscription = await getActiveSubscription(user.id, admin);
+    if (!subscription) {
+      return { error: "No active subscription to resume." };
+    }
+    if (!subscription.cancel_at_period_end) {
+      return { error: "This subscription is not scheduled for cancellation." };
+    }
+
+    await stripeResumeSubscription(subscription.stripe_subscription_id);
+    revalidatePath("/account/billing");
+    revalidatePath("/account");
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not resume subscription.",
     };
   }
 }

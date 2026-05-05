@@ -11,7 +11,7 @@ export function Hero({ className }: HeroProps) {
       <div className="mx-auto max-w-6xl text-center">
         <div className="mx-auto mb-8 flex justify-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="SynthPress mascot" className="h-24 w-auto drop-shadow-lg" />
+          <img src="/synthpress-logo-icon.svg" alt="SynthPress mascot" className="h-32 w-auto drop-shadow-lg sm:h-40" />
         </div>
 
         <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-foreground sm:text-6xl">

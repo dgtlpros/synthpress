@@ -1,6 +1,6 @@
 ---
 description: Next.js 16 App Router patterns, Supabase auth, server rendering conventions
-globs: apps/web/src/app/**/*.{ts,tsx}
+globs: apps/web/src/app/**/*.{ts,tsx},apps/web/src/services/**/*.ts,apps/web/src/lib/supabase/**/*.ts
 alwaysApply: false
 ---
 
@@ -21,6 +21,7 @@ All Supabase interactions go through one of these server-side paths:
 | Server Components | `await createClient()` from `@/lib/supabase/server` |
 | Server Actions | `await createClient()` from `@/lib/supabase/server` |
 | Route Handlers | `await createClient()` from `@/lib/supabase/server` |
+| Webhook routes | `createAdminClient()` from `@/lib/supabase/admin` (service-role) |
 | Middleware | `updateSession()` from `@/lib/supabase/middleware` |
 | Client Components | **Call a server action.** Never import Supabase. |
 
@@ -37,6 +38,29 @@ import { signInWithMagicLink } from "@/app/(auth)/actions";
 
 const result = await signInWithMagicLink(email);
 ```
+
+## CRITICAL: `import "server-only"` on every server-only module
+
+Every file that touches secrets (service-role key, Stripe secret key, Stripe SDK,
+admin Supabase client, anything in `services/`) **must** start with:
+
+```ts
+import "server-only";
+```
+
+The package errors at build time if a `"use client"` module ever imports it
+(transitively). Required at the top of:
+
+- `apps/web/src/lib/supabase/admin.ts`
+- `apps/web/src/lib/supabase/server.ts`
+- `apps/web/src/services/*.ts` (every service file)
+- Any new module that reads `process.env.*_SECRET_KEY` or `*_SERVICE_ROLE_KEY`
+
+Vitest runs in Node and isn't a React Server Components environment, so the
+real `server-only` package would throw inside tests. The `vitest.config.ts`
+aliases it to `src/test/server-only-stub.ts` (a no-op) — leave that alias in
+place when you add new server-only files. Do not write tests that work around
+the rule; they should pass through the alias.
 
 ## Server-First Rendering
 
@@ -132,6 +156,38 @@ import { createProjectWithDefaults } from "@/services/project-service";
 
 export async function createProject(name: string) {
   // validate, get user, call service, return result
+}
+```
+
+## Webhook Routes
+
+Webhook handlers (Stripe, etc.) live under `app/api/webhooks/<provider>/route.ts`
+and follow these rules:
+
+- **`runtime = "nodejs"` + `dynamic = "force-dynamic"`** at the top — these
+  routes need raw bodies and must not be cached.
+- **Skip middleware auth** by adding the path prefix to `middlewareSkipPrefixes`
+  in `apps/web/middleware.ts`. The handler verifies the provider's signature
+  itself; running Supabase auth on incoming webhooks would reject them.
+- **Always verify the signature first**, then dispatch to a handler in
+  `services/`. The handler uses the service-role client (`createAdminClient`)
+  because RLS forbids `authenticated` writes to billing tables.
+- **Idempotency belongs in the service**, not the route. Pass `event.id`
+  through to grant/refund functions which short-circuit duplicates via the
+  `stripe_event_id` unique constraint.
+
+```ts
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(request: NextRequest) {
+  const signature = request.headers.get("stripe-signature");
+  if (!signature) return NextResponse.json({ error: "..." }, { status: 400 });
+
+  const rawBody = await request.text();
+  const event = await verifyWebhook({ rawBody, signature });
+  await handleWebhookEvent(event, { /* SDK callbacks */ });
+  return NextResponse.json({ received: true });
 }
 ```
 

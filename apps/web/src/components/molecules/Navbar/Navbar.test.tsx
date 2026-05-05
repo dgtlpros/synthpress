@@ -10,11 +10,15 @@ describe("Navbar", () => {
     expect(screen.getByAltText("SynthPress")).toBeInTheDocument();
   });
 
-  it("renders nav links", () => {
-    render(<Navbar />);
-    expect(screen.getByText("Features")).toBeInTheDocument();
-    expect(screen.getByText("How It Works")).toBeInTheDocument();
-    expect(screen.getByText("Pricing")).toBeInTheDocument();
+  describe("nav links", () => {
+    it.each([
+      ["Features", "/#features"],
+      ["How It Works", "/#how-it-works"],
+      ["Pricing", "/pricing"],
+    ])("links %s to %s", (label, href) => {
+      render(<Navbar />);
+      expect(screen.getByText(label).closest("a")).toHaveAttribute("href", href);
+    });
   });
 
   describe("logged out (no user)", () => {

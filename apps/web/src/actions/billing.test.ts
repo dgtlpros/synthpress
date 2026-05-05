@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("next/cache", () => ({
+  revalidatePath: vi.fn(),
+}));
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
@@ -9,6 +13,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 vi.mock("@/services/billing-service", () => ({
+  getActiveSubscription: vi.fn(),
   getOrCreateStripeCustomer: vi.fn(),
   getPlanByKey: vi.fn(),
 }));
@@ -17,11 +22,14 @@ vi.mock("@/services/stripe-service", () => ({
   createSubscriptionCheckoutSession: vi.fn(),
   createTopUpCheckoutSession: vi.fn(),
   createPortalSession: vi.fn(),
+  resumeSubscription: vi.fn(),
 }));
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  getActiveSubscription,
   getOrCreateStripeCustomer,
   getPlanByKey,
 } from "@/services/billing-service";
@@ -29,20 +37,25 @@ import {
   createSubscriptionCheckoutSession,
   createTopUpCheckoutSession,
   createPortalSession,
+  resumeSubscription as stripeResumeSubscription,
 } from "@/services/stripe-service";
 import {
   createSubscriptionCheckout,
   createTopUpCheckout,
   createBillingPortal,
+  resumeSubscription,
 } from "./billing";
 
+const mockedRevalidatePath = vi.mocked(revalidatePath);
 const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
+const mockedGetActiveSub = vi.mocked(getActiveSubscription);
 const mockedGetOrCreate = vi.mocked(getOrCreateStripeCustomer);
 const mockedGetPlanByKey = vi.mocked(getPlanByKey);
 const mockedSubCheckout = vi.mocked(createSubscriptionCheckoutSession);
 const mockedTopUpCheckout = vi.mocked(createTopUpCheckoutSession);
 const mockedPortal = vi.mocked(createPortalSession);
+const mockedStripeResume = vi.mocked(stripeResumeSubscription);
 
 function mockSupabase(user: { id: string; email: string } | null) {
   mockedCreateClient.mockResolvedValue({
@@ -83,17 +96,19 @@ describe("createSubscriptionCheckout", () => {
       key: "pro",
       name: "Pro",
       stripe_price_id: null,
+      stripe_annual_price_id: null,
     } as never);
     const result = await createSubscriptionCheckout("pro");
     expect(result.error).toMatch(/not currently for sale/);
   });
 
-  it("creates checkout and returns clientSecret", async () => {
+  it("creates a monthly checkout by default", async () => {
     mockSupabase({ id: "u1", email: "u@test.com" });
     mockedGetPlanByKey.mockResolvedValue({
       key: "pro",
       name: "Pro",
-      stripe_price_id: "price_pro",
+      stripe_price_id: "price_pro_month",
+      stripe_annual_price_id: "price_pro_year",
     } as never);
     mockedGetOrCreate.mockResolvedValue("cus_1");
     mockedSubCheckout.mockResolvedValue({ id: "cs_1", clientSecret: "secret_1" });
@@ -102,10 +117,45 @@ describe("createSubscriptionCheckout", () => {
     expect(result).toEqual({ clientSecret: "secret_1" });
     expect(mockedSubCheckout).toHaveBeenCalledWith({
       customerId: "cus_1",
-      priceId: "price_pro",
+      priceId: "price_pro_month",
       userId: "u1",
       planKey: "pro",
+      interval: "month",
     });
+  });
+
+  it("creates an annual checkout when interval=year", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetPlanByKey.mockResolvedValue({
+      key: "pro",
+      name: "Pro",
+      stripe_price_id: "price_pro_month",
+      stripe_annual_price_id: "price_pro_year",
+    } as never);
+    mockedGetOrCreate.mockResolvedValue("cus_1");
+    mockedSubCheckout.mockResolvedValue({ id: "cs_y", clientSecret: "secret_y" });
+
+    const result = await createSubscriptionCheckout("pro", "year");
+    expect(result).toEqual({ clientSecret: "secret_y" });
+    expect(mockedSubCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priceId: "price_pro_year",
+        interval: "year",
+      }),
+    );
+  });
+
+  it("returns a clear error when plan has no annual price and interval=year", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetPlanByKey.mockResolvedValue({
+      key: "pro",
+      name: "Pro",
+      stripe_price_id: "price_pro_month",
+      stripe_annual_price_id: null,
+    } as never);
+
+    const result = await createSubscriptionCheckout("pro", "year");
+    expect(result.error).toMatch(/doesn't have an annual price/);
   });
 
   it("returns error message on Stripe failure", async () => {
@@ -114,6 +164,7 @@ describe("createSubscriptionCheckout", () => {
       key: "pro",
       name: "Pro",
       stripe_price_id: "price_pro",
+      stripe_annual_price_id: null,
     } as never);
     mockedGetOrCreate.mockRejectedValue(new Error("stripe down"));
 
@@ -127,6 +178,7 @@ describe("createSubscriptionCheckout", () => {
       key: "pro",
       name: "Pro",
       stripe_price_id: "price_pro",
+      stripe_annual_price_id: null,
     } as never);
     mockedGetOrCreate.mockRejectedValue("nope");
 
@@ -212,6 +264,73 @@ describe("createTopUpCheckout", () => {
 
     const result = await createTopUpCheckout("pack_500");
     expect(result).toEqual({ error: "Could not start checkout." });
+  });
+});
+
+describe("resumeSubscription", () => {
+  it("returns error when not signed in", async () => {
+    mockSupabase(null);
+    const result = await resumeSubscription();
+    expect(result.error).toMatch(/signed in/);
+  });
+
+  it("returns error when there is no active subscription", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue(null);
+
+    const result = await resumeSubscription();
+    expect(result).toEqual({ error: "No active subscription to resume." });
+  });
+
+  it("returns error when sub is not scheduled for cancellation", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue({
+      stripe_subscription_id: "sub_1",
+      cancel_at_period_end: false,
+    } as never);
+
+    const result = await resumeSubscription();
+    expect(result.error).toMatch(/not scheduled for cancellation/);
+    expect(mockedStripeResume).not.toHaveBeenCalled();
+  });
+
+  it("calls Stripe and revalidates the billing pages on success", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue({
+      stripe_subscription_id: "sub_1",
+      cancel_at_period_end: true,
+    } as never);
+    mockedStripeResume.mockResolvedValue();
+
+    const result = await resumeSubscription();
+    expect(result).toEqual({ ok: true });
+    expect(mockedStripeResume).toHaveBeenCalledWith("sub_1");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith("/account/billing");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith("/account");
+  });
+
+  it("returns error message on Stripe failure", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue({
+      stripe_subscription_id: "sub_1",
+      cancel_at_period_end: true,
+    } as never);
+    mockedStripeResume.mockRejectedValue(new Error("stripe down"));
+
+    const result = await resumeSubscription();
+    expect(result).toEqual({ error: "stripe down" });
+  });
+
+  it("returns generic error on non-Error rejection", async () => {
+    mockSupabase({ id: "u1", email: "u@test.com" });
+    mockedGetActiveSub.mockResolvedValue({
+      stripe_subscription_id: "sub_1",
+      cancel_at_period_end: true,
+    } as never);
+    mockedStripeResume.mockRejectedValue("nope");
+
+    const result = await resumeSubscription();
+    expect(result).toEqual({ error: "Could not resume subscription." });
   });
 });
 

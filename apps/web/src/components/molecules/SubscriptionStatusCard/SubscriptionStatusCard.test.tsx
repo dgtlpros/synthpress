@@ -22,7 +22,7 @@ describe("SubscriptionStatusCard", () => {
     expect(screen.getByText(/Renews on/)).toBeInTheDocument();
   });
 
-  it("renders cancellation note when cancel_at_period_end is true", () => {
+  it("renders cancellation note and Canceling badge when cancel_at_period_end is true", () => {
     render(
       <SubscriptionStatusCard
         planName="Pro"
@@ -33,6 +33,45 @@ describe("SubscriptionStatusCard", () => {
       />,
     );
     expect(screen.getByText(/Subscription ends on/)).toBeInTheDocument();
+    expect(screen.getByText("Pro · Canceling")).toBeInTheDocument();
+  });
+
+  it("keeps the underlying status badge when cancel_at_period_end is false", () => {
+    render(
+      <SubscriptionStatusCard
+        planName="Pro"
+        status="past_due"
+        monthlyPriceCents={7900}
+        currentPeriodEnd="2026-06-01T00:00:00Z"
+      />,
+    );
+    expect(screen.getByText("Pro · Past due")).toBeInTheDocument();
+  });
+
+  it("treats cancel_at_period_end on a trialing sub as Canceling", () => {
+    render(
+      <SubscriptionStatusCard
+        planName="Pro"
+        status="trialing"
+        monthlyPriceCents={7900}
+        currentPeriodEnd="2026-06-01T00:00:00Z"
+        cancelAtPeriodEnd
+      />,
+    );
+    expect(screen.getByText("Pro · Canceling")).toBeInTheDocument();
+  });
+
+  it("doesn't promote a non-active status to canceling even if flagged", () => {
+    render(
+      <SubscriptionStatusCard
+        planName="Pro"
+        status="past_due"
+        monthlyPriceCents={7900}
+        currentPeriodEnd="2026-06-01T00:00:00Z"
+        cancelAtPeriodEnd
+      />,
+    );
+    expect(screen.getByText("Pro · Past due")).toBeInTheDocument();
   });
 
   it("shows the canceled note for canceled status", () => {

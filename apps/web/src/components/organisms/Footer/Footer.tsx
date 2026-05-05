@@ -1,19 +1,20 @@
+import { Link } from "@/components/atoms/Link";
 import { cn } from "@/lib/cn";
 
 const footerLinks = {
   Product: [
-    { label: "Features", href: "#features" },
-    { label: "Pricing", href: "#pricing" },
-    { label: "How It Works", href: "#how-it-works" },
+    { label: "Features", href: "/#features" },
+    { label: "Pricing", href: "/pricing" },
+    { label: "How It Works", href: "/#how-it-works" },
   ],
   Company: [
-    { label: "About", href: "#" },
-    { label: "Blog", href: "#" },
-    { label: "Contact", href: "#" },
+    { label: "About", href: "/about" },
+    { label: "Blog", href: "/blog" },
+    { label: "Contact", href: "/contact" },
   ],
   Legal: [
-    { label: "Privacy Policy", href: "#" },
-    { label: "Terms of Service", href: "#" },
+    { label: "Privacy Policy", href: "/privacy" },
+    { label: "Terms of Service", href: "/terms" },
   ],
 };
 
@@ -27,8 +28,11 @@ export function Footer({ className }: FooterProps) {
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-12 sm:grid-cols-4">
           <div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="SynthPress" className="mb-4 h-10 w-auto" />
+            <picture>
+              <source media="(min-width: 768px)" srcSet="/synthpress-full-logo.svg" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/synthpress-logo-icon.svg" alt="SynthPress" className="mb-4 h-14 w-auto" />
+            </picture>
             <p className="text-sm text-muted leading-relaxed">
               AI-powered content generation and publishing for WordPress networks.
             </p>
@@ -40,9 +44,9 @@ export function Footer({ className }: FooterProps) {
               <ul className="space-y-2">
                 {links.map((link) => (
                   <li key={link.label}>
-                    <a href={link.href} className="cursor-pointer text-sm text-muted hover:text-foreground transition-colors">
+                    <Link href={link.href} variant="muted">
                       {link.label}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>

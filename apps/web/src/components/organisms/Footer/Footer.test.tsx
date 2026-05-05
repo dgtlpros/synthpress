@@ -22,9 +22,19 @@ describe("Footer", () => {
     expect(screen.getByText(/2026 SynthPress/)).toBeInTheDocument();
   });
 
-  it("renders product links", () => {
-    render(<Footer />);
-    expect(screen.getByText("Privacy Policy")).toBeInTheDocument();
-    expect(screen.getByText("Terms of Service")).toBeInTheDocument();
+  describe("link wiring", () => {
+    it.each([
+      ["Features", "/#features"],
+      ["Pricing", "/pricing"],
+      ["How It Works", "/#how-it-works"],
+      ["About", "/about"],
+      ["Blog", "/blog"],
+      ["Contact", "/contact"],
+      ["Privacy Policy", "/privacy"],
+      ["Terms of Service", "/terms"],
+    ])("links %s to %s", (label, href) => {
+      render(<Footer />);
+      expect(screen.getByText(label).closest("a")).toHaveAttribute("href", href);
+    });
   });
 });

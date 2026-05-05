@@ -12,9 +12,30 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const APP_DESCRIPTION =
+  "AI-powered content generation and publishing platform for WordPress sites.";
+
 export const metadata: Metadata = {
-  title: "SynthPress",
-  description: "AI-powered content generation and publishing platform",
+  metadataBase: new URL(APP_URL),
+  title: {
+    default: "SynthPress",
+    template: "%s · SynthPress",
+  },
+  description: APP_DESCRIPTION,
+  applicationName: "SynthPress",
+  openGraph: {
+    title: "SynthPress",
+    description: APP_DESCRIPTION,
+    url: APP_URL,
+    siteName: "SynthPress",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "SynthPress",
+    description: APP_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

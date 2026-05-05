@@ -1,0 +1,118 @@
+---
+description: Supabase schema, RLS policies, RPC functions, and service-layer patterns
+alwaysApply: true
+---
+
+# Supabase Database Patterns
+
+Conventions for `supabase/migrations/*.sql` and `apps/web/src/services/*.ts`.
+The full runbook is in [docs/billing.md](../../docs/billing.md) — these rules
+are the must-follow extracts. **Default-deny is the posture: clients can only
+read their own rows; all writes go through service-role on the server.**
+
+## Atomic balance / counter operations → RPC, never JS read-then-write
+
+Any change that needs to read a value, compute, then write **must** happen
+inside a Postgres `security definer` function. Two parallel webhook events for
+the same user can otherwise lose a write to a stale-balance race.
+
+```sql
+-- ✅ GOOD: atomic in one transaction, idempotent on stripe_event_id
+create or replace function public.grant_tokens(p_user_id uuid, p_amount int, ...)
+returns int
+language plpgsql
+security definer set search_path = ''
+as $$
+begin
+  -- 1. fast-path idempotency check
+  -- 2. insert audit row (catch unique_violation as safety net)
+  -- 3. INSERT ... ON CONFLICT DO UPDATE for atomic increment
+end;
+$$;
+
+revoke all on function public.grant_tokens(...) from public;
+grant execute on function public.grant_tokens(...) to service_role;
+```
+
+```ts
+// ✅ GOOD: thin TS wrapper just calls the RPC
+const { data, error } = await supabase.rpc("grant_tokens", { ... });
+
+// ❌ BAD: read + compute + upsert is a race
+const { data: bal } = await supabase.from("token_balances").select("balance")...;
+const newBalance = (bal?.balance ?? 0) + amount;
+await supabase.from("token_balances").upsert({ balance: newBalance }, ...);
+```
+
+Always include `security definer set search_path = ''`, `revoke all ... from public`,
+and `grant execute ... to service_role` (or `authenticated` if a row-scoped
+function the user calls directly).
+
+## Webhook idempotency: `stripe_event_id` is the lock
+
+Every webhook-driven write tags `token_transactions.stripe_event_id`. The
+unique index makes Stripe replays a no-op. Handlers MUST be safe to replay:
+
+```ts
+await grantTokens({ ..., stripeEventId: event.id });  // returns null on dup
+```
+
+If you add a new webhook handler, write it to short-circuit on the unique
+constraint, not just the pre-check — see `grant_tokens` for the pattern.
+
+## RLS performance: wrap `auth.uid()` in a subquery
+
+```sql
+-- ✅ GOOD: evaluated once per query
+create policy "Users can view own X" on public.x for select
+  using ((select auth.uid()) = user_id);
+
+-- ❌ BAD: VOLATILE function fires per row
+create policy "Users can view own X" on public.x for select
+  using (auth.uid() = user_id);
+```
+
+## Default-deny on sensitive tables, plus an explicit deny
+
+Tables that hold money, entitlements, or audit logs (`stripe_customers`,
+`subscriptions`, `token_balances`, `token_transactions`) should have **no**
+INSERT / UPDATE / DELETE policies for `authenticated` / `anon`, plus an
+**explicit deny** so the intent is unambiguous:
+
+```sql
+create policy "Deny client writes to token_balances"
+  on public.token_balances for all
+  to authenticated, anon
+  using (false) with check (false);
+```
+
+The service-role client (used by webhooks and server actions) bypasses RLS,
+so legitimate writes still work.
+
+## Index hot jsonb metadata lookups with partial expression indexes
+
+```sql
+-- ✅ GOOD: partial keeps the index tiny
+create index token_transactions_invoice_idx
+  on public.token_transactions ((metadata->>'stripe_invoice_id'))
+  where amount > 0;
+```
+
+Only index the rows you actually query (here: positive grants only — refund
+rows are negative and irrelevant for the lookup).
+
+## Triggers handle `updated_at`; don't set it manually in service code
+
+`update_updated_at()` runs `before update` on every table that has an
+`updated_at` column. Don't set it again in your `UPDATE` statements; the
+trigger will overwrite the value anyway.
+
+## When to add a new RPC
+
+Add a Postgres function (RPC) when you need:
+- **Atomicity** across multiple writes the client can't safely retry
+  (balance + audit row).
+- **Conditional writes** like "decrement only if balance ≥ amount".
+- **Aggregation** that's expensive to round-trip (dashboard counters).
+
+Don't reach for an RPC when a single Supabase query covers it.

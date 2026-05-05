@@ -3,12 +3,14 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 
 vi.mock("@/actions/billing", () => ({
   createBillingPortal: vi.fn(),
+  resumeSubscription: vi.fn(),
 }));
 
-import { createBillingPortal } from "@/actions/billing";
+import { createBillingPortal, resumeSubscription } from "@/actions/billing";
 import { useBillingActions } from "./useBillingActions";
 
 const mockedPortal = vi.mocked(createBillingPortal);
+const mockedResume = vi.mocked(resumeSubscription);
 
 const ORIGINAL_LOCATION = window.location;
 
@@ -27,7 +29,7 @@ afterEach(() => {
   });
 });
 
-describe("useBillingActions", () => {
+describe("useBillingActions — openPortal", () => {
   it("redirects to the returned portal url on success", async () => {
     mockedPortal.mockResolvedValue({ url: "https://billing.stripe.com/x" });
     const { result } = renderHook(() => useBillingActions());
@@ -61,7 +63,7 @@ describe("useBillingActions", () => {
     );
   });
 
-  it("clears prior errors when openPortal is invoked again", async () => {
+  it("clears prior portal errors when openPortal is invoked again", async () => {
     mockedPortal.mockResolvedValueOnce({ error: "first" });
     const { result } = renderHook(() => useBillingActions());
 
@@ -75,5 +77,52 @@ describe("useBillingActions", () => {
       expect(result.current.portalError).toBeNull();
       expect(window.location.href).toBe("https://billing.stripe.com/y");
     });
+  });
+});
+
+describe("useBillingActions — resume", () => {
+  it("calls the server action and clears any prior error on success", async () => {
+    mockedResume.mockResolvedValue({ ok: true });
+    const { result } = renderHook(() => useBillingActions());
+
+    act(() => result.current.resume());
+
+    await waitFor(() => {
+      expect(mockedResume).toHaveBeenCalledTimes(1);
+      expect(result.current.resumeError).toBeNull();
+    });
+  });
+
+  it("surfaces server-action errors", async () => {
+    mockedResume.mockResolvedValue({ error: "boom" });
+    const { result } = renderHook(() => useBillingActions());
+
+    act(() => result.current.resume());
+
+    await waitFor(() => expect(result.current.resumeError).toBe("boom"));
+  });
+
+  it("falls back to a generic error when neither ok nor error is returned", async () => {
+    mockedResume.mockResolvedValue({});
+    const { result } = renderHook(() => useBillingActions());
+
+    act(() => result.current.resume());
+
+    await waitFor(() =>
+      expect(result.current.resumeError).toBe("Could not resume subscription."),
+    );
+  });
+
+  it("clears prior resume errors on subsequent calls", async () => {
+    mockedResume.mockResolvedValueOnce({ error: "first" });
+    const { result } = renderHook(() => useBillingActions());
+
+    act(() => result.current.resume());
+    await waitFor(() => expect(result.current.resumeError).toBe("first"));
+
+    mockedResume.mockResolvedValueOnce({ ok: true });
+    act(() => result.current.resume());
+
+    await waitFor(() => expect(result.current.resumeError).toBeNull());
   });
 });

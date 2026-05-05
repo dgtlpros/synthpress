@@ -6,6 +6,7 @@ const {
   mockCustomersCreate,
   mockPortalCreate,
   mockConstructEventAsync,
+  mockSubscriptionsUpdate,
   StripeMock,
 } = vi.hoisted(() => {
   const mockSessionsCreate = vi.fn();
@@ -13,6 +14,7 @@ const {
   const mockCustomersCreate = vi.fn();
   const mockPortalCreate = vi.fn();
   const mockConstructEventAsync = vi.fn();
+  const mockSubscriptionsUpdate = vi.fn();
   const StripeMock = vi.fn(function StripeMock() {
     return {
       checkout: {
@@ -29,6 +31,9 @@ const {
           create: mockPortalCreate,
         },
       },
+      subscriptions: {
+        update: mockSubscriptionsUpdate,
+      },
       webhooks: {
         constructEventAsync: mockConstructEventAsync,
       },
@@ -40,6 +45,7 @@ const {
     mockCustomersCreate,
     mockPortalCreate,
     mockConstructEventAsync,
+    mockSubscriptionsUpdate,
     StripeMock,
   };
 });
@@ -54,6 +60,7 @@ import {
   createTopUpCheckoutSession,
   createPortalSession,
   retrieveCheckoutSession,
+  resumeSubscription,
   verifyWebhook,
 } from "./stripe-service";
 
@@ -129,7 +136,35 @@ describe("createSubscriptionCheckoutSession", () => {
       metadata: expect.objectContaining({
         supabase_user_id: "user-1",
         plan_key: "pro",
+        interval: "month",
         checkout_kind: "subscription",
+      }),
+      subscription_data: expect.objectContaining({
+        metadata: expect.objectContaining({ interval: "month" }),
+      }),
+    }));
+    // Tax + customer_update intentionally not enabled until jurisdictions
+    // are registered in Stripe Tax.
+    const args = mockSessionsCreate.mock.calls[0][0];
+    expect(args).not.toHaveProperty("automatic_tax");
+    expect(args).not.toHaveProperty("customer_update");
+  });
+
+  it("propagates the interval into metadata when set to year", async () => {
+    mockSessionsCreate.mockResolvedValue({ id: "cs_y", client_secret: "secret_y" });
+
+    await createSubscriptionCheckoutSession({
+      customerId: "cus_1",
+      priceId: "price_y",
+      userId: "user-1",
+      planKey: "pro",
+      interval: "year",
+    });
+
+    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ interval: "year" }),
+      subscription_data: expect.objectContaining({
+        metadata: expect.objectContaining({ interval: "year" }),
       }),
     }));
   });
@@ -205,6 +240,9 @@ describe("createTopUpCheckoutSession", () => {
         }),
       }),
     }));
+    const args = mockSessionsCreate.mock.calls[0][0];
+    expect(args).not.toHaveProperty("automatic_tax");
+    expect(args).not.toHaveProperty("customer_update");
   });
 
   it("throws when client_secret missing", async () => {
@@ -263,6 +301,23 @@ describe("retrieveCheckoutSession", () => {
     const result = await retrieveCheckoutSession("cs_1");
     expect(result).toEqual({ id: "cs_1", payment_status: "paid" });
     expect(mockSessionsRetrieve).toHaveBeenCalledWith("cs_1");
+  });
+});
+
+describe("resumeSubscription", () => {
+  it("clears cancel_at_period_end on the given subscription", async () => {
+    mockSubscriptionsUpdate.mockResolvedValue({ id: "sub_1" });
+
+    await resumeSubscription("sub_1");
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      cancel_at_period_end: false,
+    });
+  });
+
+  it("propagates Stripe errors", async () => {
+    mockSubscriptionsUpdate.mockRejectedValue(new Error("not found"));
+    await expect(resumeSubscription("sub_x")).rejects.toThrow("not found");
   });
 });
 

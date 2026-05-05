@@ -38,6 +38,13 @@ export function SubscriptionStatusCard({
 }: SubscriptionStatusCardProps) {
   const renewalDate = formatDate(currentPeriodEnd);
   const isFree = status === "free";
+  // When a paid sub is scheduled to cancel, render the badge as "Canceling"
+  // so the state is visible at a glance. The underlying Stripe status is
+  // still active until the period ends.
+  const effectiveStatus: SubscriptionStatus =
+    cancelAtPeriodEnd && (status === "active" || status === "trialing")
+      ? "canceling"
+      : status;
 
   let footnote: string | null = null;
   if (!isFree && renewalDate) {
@@ -58,7 +65,7 @@ export function SubscriptionStatusCard({
             <CardTitle>Subscription</CardTitle>
             {planDescription && <CardDescription>{planDescription}</CardDescription>}
           </div>
-          <PlanBadge planName={planName} status={status} />
+          <PlanBadge planName={planName} status={effectiveStatus} />
         </div>
       </CardHeader>
 

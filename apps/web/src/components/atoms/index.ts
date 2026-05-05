@@ -44,7 +44,13 @@ export { PriceTag } from "./PriceTag";
 export type { PriceTagProps } from "./PriceTag";
 
 export { TokenBadge } from "./TokenBadge";
-export type { TokenBadgeProps, TokenBadgeVariant } from "./TokenBadge";
+export type { TokenBadgeProps, TokenBadgeVariant, TokenBadgeSize } from "./TokenBadge";
 
 export { PlanBadge } from "./PlanBadge";
 export type { PlanBadgeProps, SubscriptionStatus } from "./PlanBadge";
+
+export { Skeleton } from "./Skeleton";
+export type { SkeletonProps, SkeletonVariant } from "./Skeleton";
+
+export { SegmentedControl } from "./SegmentedControl";
+export type { SegmentedControlProps, SegmentedControlOption } from "./SegmentedControl";

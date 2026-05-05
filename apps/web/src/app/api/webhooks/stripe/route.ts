@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
   try {
     await handleWebhookEvent(event, {
       retrieveSubscription: (id) => getStripe().subscriptions.retrieve(id),
+      retrieveCharge: (id) => getStripe().charges.retrieve(id),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "handler failure";

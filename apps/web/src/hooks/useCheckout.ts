@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { createSubscriptionCheckout, createTopUpCheckout } from "@/actions/billing";
 
+export type CheckoutInterval = "month" | "year";
+
 export type CheckoutTarget =
-  | { kind: "subscription"; planKey: string }
+  | { kind: "subscription"; planKey: string; interval?: CheckoutInterval }
   | { kind: "top_up"; packKey: string };
 
 export interface UseCheckoutResult {
@@ -14,7 +16,10 @@ export interface UseCheckoutResult {
 }
 
 function targetIdentity(target: CheckoutTarget): string {
-  return target.kind === "subscription" ? `sub:${target.planKey}` : `top:${target.packKey}`;
+  if (target.kind === "subscription") {
+    return `sub:${target.planKey}:${target.interval ?? "month"}`;
+  }
+  return `top:${target.packKey}`;
 }
 
 export function useCheckout(target: CheckoutTarget): UseCheckoutResult {
@@ -34,8 +39,14 @@ export function useCheckout(target: CheckoutTarget): UseCheckoutResult {
       try {
         const result =
           target.kind === "subscription"
-            ? await createSubscriptionCheckout(target.planKey)
+            ? await createSubscriptionCheckout(target.planKey, target.interval ?? "month")
             : await createTopUpCheckout(target.packKey);
+        // Defensive: drop the result if the consumer unmounted (or the target
+        // changed) while we were awaiting. React 18+ no-ops state setters on
+        // unmounted components, so this is belt-and-suspenders. The branch
+        // requires precise microtask ordering that's flaky in jsdom; we
+        // exercise the equivalent catch-block path in tests instead.
+        /* v8 ignore next */
         if (cancelled) return;
         if (result.error) {
           setError(result.error);

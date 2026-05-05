@@ -125,3 +125,113 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* ============================================================================
+ * Celebratory animations used by the checkout success page.
+ *
+ * Each animation has a named utility class so React components only need to
+ * supply timing offsets (animationDelay / animationDuration) inline. Using
+ * named classes also makes reduced-motion fallbacks easy: the `@media
+ * (prefers-reduced-motion: reduce)` block targets each class and lands the
+ * element on a sensible static state instead of the invisible base styles
+ * that the animation would normally drive away from.
+ * ============================================================================ */
+
+@keyframes sp-check-draw {
+  from {
+    stroke-dashoffset: 50;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sp-pulse-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes sp-confetti-burst {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--sp-confetti-x, 0), var(--sp-confetti-y, 0))
+      rotate(var(--sp-confetti-rotate, 0deg)) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes sp-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* `both` fill-mode applies the 0% keyframe during the delay window and the
+ * 100% keyframe after the animation ends, so an infinite ring is visible
+ * during its delay and a forwards check stays drawn after completion. */
+.sp-anim-pulse-ring {
+  animation: sp-pulse-ring 2.4s ease-out infinite both;
+}
+
+.sp-anim-confetti {
+  /* Default duration; consumers override via inline style. */
+  animation: sp-confetti-burst 2.4s ease-out forwards;
+  opacity: 0;
+}
+
+.sp-anim-check-draw {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: sp-check-draw 0.6s ease-out 0.35s forwards;
+}
+
+.sp-anim-rise-in {
+  animation: sp-rise-in 0.5s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-anim-pulse-ring,
+  .sp-anim-confetti,
+  .sp-anim-check-draw,
+  .sp-anim-rise-in {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* Static fallbacks so reduced-motion users still see a coherent state
+   * instead of the invisible base values the animation would normally drive
+   * the element away from. */
+  .sp-anim-pulse-ring {
+    opacity: 0.35;
+  }
+  .sp-anim-confetti {
+    opacity: 0;
+  }
+  .sp-anim-check-draw {
+    stroke-dashoffset: 0;
+  }
+  .sp-anim-rise-in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -95,6 +95,7 @@ export type Database = {
       }
       plans: {
         Row: {
+          annual_price_cents: number | null
           created_at: string
           description: string
           features: Json
@@ -104,9 +105,11 @@ export type Database = {
           monthly_tokens: number
           name: string
           sort_order: number
+          stripe_annual_price_id: string | null
           stripe_price_id: string | null
         }
         Insert: {
+          annual_price_cents?: number | null
           created_at?: string
           description?: string
           features?: Json
@@ -116,9 +119,11 @@ export type Database = {
           monthly_tokens: number
           name: string
           sort_order?: number
+          stripe_annual_price_id?: string | null
           stripe_price_id?: string | null
         }
         Update: {
+          annual_price_cents?: number | null
           created_at?: string
           description?: string
           features?: Json
@@ -128,6 +133,7 @@ export type Database = {
           monthly_tokens?: number
           name?: string
           sort_order?: number
+          stripe_annual_price_id?: string | null
           stripe_price_id?: string | null
         }
         Relationships: []
@@ -381,6 +387,27 @@ export type Database = {
       consume_tokens: {
         Args: { p_amount: number; p_description?: string; p_user_id: string }
         Returns: number
+      }
+      grant_tokens: {
+        Args: {
+          p_amount: number
+          p_description?: string
+          p_metadata?: Json
+          p_stripe_event_id?: string
+          p_type: string
+          p_user_id: string
+        }
+        Returns: number
+      }
+      record_token_refund: {
+        Args: {
+          p_amount: number
+          p_description?: string
+          p_metadata?: Json
+          p_stripe_event_id?: string
+          p_user_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {

@@ -14,7 +14,8 @@
     "test:e2e:ui": "playwright test --ui",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts"
+    "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
+    "stripe:setup": "node --env-file=.env.local scripts/stripe-setup.mjs"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^6.3.0",
@@ -24,6 +25,7 @@
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "stripe": "^22.1.0",
     "zustand": "^5.0.12"
   },

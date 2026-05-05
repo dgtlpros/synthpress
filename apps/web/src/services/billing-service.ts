@@ -1,9 +1,10 @@
+import "server-only";
 import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateCustomer } from "./stripe-service";
-import { grantTokens } from "./token-service";
+import { grantTokens, recordTokenRefund } from "./token-service";
 
 type Client = SupabaseClient<Database>;
 
@@ -89,6 +90,11 @@ export async function getCurrentPlan(
   return { plan, subscription };
 }
 
+/**
+ * Looks up the plan by its Stripe Price id, matching either the monthly or
+ * annual price. We accept both because a single plan has two prices in Stripe
+ * (one per cadence) and a subscription's `stripe_price_id` could be either.
+ */
 export async function getPlanByStripePriceId(
   priceId: string,
   client?: Client,
@@ -97,7 +103,7 @@ export async function getPlanByStripePriceId(
   const { data, error } = await supabase
     .from("plans")
     .select("*")
-    .eq("stripe_price_id", priceId)
+    .or(`stripe_price_id.eq.${priceId},stripe_annual_price_id.eq.${priceId}`)
     .maybeSingle();
   if (error) throw error;
   return data ?? null;
@@ -117,6 +123,59 @@ export async function getPlanByKey(planKey: string, client?: Client): Promise<Pl
 function timestampToIso(value: number | null | undefined): string | null {
   if (!value) return null;
   return new Date(value * 1000).toISOString();
+}
+
+function getSubscriptionInterval(
+  stripeSub: Stripe.Subscription,
+): "month" | "year" | null {
+  const interval = stripeSub.items.data[0]?.price.recurring?.interval ?? null;
+  if (interval === "month" || interval === "year") return interval;
+  return null;
+}
+
+/**
+ * Annual subscriptions prepay for the full year, so we grant 12 cycles of
+ * tokens up-front. Monthly subscriptions get one cycle per invoice.
+ */
+function tokensForCycle(plan: Plan, stripeSub: Stripe.Subscription): number {
+  return getSubscriptionInterval(stripeSub) === "year"
+    ? plan.monthly_tokens * 12
+    : plan.monthly_tokens;
+}
+
+function extractInvoiceIdFromSubscription(
+  stripeSub: Stripe.Subscription,
+): string | null {
+  const latest = (stripeSub as unknown as { latest_invoice?: string | { id: string } | null })
+    .latest_invoice;
+  if (typeof latest === "string") return latest;
+  if (latest && typeof latest === "object" && "id" in latest) return latest.id;
+  return null;
+}
+
+/**
+ * Stripe API 2024-11-20.acacia and later moved `invoice.subscription` into
+ * `invoice.parent.subscription_details.subscription`. We read the new field
+ * first and fall back to the legacy field so older API versions still work.
+ */
+function extractSubscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
+  const parent = (invoice as unknown as {
+    parent?: {
+      subscription_details?: { subscription?: string | { id: string } | null } | null;
+    } | null;
+  }).parent;
+  const fromParent = parent?.subscription_details?.subscription ?? null;
+  if (typeof fromParent === "string") return fromParent;
+  if (fromParent && typeof fromParent === "object" && "id" in fromParent) {
+    return fromParent.id;
+  }
+
+  const legacy = (invoice as unknown as { subscription?: string | { id: string } | null })
+    .subscription ?? null;
+  if (typeof legacy === "string") return legacy;
+  if (legacy && typeof legacy === "object" && "id" in legacy) return legacy.id;
+
+  return null;
 }
 
 function buildSubscriptionRow(params: {
@@ -139,8 +198,15 @@ function buildSubscriptionRow(params: {
 }
 
 /**
- * Resolves the user_id and plan_key for a Stripe subscription, falling back
- * from metadata to lookups when needed.
+ * Resolves the user_id and plan_key for a Stripe subscription.
+ *
+ * IMPORTANT: the plan_key is derived from the *current* Stripe Price id, NOT
+ * from `subscription.metadata.plan_key`. Stripe doesn't auto-update metadata
+ * when a customer (or admin) switches plans via the Customer Portal or the
+ * Stripe Dashboard, so the price id is the only reliable source of truth.
+ *
+ * Metadata is used as a fallback when the current price doesn't match any
+ * known plan (e.g. a custom one-off price was attached to the subscription).
  */
 async function resolveSubscriptionContext(
   stripeSub: Stripe.Subscription,
@@ -152,6 +218,16 @@ async function resolveSubscriptionContext(
 
   if (!userId) return null;
 
+  const priceId = stripeSub.items.data[0]?.price.id;
+  if (priceId) {
+    const plan = await getPlanByStripePriceId(priceId, client);
+    if (plan) {
+      return { userId, planKey: plan.key };
+    }
+  }
+
+  // Fallback: subscription is on a price we don't know about (custom price,
+  // legacy plan, etc.). Trust the metadata if it points at a known plan_key.
   const metadataPlanKey =
     typeof stripeSub.metadata?.plan_key === "string" ? stripeSub.metadata.plan_key : null;
 
@@ -159,13 +235,7 @@ async function resolveSubscriptionContext(
     return { userId, planKey: metadataPlanKey };
   }
 
-  const priceId = stripeSub.items.data[0]?.price.id;
-  if (!priceId) return null;
-
-  const plan = await getPlanByStripePriceId(priceId, client);
-  if (!plan) return null;
-
-  return { userId, planKey: plan.key };
+  return null;
 }
 
 export async function syncSubscriptionFromStripe(params: {
@@ -226,13 +296,23 @@ export async function handleCheckoutCompleted(
     const plan = await getPlanByKey(ctx.planKey, supabase);
     if (!plan) return;
 
+    const interval = getSubscriptionInterval(stripeSub);
+    const amount = tokensForCycle(plan, stripeSub);
+    const cadence = interval === "year" ? "annual" : "monthly";
+    const invoiceId = extractInvoiceIdFromSubscription(stripeSub);
+
     await grantTokens({
       userId: ctx.userId,
-      amount: plan.monthly_tokens,
+      amount,
       type: "subscription_grant",
-      description: `${plan.name} plan — initial grant`,
+      description: `${plan.name} plan — initial ${cadence} grant`,
       stripeEventId: event.id,
-      metadata: { stripe_subscription_id: stripeSub.id, plan_key: plan.key },
+      metadata: {
+        stripe_subscription_id: stripeSub.id,
+        stripe_invoice_id: invoiceId,
+        plan_key: plan.key,
+        interval: interval ?? "month",
+      },
       client: supabase,
     });
     return;
@@ -246,13 +326,22 @@ export async function handleCheckoutCompleted(
     const tokens = tokensRaw ? Number.parseInt(tokensRaw, 10) : NaN;
     if (!packKey || !Number.isFinite(tokens) || tokens <= 0) return;
 
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id ?? null;
+
     await grantTokens({
       userId,
       amount: tokens,
       type: "top_up_purchase",
       description: `Top-up: ${packKey}`,
       stripeEventId: event.id,
-      metadata: { pack_key: packKey, checkout_session_id: session.id },
+      metadata: {
+        pack_key: packKey,
+        checkout_session_id: session.id,
+        stripe_payment_intent_id: paymentIntentId,
+      },
       client: supabase,
     });
   }
@@ -272,6 +361,36 @@ export async function handleSubscriptionUpdated(
   });
 }
 
+/**
+ * Returns the most recent positive subscription_grant for a user/sub. We use
+ * it as the baseline when computing the token delta for a mid-cycle plan
+ * change — the prior cycle's grant amount tells us how many tokens the user
+ * already received on this subscription.
+ */
+async function findMostRecentSubscriptionGrant(
+  userId: string,
+  subscriptionId: string,
+  client: Client,
+): Promise<{ planKey: string | null; cycleTokens: number } | null> {
+  const { data, error } = await client
+    .from("token_transactions")
+    .select("amount, metadata")
+    .eq("user_id", userId)
+    .eq("type", "subscription_grant")
+    .filter("metadata->>stripe_subscription_id", "eq", subscriptionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const meta = (data.metadata ?? {}) as Record<string, unknown>;
+  const planKey = typeof meta.plan_key === "string" ? meta.plan_key : null;
+  const cycleTokens = typeof data.amount === "number" ? data.amount : 0;
+  return { planKey, cycleTokens };
+}
+
 export async function handleInvoicePaymentSucceeded(
   event: Stripe.InvoicePaymentSucceededEvent,
   options: {
@@ -282,14 +401,19 @@ export async function handleInvoicePaymentSucceeded(
   const supabase = options.client ?? createAdminClient();
   const invoice = event.data.object;
 
-  if (invoice.billing_reason !== "subscription_cycle") return;
+  // Two billing_reasons drive token grants. Other reasons (subscription_create,
+  // manual, threshold, upcoming) are handled elsewhere or ignored.
+  //   - subscription_cycle  → renewal at start of period, grant the full tier.
+  //   - subscription_update → mid-cycle plan change proration; grant the
+  //     positive token delta for upgrades, skip for downgrades.
+  if (
+    invoice.billing_reason !== "subscription_cycle" &&
+    invoice.billing_reason !== "subscription_update"
+  ) {
+    return;
+  }
 
-  const subscriptionField = (invoice as unknown as { subscription?: string | { id: string } | null })
-    .subscription;
-  const subscriptionId =
-    typeof subscriptionField === "string"
-      ? subscriptionField
-      : subscriptionField?.id ?? null;
+  const subscriptionId = extractSubscriptionIdFromInvoice(invoice);
   if (!subscriptionId || !options.retrieveSubscription) return;
 
   const stripeSub = await options.retrieveSubscription(subscriptionId);
@@ -299,13 +423,272 @@ export async function handleInvoicePaymentSucceeded(
   const plan = await getPlanByKey(ctx.planKey, supabase);
   if (!plan) return;
 
+  const interval = getSubscriptionInterval(stripeSub);
+  const newCycleTokens = tokensForCycle(plan, stripeSub);
+  const cadence = interval === "year" ? "annual" : "monthly";
+
+  if (invoice.billing_reason === "subscription_update") {
+    // Compare against the previous cycle's grant on this subscription. If the
+    // user upgraded, the new tier grants more — credit the difference. If it's
+    // a same-tier change (e.g. monthly→monthly cadence flip with same plan)
+    // or a downgrade, skip the grant entirely so we never deduct.
+    const previous = await findMostRecentSubscriptionGrant(
+      ctx.userId,
+      stripeSub.id,
+      supabase,
+    );
+    const previousCycleTokens = previous?.cycleTokens ?? 0;
+    const delta = newCycleTokens - previousCycleTokens;
+    if (delta <= 0) return;
+
+    const formatted = new Intl.NumberFormat("en-US").format(delta);
+    await grantTokens({
+      userId: ctx.userId,
+      amount: delta,
+      type: "subscription_grant",
+      description: `Upgraded to ${plan.name} — ${formatted} tokens added`,
+      stripeEventId: event.id,
+      metadata: {
+        stripe_subscription_id: stripeSub.id,
+        stripe_invoice_id: invoice.id,
+        plan_key: plan.key,
+        interval: interval ?? "month",
+        grant_kind: "upgrade_proration",
+        previous_plan_key: previous?.planKey ?? null,
+        previous_cycle_tokens: previousCycleTokens,
+        new_cycle_tokens: newCycleTokens,
+      },
+      client: supabase,
+    });
+    return;
+  }
+
   await grantTokens({
     userId: ctx.userId,
-    amount: plan.monthly_tokens,
+    amount: newCycleTokens,
     type: "subscription_grant",
-    description: `${plan.name} plan — monthly renewal`,
+    description: `${plan.name} plan — ${cadence} renewal`,
     stripeEventId: event.id,
-    metadata: { stripe_subscription_id: stripeSub.id, plan_key: plan.key },
+    metadata: {
+      stripe_subscription_id: stripeSub.id,
+      stripe_invoice_id: invoice.id,
+      plan_key: plan.key,
+      interval: interval ?? "month",
+    },
+    client: supabase,
+  });
+}
+
+/**
+ * Looks up the user that owns a Stripe customer by walking
+ * `stripe_customers.stripe_customer_id`.
+ */
+async function findUserIdForStripeCustomer(
+  customerId: string,
+  client: Client,
+): Promise<string | null> {
+  const { data, error } = await client
+    .from("stripe_customers")
+    .select("user_id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.user_id ?? null;
+}
+
+/**
+ * Sums all positive grants on `token_transactions` whose metadata links them
+ * to the given Stripe object id (invoice or payment intent).
+ */
+async function sumGrantsByMetadataKey(params: {
+  userId: string;
+  metadataKey: "stripe_invoice_id" | "stripe_payment_intent_id";
+  metadataValue: string;
+  client: Client;
+}): Promise<number> {
+  const { data, error } = await params.client
+    .from("token_transactions")
+    .select("amount")
+    .eq("user_id", params.userId)
+    .gt("amount", 0)
+    .filter(`metadata->>${params.metadataKey}`, "eq", params.metadataValue);
+
+  if (error) throw error;
+  return (data ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
+}
+
+/**
+ * Calculates how many tokens to revoke for a refund/chargeback. The policy is
+ * "revoke proportional to the refunded amount" — for a full refund this
+ * removes everything that was granted by the original charge; for a partial
+ * refund it removes the same fraction.
+ */
+function tokensToRevoke(params: {
+  totalGranted: number;
+  amountRefunded: number;
+  amountOriginal: number;
+}): number {
+  if (params.amountOriginal <= 0 || params.totalGranted <= 0) return 0;
+  const proportion = Math.min(1, params.amountRefunded / params.amountOriginal);
+  return Math.ceil(params.totalGranted * proportion);
+}
+
+/**
+ * `Charge.invoice` is deprecated in the current Stripe SDK types but the field
+ * still ships on the API for subscription-driven charges. Read it via an
+ * `unknown` cast — same pattern used in `handleInvoicePaymentSucceeded`.
+ */
+function extractInvoiceIdFromCharge(charge: Stripe.Charge): string | null {
+  const invoice = (charge as unknown as { invoice?: string | { id: string } | null })
+    .invoice;
+  if (typeof invoice === "string") return invoice;
+  if (invoice && typeof invoice === "object" && "id" in invoice) return invoice.id;
+  return null;
+}
+
+/**
+ * Reverses a charge by revoking the tokens granted from the underlying
+ * invoice (subscription) or payment intent (top-up). Idempotent on event id.
+ */
+export async function handleChargeRefunded(
+  event: Stripe.ChargeRefundedEvent,
+  options: { client?: Client } = {},
+): Promise<void> {
+  const supabase = options.client ?? createAdminClient();
+  const charge = event.data.object;
+
+  const customerId =
+    typeof charge.customer === "string"
+      ? charge.customer
+      : charge.customer?.id ?? null;
+  if (!customerId) return;
+
+  const userId = await findUserIdForStripeCustomer(customerId, supabase);
+  if (!userId) return;
+
+  const invoiceId = extractInvoiceIdFromCharge(charge);
+  const paymentIntentId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : charge.payment_intent?.id ?? null;
+
+  let totalGranted = 0;
+  if (invoiceId) {
+    totalGranted = await sumGrantsByMetadataKey({
+      userId,
+      metadataKey: "stripe_invoice_id",
+      metadataValue: invoiceId,
+      client: supabase,
+    });
+  } else if (paymentIntentId) {
+    totalGranted = await sumGrantsByMetadataKey({
+      userId,
+      metadataKey: "stripe_payment_intent_id",
+      metadataValue: paymentIntentId,
+      client: supabase,
+    });
+  }
+
+  if (totalGranted <= 0) return;
+
+  const amountRefunded = charge.amount_refunded ?? 0;
+  const amountOriginal = charge.amount ?? 0;
+  const revoke = tokensToRevoke({
+    totalGranted,
+    amountRefunded,
+    amountOriginal,
+  });
+  if (revoke <= 0) return;
+
+  await recordTokenRefund({
+    userId,
+    amount: revoke,
+    description: `Refund for charge ${charge.id}`,
+    stripeEventId: event.id,
+    metadata: {
+      stripe_charge_id: charge.id,
+      stripe_invoice_id: invoiceId,
+      stripe_payment_intent_id: paymentIntentId,
+      stripe_event_type: event.type,
+      total_granted: totalGranted,
+      amount_refunded_cents: amountRefunded,
+      amount_original_cents: amountOriginal,
+    },
+    client: supabase,
+  });
+}
+
+/**
+ * Reacts to a chargeback only when the dispute is *closed* and lost.
+ * Open disputes are tracked but don't revoke tokens until resolved.
+ */
+export async function handleChargeDisputeClosed(
+  event: Stripe.ChargeDisputeClosedEvent,
+  options: {
+    client?: Client;
+    retrieveCharge?: (id: string) => Promise<Stripe.Charge>;
+  } = {},
+): Promise<void> {
+  const supabase = options.client ?? createAdminClient();
+  const dispute = event.data.object;
+
+  if (dispute.status !== "lost") return;
+
+  const chargeId =
+    typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id ?? null;
+  if (!chargeId || !options.retrieveCharge) return;
+
+  const charge = await options.retrieveCharge(chargeId);
+
+  const customerId =
+    typeof charge.customer === "string"
+      ? charge.customer
+      : charge.customer?.id ?? null;
+  if (!customerId) return;
+
+  const userId = await findUserIdForStripeCustomer(customerId, supabase);
+  if (!userId) return;
+
+  const invoiceId = extractInvoiceIdFromCharge(charge);
+  const paymentIntentId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : charge.payment_intent?.id ?? null;
+
+  let totalGranted = 0;
+  if (invoiceId) {
+    totalGranted = await sumGrantsByMetadataKey({
+      userId,
+      metadataKey: "stripe_invoice_id",
+      metadataValue: invoiceId,
+      client: supabase,
+    });
+  } else if (paymentIntentId) {
+    totalGranted = await sumGrantsByMetadataKey({
+      userId,
+      metadataKey: "stripe_payment_intent_id",
+      metadataValue: paymentIntentId,
+      client: supabase,
+    });
+  }
+
+  if (totalGranted <= 0) return;
+
+  await recordTokenRefund({
+    userId,
+    amount: totalGranted,
+    description: `Chargeback lost for charge ${charge.id}`,
+    stripeEventId: event.id,
+    metadata: {
+      stripe_charge_id: charge.id,
+      stripe_dispute_id: dispute.id,
+      stripe_invoice_id: invoiceId,
+      stripe_payment_intent_id: paymentIntentId,
+      stripe_event_type: event.type,
+      total_granted: totalGranted,
+      dispute_status: dispute.status,
+    },
     client: supabase,
   });
 }
@@ -317,12 +700,7 @@ export async function handleInvoicePaymentFailed(
   const supabase = options.client ?? createAdminClient();
   const invoice = event.data.object;
 
-  const subscriptionField = (invoice as unknown as { subscription?: string | { id: string } | null })
-    .subscription;
-  const subscriptionId =
-    typeof subscriptionField === "string"
-      ? subscriptionField
-      : subscriptionField?.id ?? null;
+  const subscriptionId = extractSubscriptionIdFromInvoice(invoice);
   if (!subscriptionId) return;
 
   const { error } = await supabase
@@ -336,6 +714,7 @@ export async function handleInvoicePaymentFailed(
 export interface WebhookHandlerOptions {
   client?: Client;
   retrieveSubscription?: (id: string) => Promise<Stripe.Subscription>;
+  retrieveCharge?: (id: string) => Promise<Stripe.Charge>;
 }
 
 export async function handleWebhookEvent(
@@ -356,6 +735,12 @@ export async function handleWebhookEvent(
       break;
     case "invoice.payment_failed":
       await handleInvoicePaymentFailed(event, options);
+      break;
+    case "charge.refunded":
+      await handleChargeRefunded(event, options);
+      break;
+    case "charge.dispute.closed":
+      await handleChargeDisputeClosed(event, options);
       break;
     default:
       break;

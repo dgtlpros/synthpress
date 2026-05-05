@@ -10,9 +10,15 @@ describe("PlanBadge", () => {
     expect(screen.getByText("Pro")).toBeInTheDocument();
   });
 
-  it("annotates trialing/past_due/canceled with a suffix", () => {
-    const cases: Array<["trialing" | "past_due" | "canceled" | "incomplete" | "unpaid" | "paused", string]> = [
+  it("annotates trialing/canceling/past_due/canceled with a suffix", () => {
+    const cases: Array<
+      [
+        "trialing" | "canceling" | "past_due" | "canceled" | "incomplete" | "unpaid" | "paused",
+        string,
+      ]
+    > = [
       ["trialing", "Trialing"],
+      ["canceling", "Canceling"],
       ["past_due", "Past due"],
       ["canceled", "Canceled"],
       ["incomplete", "Incomplete"],

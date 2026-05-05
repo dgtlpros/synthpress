@@ -13,6 +13,7 @@ import {
   type TokenTransaction,
 } from "@/services/token-service";
 import { BillingSection } from "@/components/organisms/BillingSection";
+import { BillingNotice } from "@/components/molecules/BillingNotice";
 import { BillingActionsConnector } from "@/connectors/BillingActionsConnector";
 import type { SubscriptionStatus } from "@/components/atoms/PlanBadge";
 
@@ -33,6 +34,93 @@ function normalizeStatus(status: string): SubscriptionStatus {
   return (KNOWN_STATUSES as string[]).includes(status)
     ? (status as SubscriptionStatus)
     : "active";
+}
+
+function formatLongDate(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+interface BillingPageNotice {
+  variant: "success" | "info" | "warning" | "danger";
+  title: string;
+  description: string;
+  actionMode: "manage" | "resume";
+  actionLabel: string;
+}
+
+function computeBillingNotice(params: {
+  planName: string | null;
+  status: SubscriptionStatus | null;
+  cancelAtPeriodEnd: boolean;
+  periodEndIso: string | null;
+}): BillingPageNotice | null {
+  const periodEndLabel = formatLongDate(params.periodEndIso);
+  const planName = params.planName ?? "Your plan";
+
+  if (params.status === "past_due") {
+    return {
+      variant: "danger",
+      title: "Your last payment failed",
+      description:
+        "Update your payment method to keep your subscription active. Stripe will automatically retry over the next few days.",
+      actionMode: "manage",
+      actionLabel: "Update payment method",
+    };
+  }
+
+  if (params.status === "unpaid") {
+    return {
+      variant: "danger",
+      title: "Subscription is unpaid",
+      description:
+        "Your subscription is on hold. Update your payment method to restore access.",
+      actionMode: "manage",
+      actionLabel: "Update payment method",
+    };
+  }
+
+  if (params.status === "incomplete") {
+    return {
+      variant: "warning",
+      title: "Subscription is pending payment",
+      description:
+        "Your initial payment hasn't completed. Try the checkout again or update your card.",
+      actionMode: "manage",
+      actionLabel: "Manage subscription",
+    };
+  }
+
+  if (params.cancelAtPeriodEnd) {
+    return {
+      variant: "warning",
+      title: periodEndLabel
+        ? `${planName} is set to cancel on ${periodEndLabel}`
+        : `${planName} is set to cancel`,
+      description:
+        "You'll keep access and your synth tokens until then. Resume anytime to continue your subscription.",
+      actionMode: "resume",
+      actionLabel: "Resume subscription",
+    };
+  }
+
+  if (params.status === "paused") {
+    return {
+      variant: "warning",
+      title: "Subscription paused",
+      description: "Your subscription is paused. Manage it to resume billing.",
+      actionMode: "manage",
+      actionLabel: "Manage subscription",
+    };
+  }
+
+  return null;
 }
 
 export default async function AccountBillingPage() {
@@ -65,16 +153,33 @@ export default async function AccountBillingPage() {
     ctaHref: `/checkout?pack=${pack.key}`,
   }));
 
-  const subscriptionActions = plan ? (
-    <BillingActionsConnector />
-  ) : (
-    <NextLink
-      href="/pricing"
-      className="inline-flex h-10 items-center justify-center rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110"
-    >
-      Choose a plan
-    </NextLink>
-  );
+  let subscriptionActions: React.ReactNode;
+  if (!plan) {
+    subscriptionActions = (
+      <NextLink
+        href="/pricing"
+        className="inline-flex h-10 items-center justify-center rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110"
+      >
+        Choose a plan
+      </NextLink>
+    );
+  } else if (subscription?.cancel_at_period_end) {
+    subscriptionActions = (
+      <>
+        <BillingActionsConnector mode="resume" />
+        <BillingActionsConnector mode="manage" variant="secondary" />
+      </>
+    );
+  } else {
+    subscriptionActions = <BillingActionsConnector />;
+  }
+
+  const notice = computeBillingNotice({
+    planName: plan?.name ?? null,
+    status: subscription ? normalizeStatus(subscription.status) : null,
+    cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
+    periodEndIso: subscription?.current_period_end ?? null,
+  });
 
   return (
     <div className="space-y-8">
@@ -85,6 +190,21 @@ export default async function AccountBillingPage() {
         <h1 className="mt-2 text-2xl font-bold text-foreground">Billing</h1>
         <p className="mt-1 text-sm text-muted">Manage your plan, synth tokens, and recent activity.</p>
       </div>
+
+      {notice && (
+        <BillingNotice
+          variant={notice.variant}
+          title={notice.title}
+          description={notice.description}
+          action={
+            <BillingActionsConnector
+              mode={notice.actionMode}
+              label={notice.actionLabel}
+              variant={notice.variant === "warning" || notice.variant === "danger" ? "primary" : "secondary"}
+            />
+          }
+        />
+      )}
 
       <BillingSection
         plan={

@@ -4,6 +4,7 @@ import { Badge, type BadgeVariant } from "@/components/atoms/Badge";
 export type SubscriptionStatus =
   | "active"
   | "trialing"
+  | "canceling"
   | "past_due"
   | "incomplete"
   | "canceled"
@@ -20,6 +21,7 @@ export interface PlanBadgeProps {
 const statusConfig: Record<SubscriptionStatus, { variant: BadgeVariant; suffix?: string }> = {
   active: { variant: "brand" },
   trialing: { variant: "brand", suffix: "Trialing" },
+  canceling: { variant: "warning", suffix: "Canceling" },
   past_due: { variant: "warning", suffix: "Past due" },
   incomplete: { variant: "warning", suffix: "Incomplete" },
   canceled: { variant: "default", suffix: "Canceled" },

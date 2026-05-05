@@ -7,7 +7,7 @@ import type { CheckoutTarget } from "@/hooks/useCheckout";
 export const dynamic = "force-dynamic";
 
 interface CheckoutPageProps {
-  searchParams: Promise<{ plan?: string; pack?: string }>;
+  searchParams: Promise<{ plan?: string; pack?: string; interval?: string }>;
 }
 
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
@@ -22,6 +22,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
   const params = await searchParams;
   const planKey = params.plan;
   const packKey = params.pack;
+  const interval = params.interval === "year" ? "year" : "month";
 
   let target: CheckoutTarget | null = null;
   let title = "Checkout";
@@ -36,9 +37,12 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
     if (!plan) {
       redirect("/pricing");
     }
-    target = { kind: "subscription", planKey };
+    target = { kind: "subscription", planKey, interval };
+    const cadence = interval === "year" ? "annually" : "monthly";
     title = `Subscribe to ${plan.name}`;
-    subtitle = plan.description ?? "";
+    subtitle = plan.description
+      ? `${plan.description} · billed ${cadence}`
+      : `Billed ${cadence}`;
   } else if (packKey) {
     const { data: pack } = await supabase
       .from("token_packs")

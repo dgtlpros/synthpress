@@ -9,6 +9,7 @@ import {
   getBalance,
   getRecentTransactions,
   grantTokens,
+  recordTokenRefund,
   consumeTokens,
 } from "./token-service";
 
@@ -153,11 +154,10 @@ describe("grantTokens", () => {
     ).rejects.toThrow(/positive/);
   });
 
-  it("inserts a transaction and increments the balance", async () => {
-    const client = makeClient({
-      token_transactions: { data: null, error: null },
-      token_balances: { data: { balance: 100 }, error: null },
-    });
+  it("calls the grant_tokens RPC and returns the new balance", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: 150, error: null }),
+    };
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const newBalance = await grantTokens({
@@ -165,106 +165,186 @@ describe("grantTokens", () => {
       amount: 50,
       type: "subscription_grant",
       description: "Pro renewal",
+      stripeEventId: "evt_1",
       metadata: { invoice_id: "in_1" },
     });
 
     expect(newBalance).toBe(150);
-    expect(client.__chains.token_transactions.insert).toHaveBeenCalledWith({
-      user_id: "user-1",
-      amount: 50,
-      type: "subscription_grant",
-      description: "Pro renewal",
-      stripe_event_id: null,
-      metadata: { invoice_id: "in_1" },
+    expect(client.rpc).toHaveBeenCalledWith("grant_tokens", {
+      p_user_id: "user-1",
+      p_amount: 50,
+      p_type: "subscription_grant",
+      p_description: "Pro renewal",
+      p_stripe_event_id: "evt_1",
+      p_metadata: { invoice_id: "in_1" },
     });
-    expect(client.__chains.token_balances.upsert).toHaveBeenCalledWith(
-      { user_id: "user-1", balance: 150 },
-      { onConflict: "user_id" },
-    );
   });
 
-  it("starts the balance at 0 when no row yet exists", async () => {
-    const client = makeClient({
-      token_transactions: { data: null, error: null },
-      token_balances: { data: null, error: null },
-    });
+  it("returns null when the RPC reports an idempotent skip", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const newBalance = await grantTokens({
+      userId: "user-1",
+      amount: 100,
+      type: "subscription_grant",
+      stripeEventId: "evt_dup",
+    });
+
+    expect(newBalance).toBeNull();
+  });
+
+  it("omits optional args when not provided", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: 100, error: null }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await grantTokens({
       userId: "user-1",
       amount: 100,
       type: "signup_grant",
     });
 
-    expect(newBalance).toBe(100);
+    expect(client.rpc).toHaveBeenCalledWith("grant_tokens", {
+      p_user_id: "user-1",
+      p_amount: 100,
+      p_type: "signup_grant",
+      p_description: undefined,
+      p_stripe_event_id: undefined,
+      p_metadata: {},
+    });
   });
 
-  it("returns null and skips the grant when stripe event already processed", async () => {
-    const client = makeClient({
-      token_transactions: { data: { id: "existing" }, error: null },
-    });
-    mockedCreateAdmin.mockReturnValue(client as never);
-
-    const newBalance = await grantTokens({
-      userId: "user-1",
-      amount: 100,
-      type: "subscription_grant",
-      stripeEventId: "evt_1",
-    });
-
-    expect(newBalance).toBeNull();
-    expect(client.__chains.token_transactions.insert).not.toHaveBeenCalled();
-  });
-
-  it("returns null when the unique constraint fires during the insert race", async () => {
-    const client = makeClient({
-      token_transactions: { data: null, error: null },
-      token_balances: { data: { balance: 0 }, error: null },
-    });
-    client.__chains.token_transactions.insert = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: { code: "23505" } });
-    mockedCreateAdmin.mockReturnValue(client as never);
-
-    const newBalance = await grantTokens({
-      userId: "user-1",
-      amount: 100,
-      type: "subscription_grant",
-      stripeEventId: "evt_2",
-    });
-
-    expect(newBalance).toBeNull();
-    expect(client.__chains.token_balances.upsert).not.toHaveBeenCalled();
-  });
-
-  it("propagates non-23505 insert errors", async () => {
-    const client = makeClient({
-      token_balances: { data: { balance: 0 }, error: null },
-    });
-    client.__chains.token_transactions = makeQueryChain({ data: null, error: null });
-    client.__chains.token_transactions.insert = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: { code: "42601", message: "syntax" } });
+  it("propagates RPC errors", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "amount_must_be_positive" },
+      }),
+    };
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
       grantTokens({ userId: "user-1", amount: 5, type: "adjustment" }),
-    ).rejects.toEqual({ code: "42601", message: "syntax" });
+    ).rejects.toEqual({ message: "amount_must_be_positive" });
   });
 
-  it("propagates balance upsert errors", async () => {
-    const client = makeClient({
-      token_transactions: { data: null, error: null },
-      token_balances: { data: { balance: 0 }, error: null },
+  it("uses an injected client when provided", async () => {
+    const injected = {
+      rpc: vi.fn().mockResolvedValue({ data: 50, error: null }),
+    };
+
+    const balance = await grantTokens({
+      userId: "user-1",
+      amount: 25,
+      type: "adjustment",
+      client: injected as never,
     });
-    client.__chains.token_balances.upsert = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: { message: "boom" } });
+
+    expect(balance).toBe(50);
+    expect(mockedCreateAdmin).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordTokenRefund", () => {
+  it("rejects non-positive amounts", async () => {
+    await expect(
+      recordTokenRefund({ userId: "u", amount: 0 }),
+    ).rejects.toThrow(/positive/);
+  });
+
+  it("calls the record_token_refund RPC and unwraps the JSON result", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { requested: 1500, deducted: 1500, balance: 3500 },
+        error: null,
+      }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await recordTokenRefund({
+      userId: "user-1",
+      amount: 1500,
+      description: "refund",
+      stripeEventId: "evt_refund_1",
+      metadata: { stripe_charge_id: "ch_1" },
+    });
+
+    expect(result).toEqual({ requested: 1500, deducted: 1500, balance: 3500 });
+    expect(client.rpc).toHaveBeenCalledWith("record_token_refund", {
+      p_user_id: "user-1",
+      p_amount: 1500,
+      p_stripe_event_id: "evt_refund_1",
+      p_description: "refund",
+      p_metadata: { stripe_charge_id: "ch_1" },
+    });
+  });
+
+  it("returns null when the RPC reports an idempotent skip", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await recordTokenRefund({
+      userId: "user-1",
+      amount: 100,
+      stripeEventId: "evt_dup",
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("returns the clamped result when the RPC reports a partial deduction", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { requested: 5000, deducted: 200, balance: 0 },
+        error: null,
+      }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await recordTokenRefund({
+      userId: "user-1",
+      amount: 5000,
+      stripeEventId: "evt_partial",
+    });
+
+    expect(result).toEqual({ requested: 5000, deducted: 200, balance: 0 });
+  });
+
+  it("returns the zero-deduction result when nothing is left to revoke", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { requested: 1000, deducted: 0, balance: 0 },
+        error: null,
+      }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await recordTokenRefund({
+      userId: "user-1",
+      amount: 1000,
+    });
+
+    expect(result).toEqual({ requested: 1000, deducted: 0, balance: 0 });
+  });
+
+  it("propagates RPC errors", async () => {
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "amount_must_be_positive" },
+      }),
+    };
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
-      grantTokens({ userId: "user-1", amount: 5, type: "adjustment" }),
-    ).rejects.toEqual({ message: "boom" });
+      recordTokenRefund({ userId: "user-1", amount: 100 }),
+    ).rejects.toEqual({ message: "amount_must_be_positive" });
   });
 });
 

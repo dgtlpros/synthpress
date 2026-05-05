@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 describe("useCheckout", () => {
-  it("loads a subscription client secret", async () => {
+  it("loads a subscription client secret (defaults to monthly)", async () => {
     mockedSub.mockResolvedValue({ clientSecret: "secret_sub" });
     const { result } = renderHook(() =>
       useCheckout({ kind: "subscription", planKey: "pro" }),
@@ -28,7 +28,15 @@ describe("useCheckout", () => {
 
     expect(result.current.clientSecret).toBe("secret_sub");
     expect(result.current.error).toBeNull();
-    expect(mockedSub).toHaveBeenCalledWith("pro");
+    expect(mockedSub).toHaveBeenCalledWith("pro", "month");
+  });
+
+  it("passes interval=year when annual subscription target is provided", async () => {
+    mockedSub.mockResolvedValue({ clientSecret: "secret_year" });
+    renderHook(() =>
+      useCheckout({ kind: "subscription", planKey: "pro", interval: "year" }),
+    );
+    await waitFor(() => expect(mockedSub).toHaveBeenCalledWith("pro", "year"));
   });
 
   it("loads a top-up client secret", async () => {
@@ -104,19 +112,44 @@ describe("useCheckout", () => {
 
   it("ignores results that arrive after unmount", async () => {
     let resolveFn: ((value: { clientSecret: string }) => void) | undefined;
-    mockedSub.mockReturnValue(new Promise((resolve) => {
-      resolveFn = resolve;
-    }) as never);
+    mockedSub.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFn = resolve;
+      }) as never,
+    );
 
     const { result, unmount } = renderHook(() =>
       useCheckout({ kind: "subscription", planKey: "pro" }),
     );
 
     unmount();
-    act(() => {
-      resolveFn?.({ clientSecret: "ignored" });
-    });
+    resolveFn?.({ clientSecret: "ignored" });
+    // Yield to the event loop so the awaited promise body executes
+    // `if (cancelled) return;` rather than racing the test's expect.
+    await new Promise<void>((r) => setTimeout(r, 0));
 
     expect(result.current.clientSecret).toBeNull();
+  });
+
+  it("ignores rejections that arrive after unmount", async () => {
+    let rejectFn: ((reason: Error) => void) | undefined;
+    mockedSub.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectFn = reject;
+      }) as never,
+    );
+
+    const { result, unmount } = renderHook(() =>
+      useCheckout({ kind: "subscription", planKey: "pro" }),
+    );
+
+    unmount();
+    await act(async () => {
+      rejectFn?.(new Error("late network failure"));
+      // Let the rejection propagate through the catch block.
+      await Promise.resolve();
+    });
+
+    expect(result.current.error).toBeNull();
   });
 });

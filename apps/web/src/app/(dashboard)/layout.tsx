@@ -4,8 +4,21 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
+import {
+  DashboardSidebar,
+  type SidebarNavItem,
+} from "@/components/molecules/DashboardSidebar";
+import { MobileNavConnector } from "@/connectors/MobileNavConnector";
 
 export const dynamic = "force-dynamic";
+
+const NAV_ITEMS: SidebarNavItem[] = [
+  { label: "Dashboard", href: "/dashboard" },
+  { label: "Projects", href: "/projects" },
+  { label: "Articles", href: "/articles" },
+  { label: "Account", href: "/account" },
+  { label: "Billing", href: "/account/billing" },
+];
 
 export default async function DashboardLayout({
   children,
@@ -13,7 +26,9 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     redirect("/login");
@@ -23,44 +38,44 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-64 border-r border-border bg-surface lg:block">
-        <div className="flex h-16 items-center border-b border-border px-6">
-          <Link href="/" className="flex items-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="SynthPress" className="h-8 w-auto" />
-          </Link>
-        </div>
-        <nav className="p-4 space-y-1">
-          <Link href="/dashboard" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
-            Dashboard
-          </Link>
-          <Link href="/projects" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
-            Projects
-          </Link>
-          <Link href="/articles" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
-            Articles
-          </Link>
-          <Link href="/account" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
-            Account
-          </Link>
-          <Link href="/account/billing" className="flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
-            Billing
-          </Link>
-        </nav>
-      </aside>
+      <DashboardSidebar
+        navItems={NAV_ITEMS}
+        email={user.email}
+        className="hidden min-h-screen lg:flex"
+      />
       <main className="flex-1">
-        <header className="flex h-16 items-center justify-between border-b border-border px-6">
-          <div />
-          <div className="flex items-center gap-3">
-            <Link href="/account/billing" aria-label="View billing">
-              <TokenBadge balance={balance} variant={balance <= 50 ? "warning" : "neutral"} />
+        <header className="flex h-16 items-center justify-between border-b border-border px-4 sm:px-6">
+          <div className="flex items-center gap-2">
+            <MobileNavConnector
+              navItems={NAV_ITEMS}
+              email={user.email}
+              className="lg:hidden"
+            />
+            <Link href="/" className="flex items-center lg:hidden" aria-label="Home">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/synthpress-logo-icon.svg"
+                alt="SynthPress"
+                className="h-8 w-auto"
+              />
             </Link>
-            <span className="text-sm text-muted">{user.email}</span>
+          </div>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <Link
+              href="/account/billing"
+              aria-label="View billing and synth tokens"
+              className="cursor-pointer"
+            >
+              <TokenBadge
+                balance={balance}
+                variant={balance <= 50 ? "warning" : "brand"}
+                size="lg"
+              />
+            </Link>
+            <span className="hidden text-sm text-muted sm:inline">{user.email}</span>
           </div>
         </header>
-        <div className="p-6">
-          {children}
-        </div>
+        <div className="p-4 sm:p-6">{children}</div>
       </main>
     </div>
   );

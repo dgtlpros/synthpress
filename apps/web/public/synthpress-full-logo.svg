@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 420" role="img" aria-labelledby="title desc">
+  <title id="title">SynthPress Full Logo</title>
+  <desc id="desc">SynthPress robot icon followed by the SynthPress wordmark, with Press in a blue to purple gradient.</desc>
+  <defs>
+    <linearGradient id="bodyGradient" x1="70" y1="348" x2="348" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4C19DB"/>
+      <stop offset="0.48" stop-color="#2467FF"/>
+      <stop offset="1" stop-color="#16D8EF"/>
+    </linearGradient>
+    <linearGradient id="bodyHighlight" x1="126" y1="70" x2="292" y2="304" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#53F3FF" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#2A7DFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#2B0BAF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="visorGradient" cx="210" cy="200" r="130" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#171C5F"/>
+      <stop offset="0.55" stop-color="#090E3B"/>
+      <stop offset="1" stop-color="#03051E"/>
+    </radialGradient>
+    <linearGradient id="antennaGradient" x1="210" y1="104" x2="210" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1842DE"/>
+      <stop offset="1" stop-color="#ED42F4"/>
+    </linearGradient>
+    <radialGradient id="orbGradient" cx="202" cy="40" r="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF7BFF"/>
+      <stop offset="0.5" stop-color="#D72DFF"/>
+      <stop offset="1" stop-color="#414BFF"/>
+    </radialGradient>
+    <radialGradient id="leftEye" cx="150" cy="212" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D8FFFF"/>
+      <stop offset="0.45" stop-color="#58DDFF"/>
+      <stop offset="1" stop-color="#1078FF"/>
+    </radialGradient>
+    <radialGradient id="rightEye" cx="270" cy="212" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD6FF"/>
+      <stop offset="0.45" stop-color="#C755FF"/>
+      <stop offset="1" stop-color="#6721FF"/>
+    </radialGradient>
+    <linearGradient id="pressGradient" x1="860" y1="180" x2="1290" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2467FF"/>
+      <stop offset="0.55" stop-color="#7D42FF"/>
+      <stop offset="1" stop-color="#D72DFF"/>
+    </linearGradient>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#1B1464" flood-opacity="0.22"/>
+    </filter>
+    <filter id="eyeGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <rect x="64" y="104" width="292" height="252" rx="74" fill="url(#bodyGradient)"/>
+    <rect x="64" y="104" width="292" height="252" rx="74" fill="url(#bodyHighlight)"/>
+    <rect x="64" y="104" width="292" height="252" rx="74" fill="none" stroke="#62F5FF" stroke-opacity="0.55" stroke-width="3.5"/>
+    <rect x="99" y="170" width="222" height="108" rx="50" fill="url(#visorGradient)"/>
+    <path d="M210 104 L210 67" stroke="url(#antennaGradient)" stroke-width="17" stroke-linecap="round"/>
+    <circle cx="210" cy="47" r="24" fill="url(#orbGradient)" stroke="#F487FF" stroke-width="2.5"/>
+    <circle cx="150" cy="212" r="21" fill="url(#leftEye)" filter="url(#eyeGlow)"/>
+    <circle cx="270" cy="212" r="21" fill="url(#rightEye)" filter="url(#eyeGlow)"/>
+    <path d="M180 253 C195 267 225 267 240 253" fill="none" stroke="#62E9FF" stroke-width="8" stroke-linecap="round"/>
+  </g>
+
+  <g font-family="Inter, Avenir Next, Montserrat, Arial, sans-serif" font-size="128" font-weight="800" letter-spacing="-8">
+    <text x="430" y="253" fill="#070B24">Synth</text>
+    <text x="825" y="253" fill="url(#pressGradient)">Press</text>
+  </g>
+</svg>

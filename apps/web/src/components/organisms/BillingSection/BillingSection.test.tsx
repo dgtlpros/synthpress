@@ -61,7 +61,8 @@ describe("BillingSection", () => {
     expect(screen.getByText("Free")).toBeInTheDocument();
     expect(screen.getByText(/free plan/)).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByText("No activity yet.")).toBeInTheDocument();
+    expect(screen.getByText("No token activity yet")).toBeInTheDocument();
+    expect(screen.getByText(/Subscription grants, top-ups/)).toBeInTheDocument();
   });
 
   it("renders an active subscription with monthly allowance and renewal", () => {
@@ -136,6 +137,21 @@ describe("BillingSection", () => {
     expect(screen.getByText("custom_kind")).toBeInTheDocument();
     expect(screen.getByText("not-a-date")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("falls back to 'active' status when plan is set but subscription is null", () => {
+    render(
+      <BillingSection
+        plan={proPlan}
+        subscription={null}
+        balance={1000}
+        transactions={[]}
+        topUpPacks={[]}
+      />,
+    );
+    expect(screen.getByText("Pro")).toBeInTheDocument();
+    // No "free plan" blurb since we computed status='active' from the plan
+    expect(screen.queryByText(/free plan/)).not.toBeInTheDocument();
   });
 
   it("renders subscriptionActions in the subscription card footer", () => {

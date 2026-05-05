@@ -2,11 +2,12 @@ import NextLink from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { LandingLayout } from "@/components/templates/LandingLayout";
 import { Footer } from "@/components/organisms/Footer";
-import { PricingCard } from "@/components/molecules/PricingCard";
+import {
+  PricingTableConnector,
+  type PricingTablePlan,
+} from "@/connectors/PricingTableConnector";
 
 export const dynamic = "force-dynamic";
-
-const formatter = new Intl.NumberFormat("en-US");
 
 export default async function PricingPage() {
   const supabase = await createClient();
@@ -15,6 +16,18 @@ export default async function PricingPage() {
     supabase.from("plans").select("*").order("sort_order"),
     supabase.auth.getUser(),
   ]);
+
+  const tablePlans: PricingTablePlan[] = (plans ?? []).map((plan) => ({
+    key: plan.key,
+    name: plan.name,
+    description: plan.description,
+    monthlyPriceCents: plan.monthly_price_cents,
+    annualPriceCents: plan.annual_price_cents ?? null,
+    features: Array.isArray(plan.features)
+      ? (plan.features as unknown[]).filter((f): f is string => typeof f === "string")
+      : [],
+    isPopular: plan.is_popular,
+  }));
 
   return (
     <LandingLayout user={user ? { email: user.email ?? "" } : null}>
@@ -30,25 +43,8 @@ export default async function PricingPage() {
             </p>
           </div>
 
-          <div className="mt-16 grid items-start gap-8 sm:grid-cols-3">
-            {plans?.map((plan) => {
-              const features = Array.isArray(plan.features)
-                ? (plan.features as unknown[]).filter((f): f is string => typeof f === "string")
-                : [];
-
-              return (
-                <PricingCard
-                  key={plan.key}
-                  name={plan.name}
-                  price={`$${formatter.format(Math.floor(plan.monthly_price_cents / 100))}`}
-                  description={plan.description}
-                  features={features}
-                  popular={plan.is_popular}
-                  ctaLabel={user ? "Subscribe" : "Get Started"}
-                  ctaHref={user ? `/checkout?plan=${plan.key}` : `/signup?next=/checkout?plan=${plan.key}`}
-                />
-              );
-            })}
+          <div className="mt-16">
+            <PricingTableConnector plans={tablePlans} authed={Boolean(user)} />
           </div>
 
           <div className="mt-16 rounded-[var(--sp-radius-xl)] border border-border bg-surface p-8 text-center shadow-[var(--sp-shadow-sm)]">
