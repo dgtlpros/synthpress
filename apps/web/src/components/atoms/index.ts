@@ -40,6 +40,9 @@ export type { LinkProps, LinkVariant } from "./Link";
 export { ConfirmModal } from "./ConfirmModal";
 export type { ConfirmModalProps, ConfirmModalVariant } from "./ConfirmModal";
 
+export { Modal } from "./Modal";
+export type { ModalProps, ModalMaxWidth } from "./Modal";
+
 export { PriceTag } from "./PriceTag";
 export type { PriceTagProps } from "./PriceTag";
 

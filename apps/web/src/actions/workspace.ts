@@ -82,6 +82,62 @@ export async function createWorkspaceProject(
 
 const MAX_PROJECT_DESCRIPTION = 5000;
 
+export async function updateProjectSettings(
+  teamId: string,
+  projectId: string,
+  input: { name: string; description: string },
+): Promise<ActionResult<null>> {
+  const name = input.name.trim();
+  if (!name) {
+    return { data: null, error: "Project name is required." };
+  }
+  if (input.description.length > MAX_PROJECT_DESCRIPTION) {
+    return { data: null, error: `Description must be at most ${MAX_PROJECT_DESCRIPTION} characters.` };
+  }
+
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  const { data: row, error: fetchErr } = await supabase
+    .from("projects")
+    .select("name, slug")
+    .eq("id", projectId)
+    .eq("team_id", teamId)
+    .maybeSingle();
+
+  if (fetchErr || !row) {
+    return { data: null, error: "Project not found." };
+  }
+
+  let slug = row.slug;
+  if (name !== row.name.trim()) {
+    try {
+      slug = await generateUniqueProjectSlug(teamId, name, supabase);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not update project slug.";
+      return { data: null, error: message };
+    }
+  }
+
+  const trimmedDesc = input.description.trim();
+  const { error } = await supabase
+    .from("projects")
+    .update({ name, description: trimmedDesc, slug })
+    .eq("id", projectId)
+    .eq("team_id", teamId);
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  revalidatePath(`/teams/${teamId}/projects/${projectId}`);
+  revalidatePath(`/teams/${teamId}/projects`);
+  revalidatePath("/dashboard");
+  return { data: null, error: null };
+}
+
 export async function updateProjectDescription(
   teamId: string,
   projectId: string,
@@ -96,21 +152,18 @@ export async function updateProjectDescription(
     return { data: null, error: "You must be signed in." };
   }
 
-  const trimmed = description.trim();
-  const { error } = await supabase
+  const { data: row, error: fetchErr } = await supabase
     .from("projects")
-    .update({ description: trimmed })
+    .select("name")
     .eq("id", projectId)
-    .eq("team_id", teamId);
+    .eq("team_id", teamId)
+    .maybeSingle();
 
-  if (error) {
-    return { data: null, error: error.message };
+  if (fetchErr || !row) {
+    return { data: null, error: "Project not found." };
   }
 
-  revalidatePath(`/teams/${teamId}/projects/${projectId}`);
-  revalidatePath(`/teams/${teamId}/projects`);
-  revalidatePath("/dashboard");
-  return { data: null, error: null };
+  return updateProjectSettings(teamId, projectId, { name: row.name, description });
 }
 
 export type CreateBlogInput = {
@@ -157,6 +210,7 @@ export async function createBlog(input: CreateBlogInput): Promise<ActionResult<{
     }
 
     revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}/blogs`);
+    revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}/blogs/${data.id}`);
     revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}`);
     revalidatePath("/dashboard");
     return { data: { id: data.id }, error: null };

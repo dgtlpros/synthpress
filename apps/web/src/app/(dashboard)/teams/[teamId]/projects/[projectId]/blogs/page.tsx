@@ -92,14 +92,17 @@ export default async function ProjectBlogsPage({
         ) : (
           <ul className="space-y-2">
             {blogs.map((blog) => (
-              <li
-                key={blog.id}
-                className="rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm shadow-sm"
-              >
-                <p className="font-medium text-foreground">{blog.name}</p>
-                <p className="mt-1 truncate text-xs text-muted" title={blog.wp_url}>
-                  {blog.wp_url}
-                </p>
+              <li key={blog.id}>
+                <Link
+                  href={`/teams/${teamId}/projects/${projectId}/blogs/${blog.id}`}
+                  className="block rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm shadow-sm transition-colors hover:border-border-hover hover:bg-surface-hover"
+                >
+                  <p className="font-medium text-foreground">{blog.name}</p>
+                  <p className="mt-1 truncate text-xs text-muted" title={blog.wp_url}>
+                    {blog.wp_url}
+                  </p>
+                  <p className="mt-2 text-xs font-medium text-brand-blue">Open settings →</p>
+                </Link>
               </li>
             ))}
           </ul>

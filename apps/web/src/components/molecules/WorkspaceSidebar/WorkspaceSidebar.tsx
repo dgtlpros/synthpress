@@ -43,6 +43,26 @@ function activeProjectIdFromPath(pathname: string | null): string | null {
   return m?.[1] ?? null;
 }
 
+/** Primary nav rows + nested project links — shared shape, hover, pointer, theme-aligned accents. */
+const sidebarNavRow =
+  "flex cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] px-2.5 py-2 text-sm font-medium transition-colors duration-150";
+
+/** Active: light brand wash + slim inset gradient bar (matches marketing gradients, lighter than a full border). */
+const sidebarNavActive =
+  "relative text-foreground bg-gradient-to-r from-brand-indigo/[0.07] via-brand-blue/[0.05] to-transparent pl-3 before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-gradient-accent before:content-['']";
+
+const sidebarNavInactive =
+  "pl-3 text-muted hover:bg-surface-hover hover:text-foreground";
+
+const sidebarSectionLabel =
+  "mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted";
+
+const sidebarSubsectionLabel =
+  "mb-1.5 mt-3 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted";
+
+const sidebarListboxOption =
+  "flex w-full cursor-pointer items-center gap-2 py-2 pl-3 pr-2.5 text-sm font-medium transition-colors duration-150";
+
 export function WorkspaceSidebar({ teams, email, onItemClick, className }: WorkspaceSidebarProps) {
   const pathname = usePathname();
   const activeTeamId = activeTeamIdFromPath(pathname);
@@ -98,15 +118,15 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
   return (
     <aside
       className={cn(
-        "flex w-64 flex-col border-r border-border bg-surface",
+        "flex w-64 flex-col border-r border-border bg-background",
         className,
       )}
       aria-label="Primary navigation"
     >
-      <div className="flex h-16 items-center border-b border-border px-6">
+      <div className="flex h-16 items-center border-b border-border/80 bg-surface/90 px-5 backdrop-blur-sm">
         <NextLink
           href="/"
-          className="flex items-center"
+          className="flex cursor-pointer items-center"
           onClick={onItemClick}
           aria-label="Go to home"
         >
@@ -120,22 +140,15 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <nav className="flex-1 space-y-6 p-4" aria-label="Workspace">
+        <nav className="flex-1 space-y-5 p-3 sm:p-4" aria-label="Main navigation">
           <div>
-            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Workspace
-            </p>
+            <p className={sidebarSectionLabel}>Workspace</p>
             <ul className="space-y-0.5">
               <li>
                 <NextLink
                   href="/dashboard"
                   onClick={onItemClick}
-                  className={cn(
-                    "flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium transition-colors",
-                    dashboardActive
-                      ? "border-l-2 border-transparent bg-surface-active bg-gradient-to-r from-brand-blue/12 to-transparent pl-[10px] text-foreground"
-                      : "border-l-2 border-transparent pl-[10px] text-muted hover:bg-surface-hover hover:text-foreground",
-                  )}
+                  className={cn(sidebarNavRow, dashboardActive ? sidebarNavActive : sidebarNavInactive)}
                   aria-current={dashboardActive ? "page" : undefined}
                 >
                   Dashboard
@@ -145,23 +158,16 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
           </div>
 
           <div>
-            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Teams
-            </p>
-            <ul className="space-y-2">
+            <p className={sidebarSectionLabel}>Team</p>
+            <ul className="space-y-1.5">
               <li>
                 <NextLink
                   href="/teams"
                   onClick={onItemClick}
-                  className={cn(
-                    "flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium transition-colors",
-                    teamsRootActive
-                      ? "border-l-2 border-transparent bg-surface-active bg-gradient-to-r from-brand-blue/12 to-transparent pl-[10px] text-foreground"
-                      : "border-l-2 border-transparent pl-[10px] text-muted hover:bg-surface-hover hover:text-foreground",
-                  )}
+                  className={cn(sidebarNavRow, teamsRootActive ? sidebarNavActive : sidebarNavInactive)}
                   aria-current={teamsRootActive ? "page" : undefined}
                 >
-                  Teams
+                  All teams
                 </NextLink>
               </li>
 
@@ -170,8 +176,9 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                   <button
                     type="button"
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-[var(--sp-radius-lg)] border border-border bg-surface px-2 py-2 text-left text-sm font-medium text-foreground shadow-sm transition-colors hover:border-border-hover hover:bg-surface-hover",
-                      activeTeam && !teamsRootActive && "ring-1 ring-border-hover/80",
+                      "flex w-full cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] border border-border/90 bg-surface px-2.5 py-2 text-left text-sm font-medium text-foreground shadow-[var(--sp-shadow-sm)] transition-all duration-150 hover:border-border-hover hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]",
+                      activeTeam && !teamsRootActive && "border-brand-blue/20 ring-1 ring-brand-blue/[0.08]",
+                      teamPickerOpen && "border-brand-blue/25 ring-1 ring-brand-blue/10",
                     )}
                     aria-label="Choose or switch team"
                     aria-expanded={teamPickerOpen}
@@ -184,7 +191,7 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                       size="sm"
                       className="shrink-0"
                     />
-                    <span className="min-w-0 flex-1 truncate">
+                    <span className="min-w-0 flex-1 truncate normal-case tracking-normal">
                       {activeTeam ? activeTeam.name : "Select a team"}
                     </span>
                     <svg
@@ -204,7 +211,7 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                       id="workspace-team-picker"
                       role="listbox"
                       aria-label="Switch team"
-                      className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-[var(--sp-radius-lg)] border border-border bg-surface py-1 shadow-[var(--sp-shadow-lg)]"
+                      className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-[var(--sp-radius-lg)] border border-border/90 bg-surface py-1 shadow-[var(--sp-shadow-lg)] ring-1 ring-black/[0.03] dark:ring-white/[0.04]"
                     >
                       {sortedTeams.map((team) => {
                         const selected = team.id === activeTeamId;
@@ -215,9 +222,9 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                             role="option"
                             aria-selected={selected}
                             className={cn(
-                              "flex items-center gap-2 px-3 py-2 text-sm transition-colors",
+                              sidebarListboxOption,
                               selected
-                                ? "bg-surface-active font-medium text-foreground"
+                                ? "relative bg-gradient-to-r from-brand-indigo/[0.06] to-transparent text-foreground before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-gradient-accent before:content-['']"
                                 : "text-muted hover:bg-surface-hover hover:text-foreground",
                             )}
                             onClick={pickTeam}
@@ -231,17 +238,18 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                   ) : null}
                 </li>
               ) : (
-                <li className="px-1 text-xs text-muted">No teams yet — create one from Teams.</li>
+                <li className="px-2.5 py-2 text-sm text-muted">No teams yet — create one from All teams.</li>
               )}
 
               {activeTeam ? (
                 <li>
-                  <p className="mb-1.5 mt-3 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Projects in this team
-                  </p>
-                  <ul className="space-y-0.5 border-l border-border pl-2" role="list">
+                  <p className={sidebarSubsectionLabel}>Projects</p>
+                  <ul
+                    className="ml-0.5 space-y-0.5 border-l border-brand-blue/[0.12] pl-2.5 dark:border-brand-blue/20"
+                    role="list"
+                  >
                     {projectsForSidebar.length === 0 ? (
-                      <li className="py-1 text-xs text-muted">No projects yet</li>
+                      <li className="px-2.5 py-2 text-sm text-muted">No projects yet</li>
                     ) : (
                       projectsForSidebar.map((p) => {
                         const href = `/teams/${activeTeam.id}/projects/${p.id}`;
@@ -252,14 +260,13 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                               href={href}
                               onClick={onItemClick}
                               className={cn(
-                                "block truncate rounded-[var(--sp-radius-md)] px-2 py-1.5 text-xs font-medium transition-colors",
-                                projectActive
-                                  ? "border-l-2 border-brand-blue bg-surface-active pl-[6px] text-foreground"
-                                  : "border-l-2 border-transparent pl-[6px] text-muted hover:bg-surface-hover hover:text-foreground",
+                                sidebarNavRow,
+                                "min-w-0 truncate",
+                                projectActive ? sidebarNavActive : sidebarNavInactive,
                               )}
                               aria-current={projectActive ? "page" : undefined}
                             >
-                              {p.name}
+                              <span className="min-w-0 truncate">{p.name}</span>
                             </NextLink>
                           </li>
                         );
@@ -272,20 +279,13 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
           </div>
 
           <div>
-            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Account
-            </p>
+            <p className={sidebarSectionLabel}>Account</p>
             <ul className="space-y-0.5">
               <li>
                 <NextLink
                   href="/account"
                   onClick={onItemClick}
-                  className={cn(
-                    "flex items-center gap-2 rounded-[var(--sp-radius-lg)] px-3 py-2 text-sm font-medium transition-colors",
-                    accountActive
-                      ? "border-l-2 border-transparent bg-surface-active bg-gradient-to-r from-brand-blue/12 to-transparent pl-[10px] text-foreground"
-                      : "border-l-2 border-transparent pl-[10px] text-muted hover:bg-surface-hover hover:text-foreground",
-                  )}
+                  className={cn(sidebarNavRow, accountActive ? sidebarNavActive : sidebarNavInactive)}
                   aria-current={accountActive ? "page" : undefined}
                 >
                   Account
@@ -297,10 +297,13 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
       </div>
 
       {email ? (
-        <div className="border-t border-border px-6 py-4">
-          <p className="truncate text-xs text-muted" title={email}>
-            {email}
-          </p>
+        <div className="border-t border-border/80 p-3">
+          <div className="rounded-[var(--sp-radius-lg)] border border-border/70 bg-surface px-3 py-2.5 shadow-[var(--sp-shadow-sm)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Signed in</p>
+            <p className="mt-1 truncate text-xs text-foreground/90" title={email}>
+              {email}
+            </p>
+          </div>
         </div>
       ) : null}
     </aside>

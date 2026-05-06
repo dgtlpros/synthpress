@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { isStaleBrowserSessionError } from "@/lib/supabase/auth-session";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -25,9 +26,13 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: userData, error } = await supabase.auth.getUser();
+  let user = userData.user;
+
+  if (error && isStaleBrowserSessionError(error)) {
+    await supabase.auth.signOut();
+    user = null;
+  }
 
   return { user, supabaseResponse };
 }

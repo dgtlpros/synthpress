@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockGetAll, mockSet } = vi.hoisted(() => ({
+const { mockGetAll, mockSet, mockGetUser, mockSignOut } = vi.hoisted(() => ({
   mockGetAll: vi.fn().mockReturnValue([]),
   mockSet: vi.fn(),
+  mockGetUser: vi.fn(),
+  mockSignOut: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -13,7 +15,9 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: vi.fn().mockReturnValue({ auth: {} }),
+  createServerClient: vi.fn().mockReturnValue({
+    auth: { getUser: vi.fn(), signOut: vi.fn() },
+  }),
 }));
 
 import { createServerClient } from "@supabase/ssr";
@@ -23,7 +27,11 @@ const mockedCreateServerClient = vi.mocked(createServerClient);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedCreateServerClient.mockReturnValue({ auth: {} } as ReturnType<typeof createServerClient>);
+  mockGetUser.mockResolvedValue({ data: { user: null }, error: null });
+  mockSignOut.mockResolvedValue({ error: null });
+  mockedCreateServerClient.mockReturnValue({
+    auth: { getUser: mockGetUser, signOut: mockSignOut },
+  } as unknown as ReturnType<typeof createServerClient>);
 });
 
 describe("createClient (server)", () => {
@@ -31,7 +39,8 @@ describe("createClient (server)", () => {
     const client = await createClient();
 
     expect(mockedCreateServerClient).toHaveBeenCalledOnce();
-    expect(client).toEqual({ auth: {} });
+    expect(client.auth.getUser).toBeTypeOf("function");
+    expect(client.auth.signOut).toBe(mockSignOut);
   });
 
   it("passes cookie getAll and setAll handlers", async () => {
@@ -84,5 +93,24 @@ describe("createClient (server)", () => {
         { name: "sb-token", value: "abc", options: {} },
       ]),
     ).not.toThrow();
+  });
+
+  it("getUser signs out and returns null user when refresh token is stale", async () => {
+    mockGetUser.mockResolvedValueOnce({
+      data: { user: null },
+      error: {
+        name: "AuthApiError",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+        code: "refresh_token_not_found",
+      },
+    });
+
+    const client = await createClient();
+    const out = await client.auth.getUser();
+
+    expect(mockSignOut).toHaveBeenCalledOnce();
+    expect(out.data.user).toBeNull();
+    expect(out.error).toBeNull();
   });
 });

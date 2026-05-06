@@ -12,6 +12,27 @@ export { TopUpCard } from "./TopUpCard";
 export type { TopUpCardProps } from "./TopUpCard";
 export { AppCard } from "./AppCard";
 export type { AppCardProps } from "./AppCard";
+
+export { ProjectPageHeader } from "./ProjectPageHeader";
+export type { ProjectPageHeaderProps } from "./ProjectPageHeader";
+
+export { EditProjectSettingsModal } from "./EditProjectSettingsModal";
+export type { EditProjectSettingsModalProps } from "./EditProjectSettingsModal";
+
+export { ProjectInstalledAppRow } from "./ProjectInstalledAppRow";
+export type { ProjectInstalledAppRowProps } from "./ProjectInstalledAppRow";
+
+export { ProjectInstalledAppList } from "./ProjectInstalledAppList";
+export type { ProjectInstalledAppListProps, ProjectInstalledAppListItem } from "./ProjectInstalledAppList";
+
+export { CreateAppChoiceModal } from "./CreateAppChoiceModal";
+export type { CreateAppChoiceModalProps } from "./CreateAppChoiceModal";
+
+export { ProjectsListToolbar } from "./ProjectsListToolbar";
+export type { ProjectsListToolbarProps, ProjectsSortKey } from "./ProjectsListToolbar";
+
+export { ProjectsList } from "./ProjectsList";
+export type { ProjectsListProps, ProjectsListProject } from "./ProjectsList";
 export { WorkspaceSidebar } from "./WorkspaceSidebar";
 export type {
   WorkspaceSidebarProps,

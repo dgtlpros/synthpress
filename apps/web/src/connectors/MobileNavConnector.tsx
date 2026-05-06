@@ -64,7 +64,7 @@ export function MobileNavConnector({ teams, email, className }: MobileNavConnect
         data-testid="mobile-nav-backdrop"
         onClick={() => setIsOpen(false)}
         className={cn(
-          "fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity",
+          "fixed inset-0 z-40 cursor-pointer bg-black/40 backdrop-blur-sm transition-opacity",
           isOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         aria-hidden="true"

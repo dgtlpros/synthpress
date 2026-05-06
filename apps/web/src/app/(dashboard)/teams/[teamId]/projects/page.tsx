@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/atoms/Card";
 import { CreateProjectForm } from "./create-project-form";
+import { TeamProjectsListConnector } from "@/connectors/TeamProjectsListConnector";
 
 export const dynamic = "force-dynamic";
 
@@ -75,25 +76,16 @@ export default async function TeamProjectsPage({
       </Card>
 
       <section aria-labelledby="project-list-heading">
-        <h2 id="project-list-heading" className="mb-4 text-lg font-semibold text-foreground">
+        <h2 id="project-list-heading" className="mb-3 text-lg font-semibold text-foreground">
           Projects in {team.name}
         </h2>
         {projects.length === 0 ? (
           <p className="text-sm text-muted">Create a project to add blogs and automation.</p>
         ) : (
-          <ul className="space-y-2">
-            {projects.map((project) => (
-              <li key={project.id}>
-                <Link
-                  href={`/teams/${teamId}/projects/${project.id}`}
-                  className="flex items-center justify-between rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-surface-hover"
-                >
-                  <span>{project.name}</span>
-                  <span className="text-muted">Open →</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <TeamProjectsListConnector
+            teamId={teamId}
+            projects={projects.map((p) => ({ id: p.id, name: p.name, created_at: p.created_at }))}
+          />
         )}
       </section>
     </div>

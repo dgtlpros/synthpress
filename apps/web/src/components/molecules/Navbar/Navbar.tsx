@@ -36,7 +36,7 @@ export function Navbar({ className, user }: NavbarProps) {
         <div className="flex items-center gap-4">
           {user ? (
             <NextLink
-              href="/account"
+              href="/dashboard"
               className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110"
             >
               Account

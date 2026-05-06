@@ -31,6 +31,7 @@ import {
   createBlog,
   getTeamsForCurrentUser,
   updateProjectDescription,
+  updateProjectSettings,
 } from "./workspace";
 
 const mockedRevalidatePath = vi.mocked(revalidatePath);
@@ -170,8 +171,68 @@ describe("createBlog", () => {
         wp_app_password: "secret",
       }),
     );
+    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid/blogs");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid/blogs/b1");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/dashboard");
+  });
+});
+
+describe("updateProjectSettings", () => {
+  it("returns error when name empty", async () => {
+    mockAuth({ id: "u1" });
+    const result = await updateProjectSettings("tid", "pid", { name: "   ", description: "x" });
+    expect(result.error).toMatch(/name is required/i);
+  });
+
+  it("returns error when project not found", async () => {
+    mockAuth({ id: "u1" });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const select = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ maybeSingle }),
+      }),
+    });
+    mockedCreateClient.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: vi.fn(() => ({ select })),
+    } as never);
+
+    const result = await updateProjectSettings("tid", "pid", { name: "N", description: "D" });
+    expect(result.error).toMatch(/not found/i);
+  });
+
+  it("updates name description and slug when name changes", async () => {
+    mockAuth({ id: "u1" });
+    mockedGenerateUniqueProjectSlug.mockResolvedValue("renamed-slug");
+
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: { name: "Old", slug: "old-slug" },
+      error: null,
+    });
+    const select = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ maybeSingle }),
+      }),
+    });
+    const eqTeamU = vi.fn().mockResolvedValue({ error: null });
+    const eqIdU = vi.fn().mockReturnValue({ eq: eqTeamU });
+    const update = vi.fn().mockReturnValue({ eq: eqIdU });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: vi.fn(() => ({ select, update })),
+    } as never);
+
+    const result = await updateProjectSettings("tid", "pid", { name: "Renamed", description: "  New desc  " });
+
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      name: "Renamed",
+      description: "New desc",
+      slug: "renamed-slug",
+    });
+    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
   });
 });
 
@@ -191,22 +252,33 @@ describe("updateProjectDescription", () => {
 
   it("updates description and revalidates", async () => {
     mockAuth({ id: "u1" });
-    const eqTeam = vi.fn().mockResolvedValue({ error: null });
-    const eqId = vi.fn().mockReturnValue({ eq: eqTeam });
-    const update = vi.fn().mockReturnValue({ eq: eqId });
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { name: "Project P" }, error: null })
+      .mockResolvedValueOnce({ data: { name: "Project P", slug: "project-p" }, error: null });
+    const select = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ maybeSingle }),
+      }),
+    });
+    const eqTeamU = vi.fn().mockResolvedValue({ error: null });
+    const eqIdU = vi.fn().mockReturnValue({ eq: eqTeamU });
+    const update = vi.fn().mockReturnValue({ eq: eqIdU });
 
     mockedCreateClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: vi.fn(() => ({ update })),
+      from: vi.fn(() => ({ select, update })),
     } as never);
 
     const result = await updateProjectDescription("tid", "pid", "  Roadmap  ");
 
     expect(result.error).toBeNull();
     expect(result.data).toBeNull();
-    expect(update).toHaveBeenCalledWith({ description: "Roadmap" });
-    expect(eqId).toHaveBeenCalledWith("id", "pid");
-    expect(eqTeam).toHaveBeenCalledWith("team_id", "tid");
+    expect(update).toHaveBeenCalledWith({
+      name: "Project P",
+      description: "Roadmap",
+      slug: "project-p",
+    });
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/dashboard");

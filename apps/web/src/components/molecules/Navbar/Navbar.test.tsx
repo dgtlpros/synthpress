@@ -43,10 +43,10 @@ describe("Navbar", () => {
   describe("logged in (user provided)", () => {
     const user = { email: "test@example.com" };
 
-    it("renders Account link pointing to /account", () => {
+    it("renders Account link pointing to /dashboard", () => {
       render(<Navbar user={user} />);
       const accountLink = screen.getByText("Account");
-      expect(accountLink).toHaveAttribute("href", "/account");
+      expect(accountLink).toHaveAttribute("href", "/dashboard");
     });
 
     it("does not render Log In or Sign Up", () => {

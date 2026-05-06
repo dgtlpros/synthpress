@@ -9,6 +9,9 @@ export type TeamRow = Tables<"teams">;
 export type ProjectRow = Tables<"projects">;
 export type BlogRow = Tables<"blogs">;
 
+/** Blog row safe for UI / JSON (no credentials). */
+export type BlogListRow = Omit<BlogRow, "wp_app_password">;
+
 /** URL-safe slug; falls back to `fallback` when empty */
 export function slugify(input: string, fallback: string): string {
   const s = input
@@ -95,15 +98,18 @@ export async function listProjectsForTeam(teamId: string, client: Client): Promi
   return data ?? [];
 }
 
-export async function listBlogsForProject(projectId: string, client: Client): Promise<BlogRow[]> {
+const BLOG_LIST_COLUMNS =
+  "id, name, slug, project_id, wp_url, wp_username, is_active, articles_per_day, niche, keywords, ai_prompt_template, schedule_cron, created_at, updated_at" as const;
+
+export async function listBlogsForProject(projectId: string, client: Client): Promise<BlogListRow[]> {
   const { data, error } = await client
     .from("blogs")
-    .select("*")
+    .select(BLOG_LIST_COLUMNS)
     .eq("project_id", projectId)
     .order("name");
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as BlogListRow[];
 }
 
 export async function createTeamWithOwner(input: {

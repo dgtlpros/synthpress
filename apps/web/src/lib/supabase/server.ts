@@ -1,12 +1,13 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { isStaleBrowserSessionError } from "@/lib/supabase/auth-session";
 import type { Database } from "./database.types";
 
 export async function createClient() {
   const cookieStore = await cookies();
 
-  return createServerClient<Database>(
+  const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -27,4 +28,20 @@ export async function createClient() {
       },
     },
   );
+
+  const originalGetUser = supabase.auth.getUser.bind(supabase.auth);
+  supabase.auth.getUser = async (jwt) => {
+    const result = await originalGetUser(jwt);
+    if (result.error && isStaleBrowserSessionError(result.error)) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Same read-only cookie context as setAll — middleware already clears cookies when possible.
+      }
+      return { data: { user: null }, error: null } as unknown as Awaited<ReturnType<typeof originalGetUser>>;
+    }
+    return result;
+  };
+
+  return supabase;
 }

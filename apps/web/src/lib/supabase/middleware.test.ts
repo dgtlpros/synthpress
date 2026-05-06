@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
 const mockGetUser = vi.fn();
+const mockSignOut = vi.fn();
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: vi.fn().mockReturnValue({
-    auth: { getUser: vi.fn() },
+    auth: { getUser: vi.fn(), signOut: vi.fn() },
   }),
 }));
 
@@ -20,9 +21,10 @@ beforeEach(() => {
   mockGetUser.mockResolvedValue({
     data: { user: { id: "user-1", email: "test@example.com" } },
   });
+  mockSignOut.mockResolvedValue({ error: null });
 
   mockedCreateServerClient.mockReturnValue({
-    auth: { getUser: mockGetUser },
+    auth: { getUser: mockGetUser, signOut: mockSignOut },
   } as unknown as ReturnType<typeof createServerClient>);
 });
 
@@ -46,6 +48,24 @@ describe("updateSession", () => {
     const { user } = await updateSession(request);
 
     expect(user).toBeNull();
+  });
+
+  it("signs out and returns null when refresh token is stale", async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: null },
+      error: {
+        name: "AuthApiError",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+        code: "refresh_token_not_found",
+      },
+    });
+
+    const request = createMockRequest();
+    const { user } = await updateSession(request);
+
+    expect(user).toBeNull();
+    expect(mockSignOut).toHaveBeenCalledOnce();
   });
 
   it("creates server client with cookie handlers", async () => {

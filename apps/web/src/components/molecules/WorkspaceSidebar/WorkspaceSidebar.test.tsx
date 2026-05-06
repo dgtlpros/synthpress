@@ -33,15 +33,15 @@ describe("WorkspaceSidebar", () => {
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
   });
 
-  it("renders Teams link to /teams root", () => {
+  it("renders All teams link to /teams root", () => {
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Teams" })).toHaveAttribute("href", "/teams");
+    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute("href", "/teams");
   });
 
-  it("marks Teams link current on /teams", () => {
+  it("marks All teams link current on /teams", () => {
     mockPathname.mockReturnValue("/teams");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows project links only for the active team in the URL", () => {
