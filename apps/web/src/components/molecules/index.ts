@@ -19,3 +19,5 @@ export type {
 } from "./CheckoutSuccessHero";
 export { BillingNotice } from "./BillingNotice";
 export type { BillingNoticeProps, BillingNoticeVariant } from "./BillingNotice";
+export { InvoiceRow } from "./InvoiceRow";
+export type { InvoiceRowProps } from "./InvoiceRow";

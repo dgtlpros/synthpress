@@ -7,6 +7,7 @@ const {
   mockPortalCreate,
   mockConstructEventAsync,
   mockSubscriptionsUpdate,
+  mockInvoicesList,
   StripeMock,
 } = vi.hoisted(() => {
   const mockSessionsCreate = vi.fn();
@@ -15,6 +16,7 @@ const {
   const mockPortalCreate = vi.fn();
   const mockConstructEventAsync = vi.fn();
   const mockSubscriptionsUpdate = vi.fn();
+  const mockInvoicesList = vi.fn();
   const StripeMock = vi.fn(function StripeMock() {
     return {
       checkout: {
@@ -34,6 +36,9 @@ const {
       subscriptions: {
         update: mockSubscriptionsUpdate,
       },
+      invoices: {
+        list: mockInvoicesList,
+      },
       webhooks: {
         constructEventAsync: mockConstructEventAsync,
       },
@@ -46,6 +51,7 @@ const {
     mockPortalCreate,
     mockConstructEventAsync,
     mockSubscriptionsUpdate,
+    mockInvoicesList,
     StripeMock,
   };
 });
@@ -62,6 +68,7 @@ import {
   retrieveCheckoutSession,
   resumeSubscription,
   verifyWebhook,
+  getCustomerInvoices,
 } from "./stripe-service";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -318,6 +325,118 @@ describe("resumeSubscription", () => {
   it("propagates Stripe errors", async () => {
     mockSubscriptionsUpdate.mockRejectedValue(new Error("not found"));
     await expect(resumeSubscription("sub_x")).rejects.toThrow("not found");
+  });
+});
+
+describe("getCustomerInvoices", () => {
+  it("returns mapped DTOs for the customer's recent invoices", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          id: "in_paid",
+          number: "INV-001",
+          status: "paid",
+          amount_paid: 7900,
+          amount_due: 7900,
+          currency: "usd",
+          created: 1_700_000_000,
+          period_start: 1_697_408_000,
+          period_end: 1_700_000_000,
+          description: "Pro plan — May",
+          invoice_pdf: "https://files.stripe.com/v1/invoices/in_paid.pdf",
+          hosted_invoice_url: "https://invoice.stripe.com/i/acct_x/in_paid",
+        },
+      ],
+    });
+
+    const invoices = await getCustomerInvoices("cus_1");
+
+    expect(mockInvoicesList).toHaveBeenCalledWith({ customer: "cus_1", limit: 12 });
+    expect(invoices).toEqual([
+      {
+        id: "in_paid",
+        number: "INV-001",
+        status: "paid",
+        amountPaid: 7900,
+        amountDue: 7900,
+        currency: "usd",
+        createdAt: 1_700_000_000,
+        periodStart: 1_697_408_000,
+        periodEnd: 1_700_000_000,
+        description: "Pro plan — May",
+        pdfUrl: "https://files.stripe.com/v1/invoices/in_paid.pdf",
+        hostedUrl: "https://invoice.stripe.com/i/acct_x/in_paid",
+      },
+    ]);
+  });
+
+  it("respects a custom limit", async () => {
+    mockInvoicesList.mockResolvedValue({ data: [] });
+    await getCustomerInvoices("cus_2", 50);
+    expect(mockInvoicesList).toHaveBeenCalledWith({ customer: "cus_2", limit: 50 });
+  });
+
+  it("normalizes unknown statuses to 'unknown' and tolerates missing fields", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          id: "in_weird",
+          number: null,
+          status: "something_new",
+          amount_paid: 0,
+          amount_due: 0,
+          currency: "usd",
+          created: 1_700_000_000,
+          period_start: null,
+          period_end: null,
+          description: null,
+          invoice_pdf: null,
+          hosted_invoice_url: null,
+        },
+      ],
+    });
+
+    const invoices = await getCustomerInvoices("cus_3");
+    expect(invoices[0]).toMatchObject({
+      id: "in_weird",
+      number: null,
+      status: "unknown",
+      pdfUrl: null,
+      hostedUrl: null,
+    });
+  });
+
+  it("returns an empty list when the customer has no invoices yet", async () => {
+    mockInvoicesList.mockResolvedValue({ data: [] });
+    const invoices = await getCustomerInvoices("cus_empty");
+    expect(invoices).toEqual([]);
+  });
+
+  it("falls back to defaults when invoice fields are missing entirely", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          // Bare minimum — exercises every `??` fallback in the mapper.
+          created: 1_700_000_000,
+        },
+      ],
+    });
+
+    const invoices = await getCustomerInvoices("cus_sparse");
+    expect(invoices[0]).toEqual({
+      id: "",
+      number: null,
+      status: "unknown",
+      amountPaid: 0,
+      amountDue: 0,
+      currency: "usd",
+      createdAt: 1_700_000_000,
+      periodStart: null,
+      periodEnd: null,
+      description: null,
+      pdfUrl: null,
+      hostedUrl: null,
+    });
   });
 });
 

@@ -256,6 +256,23 @@ export default async function AccountBillingPage() {
         topUpPacks={packs}
         subscriptionActions={subscriptionActions}
       />
+
+      <div className="rounded-[var(--sp-radius-xl)] border border-border bg-surface px-6 py-4 shadow-[var(--sp-shadow-sm)]">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Billing history</h3>
+            <p className="text-xs text-muted">
+              Download PDF receipts for every charge.
+            </p>
+          </div>
+          <NextLink
+            href="/account/billing/invoices"
+            className="inline-flex h-9 items-center justify-center rounded-[var(--sp-radius-md)] border border-border bg-surface px-4 text-sm font-medium text-foreground hover:bg-surface-hover transition-colors cursor-pointer"
+          >
+            View all invoices
+          </NextLink>
+        </div>
+      </div>
     </div>
   );
 }

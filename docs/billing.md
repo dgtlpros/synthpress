@@ -700,6 +700,32 @@ stripe trigger customer.subscription.deleted
 These create real test data in your Stripe test mode and fire your local
 webhook handler.
 
+## Billing history page
+
+`/account/billing/invoices` shows the user's last 12 Stripe invoices with
+PDF download + hosted-view links. Two design notes:
+
+- **Live fetch, not mirrored.** The page calls `stripe.invoices.list({ customer })`
+  via [`getCustomerInvoices`](../apps/web/src/services/stripe-service.ts) on
+  every render (the page is `force-dynamic`). We don't keep an `invoices`
+  table because Stripe is already the source of truth, the data is read-only
+  for the user, and a webhook-mirrored cache would just be one more thing
+  that can drift. Every charge generates a hosted PDF on Stripe's CDN —
+  `invoice.invoice_pdf` is a direct download URL we link to with the
+  `download` attribute.
+- **Streamed via Suspense.** The page header renders immediately; the list
+  is wrapped in `<Suspense fallback={<InvoiceListSkeleton />}>`. Next.js
+  streams the resolved list into the same response once Stripe responds, so
+  the user sees a coherent shell within ~30ms even if Stripe takes 200ms.
+
+If a user needs older invoices than the last 12, the footer points them at
+the Customer Portal (which Stripe paginates fully).
+
+We never render PDFs ourselves. If you ever need a custom-branded PDF, the
+right path is enabling Stripe's invoice branding (logo + accent color) at
+https://dashboard.stripe.com/settings/branding — it applies to every
+existing and future PDF without code changes.
+
 ## Where things live in the codebase
 
 | Concern                            | File                                                                       |
@@ -725,3 +751,5 @@ webhook handler.
 | Pricing page (public)              | [apps/web/src/app/pricing/page.tsx](../apps/web/src/app/pricing/page.tsx)  |
 | Checkout page                      | [apps/web/src/app/(dashboard)/checkout/page.tsx](<../apps/web/src/app/(dashboard)/checkout/page.tsx>) |
 | Billing dashboard                  | [apps/web/src/app/(dashboard)/account/billing/page.tsx](<../apps/web/src/app/(dashboard)/account/billing/page.tsx>) |
+| Billing history (invoices) page    | [apps/web/src/app/(dashboard)/account/billing/invoices/page.tsx](<../apps/web/src/app/(dashboard)/account/billing/invoices/page.tsx>) |
+| Invoice list organism              | [apps/web/src/components/organisms/InvoiceList/](../apps/web/src/components/organisms/InvoiceList/) |

@@ -141,6 +141,72 @@ export async function retrieveCheckoutSession(sessionId: string) {
   return stripe.checkout.sessions.retrieve(sessionId);
 }
 
+export type InvoiceStatus =
+  | "paid"
+  | "open"
+  | "void"
+  | "uncollectible"
+  | "draft"
+  | "unknown";
+
+export interface InvoiceListItem {
+  id: string;
+  number: string | null;
+  status: InvoiceStatus;
+  amountPaid: number;
+  amountDue: number;
+  currency: string;
+  createdAt: number;
+  periodStart: number | null;
+  periodEnd: number | null;
+  description: string | null;
+  pdfUrl: string | null;
+  hostedUrl: string | null;
+}
+
+const INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = [
+  "paid",
+  "open",
+  "void",
+  "uncollectible",
+  "draft",
+];
+
+function normalizeInvoiceStatus(status: string | null | undefined): InvoiceStatus {
+  if (status && (INVOICE_STATUSES as readonly string[]).includes(status)) {
+    return status as InvoiceStatus;
+  }
+  return "unknown";
+}
+
+/**
+ * Returns the most recent invoices for a Stripe customer, mapped to a clean
+ * DTO the UI can consume directly. We rely on Stripe-hosted PDFs
+ * (`invoice.invoice_pdf`) and never render PDFs ourselves.
+ */
+export async function getCustomerInvoices(
+  customerId: string,
+  limit = 12,
+): Promise<InvoiceListItem[]> {
+  const stripe = getStripe();
+  const list = await stripe.invoices.list({ customer: customerId, limit });
+
+  return list.data.map((invoice) => ({
+    id: invoice.id ?? "",
+    number: invoice.number ?? null,
+    status: normalizeInvoiceStatus(invoice.status),
+    amountPaid: invoice.amount_paid ?? 0,
+    amountDue: invoice.amount_due ?? 0,
+    currency: invoice.currency ?? "usd",
+    createdAt: invoice.created,
+    periodStart: invoice.period_start ?? null,
+    periodEnd: invoice.period_end ?? null,
+    description: invoice.description ?? null,
+    pdfUrl: invoice.invoice_pdf ?? null,
+    hostedUrl: invoice.hosted_invoice_url ?? null,
+  }));
+}
+
 /**
  * Reverses an end-of-period cancellation. Returns the updated subscription
  * object so callers can sync our DB without a second round-trip — important
