@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCustomerInvoices } from "@/services/stripe-service";
 import { InvoiceList } from "@/components/organisms/InvoiceList";
@@ -10,10 +10,9 @@ import { InvoiceListSkeleton } from "@/components/atoms/InvoiceListSkeleton";
 export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
   if (!user) {
     redirect("/login");
   }

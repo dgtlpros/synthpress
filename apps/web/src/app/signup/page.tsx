@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { Navbar } from "@/components/molecules/Navbar";
 import { Footer } from "@/components/organisms/Footer";
 import { SignupForm } from "./signup-form";
 
 export default async function SignupPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getAuthUserOncePerResponse();
 
   if (user) {
     redirect("/dashboard");

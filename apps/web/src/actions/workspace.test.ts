@@ -72,6 +72,7 @@ describe("createTeam", () => {
       name: "Acme",
       slug: "acme",
       created_by: "u1",
+      billing_user_id: "u1",
       created_at: "",
       updated_at: "",
     });
@@ -295,7 +296,17 @@ describe("getTeamsForCurrentUser", () => {
 
   it("returns teams from service", async () => {
     mockAuth({ id: "u1" });
-    const rows = [{ id: "t1", name: "T", slug: "t", created_by: null, created_at: "", updated_at: "" }];
+    const rows = [
+      {
+        id: "t1",
+        name: "T",
+        slug: "t",
+        created_by: null,
+        billing_user_id: "u1",
+        created_at: "",
+        updated_at: "",
+      },
+    ];
     mockedListTeamsForUser.mockResolvedValue(rows as never);
 
     const result = await getTeamsForCurrentUser();

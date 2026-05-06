@@ -1,6 +1,6 @@
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getCurrentPlan,
@@ -124,10 +124,9 @@ function computeBillingNotice(params: {
 }
 
 export default async function AccountBillingPage() {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
   if (!user) {
     redirect("/login");
   }

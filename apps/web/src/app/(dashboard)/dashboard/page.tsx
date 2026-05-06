@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
 import { listTeamsForUser } from "@/services/workspace-service";
@@ -45,15 +45,15 @@ function initials(fullName: string | null | undefined, email: string | null | un
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   if (!user) {
     redirect("/login");
   }
 
+  const supabase = await createClient();
   const admin = createAdminClient();
   const [{ data: profile }, teams, balance] = await Promise.all([
     supabase.from("profiles").select("full_name,avatar_url").eq("id", user.id).maybeSingle(),

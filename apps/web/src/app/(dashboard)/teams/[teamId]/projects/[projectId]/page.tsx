@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { listBlogsForProject } from "@/services/workspace-service";
 import { ProjectOverviewConnector } from "@/connectors/ProjectOverviewConnector";
 
@@ -12,14 +12,15 @@ export default async function ProjectOverviewPage({
   params: Promise<{ teamId: string; projectId: string }>;
 }) {
   const { teamId, projectId } = await params;
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   if (!user) {
     redirect("/login");
   }
+
+  const supabase = await createClient();
 
   const { data: team } = await supabase.from("teams").select("id,name").eq("id", teamId).maybeSingle();
   const { data: project } = await supabase
@@ -62,7 +63,11 @@ export default async function ProjectOverviewPage({
       />
 
       <p className="text-xs text-muted">
-        Team invites and join-by-link are planned; membership is owner-controlled for now.
+        Manage members and invites in{" "}
+        <Link href={`/teams/${teamId}/settings`} className="underline hover:text-foreground">
+          team settings
+        </Link>
+        .
       </p>
     </div>
   );

@@ -33,6 +33,8 @@ export type { ProjectsListToolbarProps, ProjectsSortKey } from "./ProjectsListTo
 
 export { ProjectsList } from "./ProjectsList";
 export type { ProjectsListProps, ProjectsListProject } from "./ProjectsList";
+export { TeamListItem } from "./TeamListItem";
+export type { TeamListItemProps } from "./TeamListItem";
 export { WorkspaceSidebar } from "./WorkspaceSidebar";
 export type {
   WorkspaceSidebarProps,

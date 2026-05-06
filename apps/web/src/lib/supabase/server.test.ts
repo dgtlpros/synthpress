@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockGetAll, mockSet, mockGetUser, mockSignOut } = vi.hoisted(() => ({
   mockGetAll: vi.fn().mockReturnValue([]),
@@ -20,18 +20,29 @@ vi.mock("@supabase/ssr", () => ({
   }),
 }));
 
+vi.mock("next/server", () => ({
+  after: vi.fn(),
+}));
+
 import { createServerClient } from "@supabase/ssr";
-import { createClient } from "./server";
+import { after } from "next/server";
+import { createClient, getAuthUserOncePerResponse, resetAuthUserDedupeForTests } from "./server";
 
 const mockedCreateServerClient = vi.mocked(createServerClient);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetAuthUserDedupeForTests();
+  mockGetAll.mockReturnValue([{ name: "sb-token", value: "abc" }]);
   mockGetUser.mockResolvedValue({ data: { user: null }, error: null });
   mockSignOut.mockResolvedValue({ error: null });
   mockedCreateServerClient.mockReturnValue({
     auth: { getUser: mockGetUser, signOut: mockSignOut },
   } as unknown as ReturnType<typeof createServerClient>);
+});
+
+afterEach(() => {
+  resetAuthUserDedupeForTests();
 });
 
 describe("createClient (server)", () => {
@@ -93,6 +104,55 @@ describe("createClient (server)", () => {
         { name: "sb-token", value: "abc", options: {} },
       ]),
     ).not.toThrow();
+  });
+
+  it("getAuthUserOncePerResponse dedupes concurrent calls", async () => {
+    await Promise.all([getAuthUserOncePerResponse(), getAuthUserOncePerResponse()]);
+
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(after)).toHaveBeenCalledOnce();
+  });
+
+  it("getAuthUserOncePerResponse dedupes sequential calls before after clears the map", async () => {
+    await getAuthUserOncePerResponse();
+    await getAuthUserOncePerResponse();
+
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("getAuthUserOncePerResponse skips Supabase entirely when no sb-* cookies are present", async () => {
+    mockGetAll.mockReturnValue([{ name: "session", value: "abc" }]);
+
+    const out = await getAuthUserOncePerResponse();
+
+    expect(out).toEqual({ data: { user: null }, error: null });
+    expect(mockGetUser).not.toHaveBeenCalled();
+    expect(mockedCreateServerClient).not.toHaveBeenCalled();
+    expect(vi.mocked(after)).not.toHaveBeenCalled();
+  });
+
+  it("getAuthUserOncePerResponse silences Supabase's refresh_token_not_found console.error", async () => {
+    const originalError = console.error;
+    const errorSpy = vi.fn();
+    console.error = errorSpy;
+
+    mockGetUser.mockImplementation(async () => {
+      console.error({
+        __isAuthError: true,
+        code: "refresh_token_not_found",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+      });
+      console.error("an unrelated message");
+      return { data: { user: null }, error: null };
+    });
+
+    await getAuthUserOncePerResponse();
+
+    console.error = originalError;
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("an unrelated message");
   });
 
   it("getUser signs out and returns null user when refresh token is stale", async () => {

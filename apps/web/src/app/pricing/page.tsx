@@ -1,5 +1,5 @@
 import NextLink from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { LandingLayout } from "@/components/templates/LandingLayout";
 import { Footer } from "@/components/organisms/Footer";
 import {
@@ -14,7 +14,7 @@ export default async function PricingPage() {
 
   const [{ data: plans }, { data: { user } }] = await Promise.all([
     supabase.from("plans").select("*").order("sort_order"),
-    supabase.auth.getUser(),
+    getAuthUserOncePerResponse(),
   ]);
 
   const tablePlans: PricingTablePlan[] = (plans ?? []).map((plan) => ({

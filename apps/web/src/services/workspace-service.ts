@@ -119,10 +119,15 @@ export async function createTeamWithOwner(input: {
 }): Promise<TeamRow> {
   const slug = await generateUniqueTeamSlug(input.name, input.client);
 
+  // billing_user_id is NOT NULL on teams (added in migration 00010). The
+  // creator is always the first owner, so we set it at insert time. The
+  // `keep_team_billing_user_id_in_sync` trigger keeps it correct on any
+  // future owner change.
   const teamInsert: TablesInsert<"teams"> = {
     name: input.name.trim(),
     slug,
     created_by: input.userId,
+    billing_user_id: input.userId,
   };
 
   const { data: team, error: teamErr } = await input.client

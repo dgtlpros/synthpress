@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { Badge } from "@/components/atoms/Badge";
 import {
   Card,
@@ -18,14 +18,15 @@ export default async function BlogAppSettingsPage({
   params: Promise<{ teamId: string; projectId: string; blogId: string }>;
 }) {
   const { teamId, projectId, blogId } = await params;
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   if (!user) {
     redirect("/login");
   }
+
+  const supabase = await createClient();
 
   const { data: team } = await supabase.from("teams").select("id,name").eq("id", teamId).maybeSingle();
   const { data: project } = await supabase

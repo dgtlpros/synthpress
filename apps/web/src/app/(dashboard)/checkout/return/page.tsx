@@ -1,7 +1,7 @@
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { retrieveCheckoutSession } from "@/services/stripe-service";
 import { getBalance } from "@/services/token-service";
@@ -44,13 +44,14 @@ interface TopUpDetails {
 type CompletedDetails = SubscriptionDetails | TopUpDetails | null;
 
 export default async function CheckoutReturnPage({ searchParams }: ReturnPageProps) {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
   if (!user) {
     redirect("/login");
   }
+
+  const supabase = await createClient();
 
   const { session_id: sessionId } = await searchParams;
   if (!sessionId) {

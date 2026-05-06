@@ -333,6 +333,70 @@ export type Database = {
           },
         ]
       }
+      team_invites: {
+        Row: {
+          accepted_at: string | null
+          accepted_by: string | null
+          created_at: string
+          email: string | null
+          expires_at: string
+          id: string
+          invited_by: string
+          revoked_at: string | null
+          role: Database["public"]["Enums"]["team_role"]
+          team_id: string
+          token_hash: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          email?: string | null
+          expires_at?: string
+          id?: string
+          invited_by: string
+          revoked_at?: string | null
+          role?: Database["public"]["Enums"]["team_role"]
+          team_id: string
+          token_hash: string
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          email?: string | null
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          revoked_at?: string | null
+          role?: Database["public"]["Enums"]["team_role"]
+          team_id?: string
+          token_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_invites_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_invites_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_members: {
         Row: {
           created_at: string
@@ -371,6 +435,7 @@ export type Database = {
       }
       teams: {
         Row: {
+          billing_user_id: string
           created_at: string
           created_by: string | null
           id: string
@@ -379,6 +444,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          billing_user_id: string
           created_at?: string
           created_by?: string | null
           id?: string
@@ -387,6 +453,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          billing_user_id?: string
           created_at?: string
           created_by?: string | null
           id?: string
@@ -395,6 +462,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "teams_billing_user_id_fkey"
+            columns: ["billing_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "teams_created_by_fkey"
             columns: ["created_by"]
@@ -461,6 +535,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          idempotency_key: string | null
           metadata: Json
           stripe_event_id: string | null
           type: string
@@ -471,6 +546,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          idempotency_key?: string | null
           metadata?: Json
           stripe_event_id?: string | null
           type: string
@@ -481,6 +557,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          idempotency_key?: string | null
           metadata?: Json
           stripe_event_id?: string | null
           type?: string
@@ -493,6 +570,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      consume_team_tokens: {
+        Args: {
+          p_acting_user_id: string
+          p_amount: number
+          p_description?: string
+          p_idempotency_key?: string
+          p_metadata?: Json
+          p_team_id: string
+        }
+        Returns: number
+      }
       consume_tokens: {
         Args: { p_amount: number; p_description?: string; p_user_id: string }
         Returns: number
@@ -521,6 +609,10 @@ export type Database = {
       user_is_team_member: {
         Args: { p_team_id: string; p_user_id: string }
         Returns: boolean
+      }
+      user_team_role: {
+        Args: { p_team_id: string; p_user_id: string }
+        Returns: Database["public"]["Enums"]["team_role"]
       }
     }
     Enums: {

@@ -12,10 +12,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  const { user, supabaseResponse } = await updateSession(request);
-
   const isProtected = protectedRoutes.some((route) => pathname.startsWith(route));
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
+
+  const { user, supabaseResponse } = await updateSession(request, {
+    resolveUser: isProtected || isAuthRoute,
+  });
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();

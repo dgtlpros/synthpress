@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import NextLink from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { CheckoutConnector } from "@/connectors/CheckoutConnector";
 import type { CheckoutTarget } from "@/hooks/useCheckout";
 
@@ -11,13 +11,14 @@ interface CheckoutPageProps {
 }
 
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
   if (!user) {
     redirect("/login");
   }
+
+  const supabase = await createClient();
 
   const params = await searchParams;
   const planKey = params.plan;

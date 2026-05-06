@@ -726,6 +726,145 @@ right path is enabling Stripe's invoice branding (logo + accent color) at
 https://dashboard.stripe.com/settings/branding — it applies to every
 existing and future PDF without code changes.
 
+## Teams and the billing subject
+
+> Added in migrations [00009](../supabase/migrations/00009_token_transactions_idempotency.sql) – [00013](../supabase/migrations/00013_team_invites.sql).
+
+Teams sit on top of the per-user billing system without changing any of the
+Stripe wiring. A team has exactly one **owner**, the owner's `auth.users.id`
+is the **billing subject**, and any team-context spend (today: future blog
+automations, AI generation jobs, etc.) atomically debits the owner's
+`token_balances` row even when a different member triggered the work.
+
+### The billing subject column
+
+`teams.billing_user_id` (NOT NULL) is the canonical pointer to the team's
+billing subject. It's maintained by a Postgres trigger
+(`keep_team_billing_user_id_in_sync()` in
+[00010](../supabase/migrations/00010_team_billing_subject.sql)) that fires
+on every `team_members` insert / update / delete, resolves the row where
+`role = 'owner'`, and writes that user_id back to `teams.billing_user_id`.
+
+A partial unique index (`teams_one_owner_idx`) makes "exactly one owner per
+team" a hard DB invariant — you cannot insert a second owner row even
+under the service-role client.
+
+### `consume_team_tokens` RPC
+
+`consume_team_tokens(p_team_id, p_amount, p_acting_user_id, p_description,
+p_metadata, p_idempotency_key)` is the team-scoped equivalent of
+`consume_tokens`. Defined in
+[00012](../supabase/migrations/00012_consume_team_tokens.sql). In one
+transaction it:
+
+1. Resolves the owner via `teams.billing_user_id`.
+2. Decrements the owner's `token_balances.balance` (raises
+   `insufficient_tokens` if the balance is too low).
+3. Inserts a `token_transactions` row with `type='usage'`,
+   `user_id = owner`, and `metadata = caller_metadata || {team_id,
+   acting_user_id}` so the owner's ledger shows exactly what spent the
+   tokens and on whose behalf.
+
+The RPC is service-role only. Server actions create the admin client and
+call it through
+[`team-billing-service.consumeTeamTokens`](../apps/web/src/services/team-billing-service.ts).
+
+#### Metadata contract
+
+Every team-spend `token_transactions` row always has at minimum:
+
+| Key              | Source                          | Notes                                                |
+|------------------|---------------------------------|------------------------------------------------------|
+| `team_id`        | RPC injects                     | Used by the per-team usage view's partial index.     |
+| `acting_user_id` | RPC injects                     | The member who triggered the job (≠ owner if member-triggered). |
+| `project_id`     | Caller (optional)               | Recommended — drives "by project" rollup on usage.   |
+| `blog_id`        | Caller (optional)               | Recommended — same.                                  |
+| `automation_id`  | Caller (optional, future)       | When automation runner lands.                        |
+
+The RPC merges `caller_metadata || jsonb_build_object('team_id', ..., 'acting_user_id', ...)`
+so the system fields always win.
+
+#### Idempotency
+
+`p_idempotency_key` is the internal-job equivalent of `stripe_event_id`. Use
+it for any consume that may be retried (cron jobs, webhook-driven jobs).
+The unique partial index `token_transactions_idempotency_key_idx` (added in
+[00009](../supabase/migrations/00009_token_transactions_idempotency.sql))
+makes a duplicate key a no-op. The RPC short-circuits via a fast-path
+EXISTS check; on a concurrent race the unique-violation handler re-credits
+the debit and returns the current balance.
+
+We deliberately did **not** overload `stripe_event_id` for internal jobs —
+that column remains the lock for Stripe webhooks alone (see
+[supabase-database rule](../.cursor/rules/supabase-database.mdc)).
+
+#### Per-team usage queries
+
+The team usage page (`/teams/[teamId]/usage`) filters
+`token_transactions` by `metadata->>'team_id' = $1 AND type = 'usage'` and
+joins to `projects`, `blogs`, `profiles` in batched id-set queries via
+[`team-usage-service.getTeamUsage`](../apps/web/src/services/team-usage-service.ts).
+The partial expression index `token_transactions_team_usage_idx` makes the
+filter O(log n) regardless of audit-log size.
+
+### Roles and permissions
+
+| Role     | Permissions                                                                                  |
+|----------|----------------------------------------------------------------------------------------------|
+| `owner`  | Everything. Sole subscription holder. Sees the full per-team usage ledger.                   |
+| `admin`  | Invite/remove members, manage projects, run jobs (spends owner's tokens), view usage rollups.|
+| `member` | Edit content, run jobs (spends owner's tokens). Cannot invite/remove or see usage page.      |
+
+The mapping lives in
+[`team-policy-service.ts`](../apps/web/src/services/team-policy-service.ts)
+as a single `PERMISSIONS` table; server actions call `assertCan(teamId,
+userId, action)` to gate every mutation. The matching DB helper
+`user_team_role(team_id, user_id)` is in
+[00011](../supabase/migrations/00011_team_role_helpers.sql) and is also
+available to RLS policies if we ever need role-aware row scoping.
+
+### Invites (shareable link, v1)
+
+`team_invites` ([00013](../supabase/migrations/00013_team_invites.sql))
+holds one-time invitations. The raw token is **only** returned by
+`createInvite` — we store SHA-256 of it (`token_hash`) and compare hashes
+on accept, mirroring how Supabase Auth handles its own magic-link tokens.
+
+- `email IS NULL` ⇒ open link, anyone signed in can accept once.
+- `email IS NOT NULL` ⇒ only the auth user with that email may accept; a
+  partial unique index prevents duplicate pending invites for the same
+  (team, email).
+- `expires_at` defaults to `now() + 14 days`.
+- All mutations go through the service-role client; clients have a
+  read-only RLS policy plus an explicit deny.
+
+The accept flow lives at `/teams/invite/[token]`. v1 is **shareable link
+only** — owners/admins copy the link from the team settings page and paste
+it into Slack/email/wherever. There is no transactional email yet (see
+Phase 5+ below).
+
+### Header billing context
+
+`/(dashboard)/layout.tsx` pre-fetches every team's billing context (owner,
+plan, balance) and passes it to
+[`HeaderTokenContextConnector`](../apps/web/src/connectors/HeaderTokenContextConnector.tsx).
+The connector reads `usePathname` and swaps the header `TokenBadge`:
+
+- Outside team routes → user's personal balance + "View billing" link.
+- Inside `/teams/[teamId]/...` → the team owner's balance + "Spending
+  {team} balance (paid by {owner})" tooltip + link to `/teams/[teamId]/usage`
+  (or `/account/billing` when the user is themselves the owner).
+
+### Phase 5+ roadmap (deferred from v1)
+
+| Item                                  | Why deferred                                                                                                     |
+|---------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| **Ownership transfer**                | Requires a policy decision on the existing Stripe subscription (move it, leave it on the old owner, or block transfer while paid).  Skipped per the v1 user request. |
+| **Transactional email for invites**   | Add Resend (or Postmark/SES) — a single API key + template — so we send a real invite email instead of just returning a copyable link. |
+| **Team-level Stripe subscriptions**   | `billing_user_id` already abstracts the subject; moving Stripe customers/subscriptions to live on `team_id` is a one-migration future task. |
+| **Per-role RLS on content tables**    | Today RLS treats any team member equally for content reads/writes; role gating happens in the service layer. Tightening RLS is a Phase 5 hardening step. |
+| **`next` param round-trip on login**  | Currently the `/teams/invite/[token]` route bounces unauthenticated visitors to `/login`; they must re-open the invite link after signing in. The full `?next=` flow needs the magic-link template to thread the param through. |
+
 ## Where things live in the codebase
 
 | Concern                            | File                                                                       |
@@ -734,6 +873,22 @@ existing and future PDF without code changes.
 | Annual billing columns             | [supabase/migrations/00003_annual_billing.sql](../supabase/migrations/00003_annual_billing.sql) |
 | Atomic grant/refund RPCs           | [supabase/migrations/00004_atomic_token_grants.sql](../supabase/migrations/00004_atomic_token_grants.sql) |
 | RLS perf + deny policies + indexes | [supabase/migrations/00005_rls_and_indexes.sql](../supabase/migrations/00005_rls_and_indexes.sql) |
+| Internal idempotency_key column    | [supabase/migrations/00009_token_transactions_idempotency.sql](../supabase/migrations/00009_token_transactions_idempotency.sql) |
+| Team billing subject + trigger     | [supabase/migrations/00010_team_billing_subject.sql](../supabase/migrations/00010_team_billing_subject.sql) |
+| user_team_role helper              | [supabase/migrations/00011_team_role_helpers.sql](../supabase/migrations/00011_team_role_helpers.sql) |
+| consume_team_tokens RPC + index    | [supabase/migrations/00012_consume_team_tokens.sql](../supabase/migrations/00012_consume_team_tokens.sql) |
+| Team invites table + RLS           | [supabase/migrations/00013_team_invites.sql](../supabase/migrations/00013_team_invites.sql) |
+| Team-spend service                 | [apps/web/src/services/team-billing-service.ts](../apps/web/src/services/team-billing-service.ts) |
+| Team policy / role table           | [apps/web/src/services/team-policy-service.ts](../apps/web/src/services/team-policy-service.ts) |
+| Team invite service                | [apps/web/src/services/team-invite-service.ts](../apps/web/src/services/team-invite-service.ts) |
+| Per-team usage rollups             | [apps/web/src/services/team-usage-service.ts](../apps/web/src/services/team-usage-service.ts) |
+| Server actions (team billing)      | [apps/web/src/actions/team-billing.ts](../apps/web/src/actions/team-billing.ts) |
+| Server actions (team invites)      | [apps/web/src/actions/team-invites.ts](../apps/web/src/actions/team-invites.ts) |
+| Server actions (team members)      | [apps/web/src/actions/team-members.ts](../apps/web/src/actions/team-members.ts) |
+| Team settings page                 | [apps/web/src/app/(dashboard)/teams/[teamId]/settings/page.tsx](<../apps/web/src/app/(dashboard)/teams/[teamId]/settings/page.tsx>) |
+| Team usage page                    | [apps/web/src/app/(dashboard)/teams/[teamId]/usage/page.tsx](<../apps/web/src/app/(dashboard)/teams/[teamId]/usage/page.tsx>) |
+| Invite accept page                 | [apps/web/src/app/(dashboard)/teams/invite/[token]/page.tsx](<../apps/web/src/app/(dashboard)/teams/invite/[token]/page.tsx>) |
+| Header token context (team-aware)  | [apps/web/src/connectors/HeaderTokenContextConnector.tsx](../apps/web/src/connectors/HeaderTokenContextConnector.tsx) |
 | Catalog seed                       | [supabase/seed.sql](../supabase/seed.sql)                                  |
 | Setup script (Stripe + seed)       | [apps/web/scripts/stripe-setup.mjs](../apps/web/scripts/stripe-setup.mjs)  |
 | Stripe SDK + Checkout/Portal helpers | [apps/web/src/services/stripe-service.ts](../apps/web/src/services/stripe-service.ts) |

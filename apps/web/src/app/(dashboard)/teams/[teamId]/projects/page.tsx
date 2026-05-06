@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { listProjectsForTeam } from "@/services/workspace-service";
 import {
   Card,
@@ -20,14 +20,15 @@ export default async function TeamProjectsPage({
   params: Promise<{ teamId: string }>;
 }) {
   const { teamId } = await params;
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   if (!user) {
     redirect("/login");
   }
+
+  const supabase = await createClient();
 
   const { data: team, error: teamErr } = await supabase
     .from("teams")
@@ -57,12 +58,28 @@ export default async function TeamProjectsPage({
         <span>Projects</span>
       </nav>
 
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Projects</h1>
-        <p className="mt-2 max-w-2xl text-muted">
-          Projects scope features for this team. The first product is AI-powered blogs—each blog
-          connects to WordPress inside a project.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Projects</h1>
+          <p className="mt-2 max-w-2xl text-muted">
+            Projects scope features for this team. The first product is AI-powered blogs—each
+            blog connects to WordPress inside a project.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Link
+            href={`/teams/${teamId}/settings`}
+            className="rounded-[var(--sp-radius-lg)] border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-hover"
+          >
+            Members
+          </Link>
+          <Link
+            href={`/teams/${teamId}/usage`}
+            className="rounded-[var(--sp-radius-lg)] border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-hover"
+          >
+            Usage
+          </Link>
+        </div>
       </div>
 
       <Card>

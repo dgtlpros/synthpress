@@ -2,7 +2,21 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { isStaleBrowserSessionError } from "@/lib/supabase/auth-session";
 
-export async function updateSession(request: NextRequest) {
+export type UpdateSessionOptions = {
+  /**
+   * When false, skips Supabase auth network calls in middleware. Public routes do
+   * not need `user` for redirects; Server Components still call `getUser()` once.
+   * (`getSession()` also refreshes and would duplicate stale-token errors with RSC.)
+   */
+  resolveUser?: boolean;
+};
+
+export async function updateSession(
+  request: NextRequest,
+  options?: UpdateSessionOptions,
+) {
+  const resolveUser = options?.resolveUser ?? true;
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -26,12 +40,16 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  const { data: userData, error } = await supabase.auth.getUser();
-  let user = userData.user;
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
 
-  if (error && isStaleBrowserSessionError(error)) {
-    await supabase.auth.signOut();
-    user = null;
+  if (resolveUser) {
+    const { data: userData, error } = await supabase.auth.getUser();
+    user = userData.user;
+
+    if (error && isStaleBrowserSessionError(error)) {
+      await supabase.auth.signOut();
+      user = null;
+    }
   }
 
   return { user, supabaseResponse };

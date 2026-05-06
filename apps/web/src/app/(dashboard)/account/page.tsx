@@ -1,6 +1,6 @@
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentPlan } from "@/services/billing-service";
 import { getBalance } from "@/services/token-service";
@@ -44,15 +44,15 @@ function getInitials(name: string | null | undefined, email: string | null | und
 const numberFormatter = new Intl.NumberFormat("en-US");
 
 export default async function AccountPage() {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   if (!user) {
     redirect("/login");
   }
 
+  const supabase = await createClient();
   const admin = createAdminClient();
   const [current, balance] = await Promise.all([
     getCurrentPlan(user.id, admin),

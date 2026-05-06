@@ -1,6 +1,10 @@
 import type { AuthError } from "@supabase/supabase-js";
-import { describe, it, expect } from "vitest";
-import { isStaleBrowserSessionError } from "./auth-session";
+import { describe, it, expect, vi } from "vitest";
+import {
+  isStaleBrowserSessionError,
+  isStaleRefreshTokenLog,
+  withSilencedStaleRefreshTokenLogs,
+} from "./auth-session";
 
 describe("isStaleBrowserSessionError", () => {
   it("returns true for refresh_token_not_found", () => {
@@ -39,5 +43,71 @@ describe("isStaleBrowserSessionError", () => {
         code: "session_expired",
       } as AuthError),
     ).toBe(false);
+  });
+});
+
+describe("isStaleRefreshTokenLog", () => {
+  it("matches the shape Supabase passes to console.error", () => {
+    expect(
+      isStaleRefreshTokenLog({
+        __isAuthError: true,
+        code: "refresh_token_not_found",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+      }),
+    ).toBe(true);
+  });
+
+  it("matches by message when code is missing", () => {
+    expect(
+      isStaleRefreshTokenLog({
+        __isAuthError: true,
+        message: "Invalid Refresh Token",
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores values that are not auth errors", () => {
+    expect(isStaleRefreshTokenLog("a string")).toBe(false);
+    expect(isStaleRefreshTokenLog({ message: "Invalid Refresh Token" })).toBe(false);
+    expect(isStaleRefreshTokenLog(null)).toBe(false);
+  });
+});
+
+describe("withSilencedStaleRefreshTokenLogs", () => {
+  it("filters only stale-refresh-token logs", async () => {
+    const original = console.error;
+    const spy = vi.fn();
+    console.error = spy;
+
+    await withSilencedStaleRefreshTokenLogs(async () => {
+      console.error({
+        __isAuthError: true,
+        code: "refresh_token_not_found",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+      });
+      console.error("keep me");
+    });
+
+    console.error = original;
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("keep me");
+  });
+
+  it("restores console.error if the wrapped function throws", async () => {
+    const original = console.error;
+    const spy = vi.fn();
+    console.error = spy;
+
+    await expect(
+      withSilencedStaleRefreshTokenLogs(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    expect(console.error).toBe(spy);
+    console.error = original;
   });
 });

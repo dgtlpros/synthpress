@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { LandingLayout } from "@/components/templates/LandingLayout";
 import { Footer } from "@/components/organisms/Footer";
 
@@ -11,10 +11,9 @@ export const metadata: Metadata = {
 };
 
 export default async function TermsOfServicePage() {
-  const supabase = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getAuthUserOncePerResponse();
 
   return (
     <LandingLayout user={user ? { email: user.email ?? "" } : null}>

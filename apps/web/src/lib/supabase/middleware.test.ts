@@ -68,6 +68,16 @@ describe("updateSession", () => {
     expect(mockSignOut).toHaveBeenCalledOnce();
   });
 
+  it("when resolveUser is false, skips auth calls (no getUser)", async () => {
+    const request = createMockRequest("http://localhost:3000/");
+
+    const { user } = await updateSession(request, { resolveUser: false });
+
+    expect(user).toBeNull();
+    expect(mockGetUser).not.toHaveBeenCalled();
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
   it("creates server client with cookie handlers", async () => {
     const request = createMockRequest();
     await updateSession(request);
