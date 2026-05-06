@@ -49,7 +49,7 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
   const activeProjectId = activeProjectIdFromPath(pathname);
 
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
-  const teamPickerRef = useRef<HTMLDivElement>(null);
+  const teamPickerRef = useRef<HTMLLIElement>(null);
 
   const dashboardActive = pathname === "/dashboard" || pathname === "/";
   const accountActive = pathname?.startsWith("/account") ?? false;
