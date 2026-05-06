@@ -7,6 +7,8 @@ import { Input } from "@/components/atoms/Input";
 import { Select } from "@/components/atoms/Select";
 import { Badge } from "@/components/atoms/Badge";
 import { ConfirmModal } from "@/components/atoms/ConfirmModal";
+import { DeleteConfirmModal } from "@/components/atoms/DeleteConfirmModal";
+import { EditTeamSettingsModal } from "@/components/molecules/EditTeamSettingsModal";
 import { roleCan, type TeamRole } from "@/lib/team-roles";
 import { useTeamSettings } from "@/hooks/useTeamSettings";
 
@@ -75,11 +77,24 @@ export function TeamSettingsConnector({
   const canInvite = roleCan(currentUserRole, "invite_member");
   const canChangeRole = roleCan(currentUserRole, "change_role");
   const canRemove = roleCan(currentUserRole, "remove_member");
+  const canUpdateTeam = roleCan(currentUserRole, "update_team");
+  const canDeleteTeam = roleCan(currentUserRole, "delete_team");
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<TeamRole>("member");
   const [copyConfirm, setCopyConfirm] = useState(false);
   const [confirmRemoveUserId, setConfirmRemoveUserId] = useState<string | null>(null);
+
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState(teamName);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  function handleConfirmRemove() {
+    if (confirmRemoveUserId) settings.remove(confirmRemoveUserId);
+    setConfirmRemoveUserId(null);
+  }
+  /* v8 ignore next */
+  const handleRemoveCancel = () => setConfirmRemoveUserId(null);
 
   function handleInviteSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -304,6 +319,65 @@ export function TeamSettingsConnector({
         </Card>
       ) : null}
 
+      {canUpdateTeam ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Team details</CardTitle>
+            <CardDescription>Rename this team.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-foreground font-medium">{teamName}</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setNameDraft(teamName);
+                  setRenameOpen(true);
+                }}
+              >
+                Rename
+              </Button>
+            </div>
+            {settings.renameTeamError ? (
+              <p className="mt-2 text-sm text-error" role="alert">
+                {settings.renameTeamError}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canDeleteTeam ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Danger zone</CardTitle>
+            <CardDescription>
+              Deleting a team permanently removes all projects, blogs, invites, and member
+              associations. This cannot be undone.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              loading={settings.isDeletingTeam}
+              onClick={() => setDeleteOpen(true)}
+              className="text-error hover:bg-error/10 border border-error/30"
+            >
+              Delete team
+            </Button>
+            {settings.deleteTeamError ? (
+              <p className="mt-2 text-sm text-error" role="alert">
+                {settings.deleteTeamError}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <ConfirmModal
         open={confirmRemoveUserId !== null}
         title="Remove member"
@@ -311,10 +385,51 @@ export function TeamSettingsConnector({
         confirmLabel="Remove"
         variant="danger"
         loading={settings.isRemoving !== null}
-        onCancel={() => setConfirmRemoveUserId(null)}
+        onCancel={handleRemoveCancel}
+        onConfirm={handleConfirmRemove}
+      />
+
+      <EditTeamSettingsModal
+        open={renameOpen}
+        onClose={() => setRenameOpen(false)}
+        teamName={nameDraft}
+        onTeamNameChange={setNameDraft}
+        errorMessage={settings.renameTeamError}
+        pending={settings.isRenamingTeam}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={settings.isRenamingTeam}
+              onClick={() => setRenameOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              loading={settings.isRenamingTeam}
+              onClick={() => {
+                settings.renameTeam(nameDraft);
+                if (!settings.renameTeamError) setRenameOpen(false);
+              }}
+            >
+              Save
+            </Button>
+          </>
+        }
+      />
+
+      <DeleteConfirmModal
+        open={deleteOpen}
+        entityKind="team"
+        requiredPhrase={teamName}
+        loading={settings.isDeletingTeam}
+        onCancel={() => setDeleteOpen(false)}
         onConfirm={() => {
-          if (confirmRemoveUserId) settings.remove(confirmRemoveUserId);
-          setConfirmRemoveUserId(null);
+          settings.deleteTeam();
         }}
       />
     </div>

@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { updateProjectSettings } from "@/actions/workspace";
+import { deleteProject, updateProjectSettings } from "@/actions/workspace";
 import type { BlogListRow } from "@/services/workspace-service";
 import { Button } from "@/components/atoms/Button";
+import { DeleteConfirmModal } from "@/components/atoms/DeleteConfirmModal";
 import { CreateAppChoiceModal } from "@/components/molecules/CreateAppChoiceModal";
 import { EditProjectSettingsModal } from "@/components/molecules/EditProjectSettingsModal";
 import {
@@ -12,6 +13,7 @@ import {
   type ProjectInstalledAppListItem,
 } from "@/components/molecules/ProjectInstalledAppList";
 import { ProjectPageHeader } from "@/components/molecules/ProjectPageHeader";
+import { roleCan, type TeamRole } from "@/lib/team-roles";
 
 export interface ProjectOverviewConnectorProps {
   teamId: string;
@@ -20,6 +22,7 @@ export interface ProjectOverviewConnectorProps {
   projectName: string;
   projectDescription: string;
   blogs: BlogListRow[];
+  currentUserRole: TeamRole;
 }
 
 export function ProjectOverviewConnector({
@@ -29,14 +32,20 @@ export function ProjectOverviewConnector({
   projectName,
   projectDescription,
   blogs,
+  currentUserRole,
 }: ProjectOverviewConnectorProps) {
   const router = useRouter();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
   const [descDraft, setDescDraft] = useState(projectDescription);
   const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
+
+  const canDelete = roleCan(currentUserRole, "delete_project");
 
   useEffect(() => {
     if (!settingsOpen) {
@@ -84,6 +93,19 @@ export function ProjectOverviewConnector({
     });
   }
 
+  function handleDeleteProject() {
+    setDeleteError(null);
+    startDeleteTransition(async () => {
+      const result = await deleteProject(teamId, projectId);
+      if (result.error) {
+        setDeleteError(result.error);
+        setDeleteOpen(false);
+        return;
+      }
+      router.push(`/teams/${teamId}/projects`);
+    });
+  }
+
   return (
     <>
       <ProjectPageHeader
@@ -92,6 +114,12 @@ export function ProjectOverviewConnector({
         descriptionPreview={projectDescription}
         onOpenSettings={openSettings}
       />
+
+      {deleteError ? (
+        <p className="text-sm text-error" role="alert">
+          {deleteError}
+        </p>
+      ) : null}
 
       <section aria-labelledby="apps-heading" className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -104,15 +132,29 @@ export function ProjectOverviewConnector({
               for that app&apos;s settings.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="shrink-0 cursor-pointer self-start sm:self-auto"
-            onClick={() => setCreateOpen(true)}
-          >
-            Create app
-          </Button>
+          <div className="flex shrink-0 gap-2 self-start sm:self-auto">
+            {canDelete ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer text-error hover:bg-error/10 border border-error/30"
+                loading={isDeleting}
+                onClick={() => setDeleteOpen(true)}
+              >
+                Delete project
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => setCreateOpen(true)}
+            >
+              Create app
+            </Button>
+          </div>
         </div>
         <ProjectInstalledAppList items={appItems} />
       </section>
@@ -143,6 +185,15 @@ export function ProjectOverviewConnector({
         onClose={() => setCreateOpen(false)}
         blogSetupHref={blogBase}
         onAfterChooseBlog={() => setCreateOpen(false)}
+      />
+
+      <DeleteConfirmModal
+        open={deleteOpen}
+        entityKind="project"
+        requiredPhrase={projectName}
+        loading={isDeleting}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={handleDeleteProject}
       />
     </>
   );

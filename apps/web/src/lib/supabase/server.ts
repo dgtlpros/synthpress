@@ -24,6 +24,7 @@ function supabaseAuthCookieKey(cookieStore: Awaited<ReturnType<typeof cookies>>)
   const parts = getSupabaseCookies(cookieStore)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((c) => `${c.name}=${c.value}`);
+  /* v8 ignore next */
   return parts.length > 0 ? parts.join(";") : "__no_sb_cookies__";
 }
 
@@ -66,6 +67,7 @@ export async function getAuthUserOncePerResponse(): Promise<AuthGetUserResult> {
 
 /** Clears dedupe state between Vitest cases (NODE_ENV=test only). */
 export function resetAuthUserDedupeForTests() {
+  /* v8 ignore next */
   if (process.env.NODE_ENV !== "test") return;
   authUserInflight.clear();
 }

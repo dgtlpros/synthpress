@@ -17,6 +17,7 @@ const teamPlans: HeaderTeamPlan[] = [
     teamName: "Acme",
     ownerName: "Owen",
     isOwner: false,
+    myRole: "member",
     balance: 250,
     planKey: "pro",
   },
@@ -25,6 +26,7 @@ const teamPlans: HeaderTeamPlan[] = [
     teamName: "Personal",
     ownerName: "Me",
     isOwner: true,
+    myRole: "owner",
     balance: 30,
     planKey: null,
   },
@@ -45,14 +47,25 @@ describe("HeaderTokenContextConnector", () => {
     expect(link.textContent).toContain("150 tokens");
   });
 
-  it("renders team balance link with owner attribution inside a team route", () => {
+  it("renders team balance link with owner attribution and role for members", () => {
     mockPathname.mockReturnValue("/teams/t-acme/projects");
     render(<HeaderTokenContextConnector personalBalance={150} teamPlans={teamPlans} />);
     const link = screen.getByRole("link", {
-      name: /spending acme balance \(paid by owen\)/i,
+      name: /spending acme balance \(paid by owen\) · member/i,
     });
     expect(link).toHaveAttribute("href", "/teams/t-acme/usage");
     expect(link.textContent).toContain("250 tokens");
+  });
+
+  it("shows Admin role label for admin users", () => {
+    const adminPlans: HeaderTeamPlan[] = [
+      { ...teamPlans[0], myRole: "admin" },
+    ];
+    mockPathname.mockReturnValue("/teams/t-acme/projects");
+    render(<HeaderTokenContextConnector personalBalance={150} teamPlans={adminPlans} />);
+    expect(
+      screen.getByRole("link", { name: /spending acme balance \(paid by owen\) · admin/i }),
+    ).toBeInTheDocument();
   });
 
   it("links owner-of-team users to their own billing", () => {

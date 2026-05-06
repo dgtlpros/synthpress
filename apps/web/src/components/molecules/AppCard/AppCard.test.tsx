@@ -26,4 +26,16 @@ describe("AppCard", () => {
     render(<AppCard title="X" href="/x" icon={<span data-testid="ic">I</span>} />);
     expect(screen.getByTestId("ic")).toBeInTheDocument();
   });
+
+  it("renders as a disabled div when href is set but disabled is true", () => {
+    render(<AppCard title="Locked" href="/locked" disabled />);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("Locked")).toBeInTheDocument();
+  });
+
+  it("renders as a static div with aria-disabled when no href and not disabled", () => {
+    render(<AppCard title="NoHref" />);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("NoHref")).toBeInTheDocument();
+  });
 });

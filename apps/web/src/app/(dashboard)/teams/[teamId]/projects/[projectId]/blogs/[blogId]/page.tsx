@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/atoms/Card";
+import { BlogSettingsConnector } from "@/connectors/BlogSettingsConnector";
 
 export const dynamic = "force-dynamic";
 
@@ -82,16 +83,20 @@ export default async function BlogAppSettingsPage({
         <span className="text-foreground">{blog.name}</span>
       </nav>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Blog app</p>
-          <h1 className="mt-1 text-2xl font-bold text-foreground">{blog.name}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            Settings for this WordPress connection. Editing fields in place is coming next; for now review
-            what SynthPress has on file.
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Blog app</p>
+        <BlogSettingsConnector
+          teamId={teamId}
+          projectId={projectId}
+          blogId={blogId}
+          blogName={blog.name}
+        />
+        <div className="mt-2 flex items-center gap-3">
+          <Badge variant={blog.is_active ? "brand" : "default"}>{blog.is_active ? "Active" : "Paused"}</Badge>
+          <p className="text-sm text-muted">
+            Settings for this WordPress connection.
           </p>
         </div>
-        <Badge variant={blog.is_active ? "brand" : "default"}>{blog.is_active ? "Active" : "Paused"}</Badge>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

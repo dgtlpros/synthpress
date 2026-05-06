@@ -48,6 +48,9 @@ export function ConfirmModal({
     <dialog
       ref={dialogRef}
       onCancel={onCancel}
+      onClick={(e) => {
+        if (e.target === dialogRef.current) onCancel();
+      }}
       className={cn(
         "m-auto max-w-sm rounded-[var(--sp-radius-xl)] border border-border bg-surface p-0 shadow-[var(--sp-shadow-lg)] backdrop:bg-black/50",
         className,

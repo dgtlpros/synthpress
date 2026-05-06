@@ -20,4 +20,18 @@ describe("ProjectInstalledAppRow", () => {
     expect(screen.getByText("Blog")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
+
+  it("renders Paused badge when isActive is false", () => {
+    render(
+      <ProjectInstalledAppRow
+        href="/t/p/b/2"
+        appKindLabel="Blog"
+        title="Backup"
+        subtitle="https://wp2.test"
+        isActive={false}
+      />,
+    );
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+  });
 });

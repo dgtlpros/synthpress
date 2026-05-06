@@ -54,4 +54,15 @@ describe("Modal", () => {
     fireEvent(dialog!, new Event("cancel", { cancelable: true }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("calls onClose when backdrop (dialog element itself) is clicked", () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <Modal open title="T" onClose={onClose}>
+        x
+      </Modal>,
+    );
+    fireEvent.click(container.querySelector("dialog")!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

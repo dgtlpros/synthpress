@@ -129,6 +129,16 @@ describe("removeMember", () => {
     const result = await removeMember("t1", "u2");
     expect(result.error).toBe("Failed to remove member");
   });
+
+  it("returns error message when a regular Error is thrown", async () => {
+    mockUser({ id: "u1" });
+    const { admin } = makeAdminFor({ selectRole: "member" });
+    mockedAdmin.mockReturnValue(admin as never);
+    mockedAssertCan.mockRejectedValue(new Error("unexpected failure"));
+
+    const result = await removeMember("t1", "u2");
+    expect(result.error).toBe("unexpected failure");
+  });
 });
 
 describe("changeMemberRole", () => {
@@ -218,5 +228,15 @@ describe("changeMemberRole", () => {
 
     const result = await changeMemberRole("t1", "u2", "admin");
     expect(result.error).toBe("Failed to change role");
+  });
+
+  it("returns error message when a regular Error is thrown", async () => {
+    mockUser({ id: "u1" });
+    const { admin } = makeAdminFor({ selectRole: "member" });
+    mockedAdmin.mockReturnValue(admin as never);
+    mockedAssertCan.mockRejectedValue(new Error("unexpected failure"));
+
+    const result = await changeMemberRole("t1", "u2", "admin");
+    expect(result.error).toBe("unexpected failure");
   });
 });

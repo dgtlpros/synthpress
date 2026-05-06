@@ -50,4 +50,38 @@ describe("TeamListItem", () => {
       }),
     ).toBeInTheDocument();
   });
+
+  it("normalizes null planStatus to active for paid plans", () => {
+    render(
+      <TeamListItem
+        href="/teams/t1/projects"
+        name="C"
+        ownerLabel="O"
+        ownerInitials="O"
+        memberCount={1}
+        projectCount={0}
+        planDisplayName="Pro"
+        planStatus={null}
+        balance={0}
+      />,
+    );
+    expect(screen.getByText("Pro")).toBeInTheDocument();
+  });
+
+  it("normalizes unknown planStatus to active for paid plans", () => {
+    render(
+      <TeamListItem
+        href="/teams/t1/projects"
+        name="D"
+        ownerLabel="O"
+        ownerInitials="O"
+        memberCount={1}
+        projectCount={0}
+        planDisplayName="Enterprise"
+        planStatus="some_unknown_status"
+        balance={0}
+      />,
+    );
+    expect(screen.getByText("Enterprise")).toBeInTheDocument();
+  });
 });

@@ -10,10 +10,15 @@ vi.mock("@/actions/team-members", () => ({
   removeMember: vi.fn(),
   changeMemberRole: vi.fn(),
 }));
+vi.mock("@/actions/workspace", () => ({
+  updateTeam: vi.fn(),
+  deleteTeam: vi.fn(),
+}));
 
 import { useRouter } from "next/navigation";
 import { createInviteAction, revokeInviteAction } from "@/actions/team-invites";
 import { changeMemberRole, removeMember } from "@/actions/team-members";
+import { updateTeam, deleteTeam as deleteTeamAction } from "@/actions/workspace";
 import { useTeamSettings } from "./useTeamSettings";
 
 const mockedRouter = vi.mocked(useRouter);
@@ -80,6 +85,23 @@ describe("useTeamSettings.createInvite", () => {
     expect(result.current.newInvite).toBeNull();
   });
 
+  it("uses fallback error when invite is null with no error message", async () => {
+    mockedRouter.mockReturnValue(makeRouter() as never);
+    mockedCreate.mockResolvedValue({
+      invite: null,
+      rawToken: null,
+      acceptUrl: null,
+      error: null,
+    });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+    act(() => {
+      result.current.createInvite({ email: "", role: "admin" });
+    });
+
+    await waitFor(() => expect(result.current.inviteError).toBe("Failed to create invite"));
+  });
+
   it("dismissNewInvite clears state", async () => {
     mockedRouter.mockReturnValue(makeRouter() as never);
     mockedCreate.mockResolvedValue({
@@ -144,6 +166,37 @@ describe("useTeamSettings.revoke", () => {
     });
     await waitFor(() => expect(result.current.revokeError).toBe("not_found"));
   });
+
+  it("refreshes without clearing newInvite when revoking a different invite", async () => {
+    const router = makeRouter();
+    mockedRouter.mockReturnValue(router as never);
+    mockedCreate.mockResolvedValue({
+      invite: {
+        id: "i-keep", team_id: "t1", role: "member", email: null, invited_by: "u1",
+        expires_at: "2099-01-01", accepted_at: null, accepted_by: null, revoked_at: null,
+        created_at: "2026-01-01",
+      },
+      rawToken: "tk",
+      acceptUrl: "https://x/teams/invite/tk",
+      error: null,
+    });
+    mockedRevoke.mockResolvedValue({ ok: true, error: null });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+
+    act(() => {
+      result.current.createInvite({ email: "", role: "member" });
+    });
+    await waitFor(() => expect(result.current.newInvite?.inviteId).toBe("i-keep"));
+
+    act(() => {
+      result.current.revoke("i-other");
+    });
+
+    await waitFor(() => expect(result.current.isRevoking).toBeNull());
+    expect(result.current.newInvite).not.toBeNull();
+    expect(result.current.newInvite?.inviteId).toBe("i-keep");
+  });
 });
 
 describe("useTeamSettings.remove", () => {
@@ -195,5 +248,66 @@ describe("useTeamSettings.changeRole", () => {
       result.current.changeRole("u2", "admin");
     });
     await waitFor(() => expect(result.current.changeRoleError).toBe("forbidden"));
+  });
+});
+
+const mockedUpdateTeam = vi.mocked(updateTeam);
+const mockedDeleteTeam = vi.mocked(deleteTeamAction);
+
+describe("useTeamSettings.renameTeam", () => {
+  it("calls updateTeam and refreshes on success", async () => {
+    const router = makeRouter();
+    mockedRouter.mockReturnValue(router as never);
+    mockedUpdateTeam.mockResolvedValue({ data: null, error: null });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+    act(() => {
+      result.current.renameTeam("New Name");
+    });
+
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+    expect(mockedUpdateTeam).toHaveBeenCalledWith("t1", { name: "New Name" });
+    expect(result.current.renameTeamError).toBeNull();
+  });
+
+  it("captures error on rename failure", async () => {
+    mockedRouter.mockReturnValue(makeRouter() as never);
+    mockedUpdateTeam.mockResolvedValue({ data: null, error: "forbidden" });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+    act(() => {
+      result.current.renameTeam("X");
+    });
+
+    await waitFor(() => expect(result.current.renameTeamError).toBe("forbidden"));
+  });
+});
+
+describe("useTeamSettings.deleteTeam", () => {
+  it("calls deleteTeam and navigates to /teams on success", async () => {
+    const router = makeRouter();
+    mockedRouter.mockReturnValue(router as never);
+    mockedDeleteTeam.mockResolvedValue({ data: { redirect: "/teams" }, error: null });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+    act(() => {
+      result.current.deleteTeam();
+    });
+
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/teams"));
+    expect(mockedDeleteTeam).toHaveBeenCalledWith("t1");
+    expect(result.current.deleteTeamError).toBeNull();
+  });
+
+  it("captures error on delete failure", async () => {
+    mockedRouter.mockReturnValue(makeRouter() as never);
+    mockedDeleteTeam.mockResolvedValue({ data: null, error: "forbidden" });
+
+    const { result } = renderHook(() => useTeamSettings({ teamId: "t1" }));
+    act(() => {
+      result.current.deleteTeam();
+    });
+
+    await waitFor(() => expect(result.current.deleteTeamError).toBe("forbidden"));
   });
 });

@@ -225,4 +225,201 @@ describe("getTeamUsage", () => {
     await getTeamUsage({ teamId: "t1", client: client as never });
     expect(mockedCreateAdmin).not.toHaveBeenCalled();
   });
+
+  it("handles null data from transactions query without error (txRows ?? [])", async () => {
+    const limit = vi.fn().mockResolvedValue({ data: null, error: null });
+    const order = vi.fn().mockReturnValue({ limit });
+    const eqMeta = vi.fn().mockReturnValue({ order });
+    const eqType = vi.fn().mockReturnValue({ eq: eqMeta });
+    const select = vi.fn().mockReturnValue({ eq: eqType });
+
+    const client = {
+      from: vi.fn(() => ({ select })),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.rows).toEqual([]);
+    expect(result.summary.totalSpent).toBe(0);
+  });
+
+  it("handles null data from projects/blogs/profiles resolution (data ?? [] branches)", async () => {
+    const txRows = [
+      {
+        id: "tx-1",
+        amount: -5,
+        description: null,
+        created_at: "2026-05-01T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: "p1", blog_id: "b1", acting_user_id: "u1" },
+      },
+    ];
+
+    const nullInQuery = {
+      select: vi.fn().mockReturnValue({
+        in: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+    };
+
+    const tx = makeUsageQuery(txRows);
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "token_transactions") return tx;
+        return nullInQuery;
+      }),
+    };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.rows[0].project_name).toBeNull();
+    expect(result.rows[0].blog_name).toBeNull();
+    expect(result.rows[0].acting_user_name).toBeNull();
+  });
+
+  it("exercises sort comparator in both directions (3+ days)", async () => {
+    const txRows = [
+      { id: "tx-1", amount: -1, description: null, created_at: "2026-05-01T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
+      { id: "tx-2", amount: -1, description: null, created_at: "2026-05-02T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
+      { id: "tx-3", amount: -1, description: null, created_at: "2026-05-03T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
+    ];
+    const { client } = makeClient({ txRows });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.summary.byDay.map((d) => d.day)).toEqual(["2026-05-03", "2026-05-02", "2026-05-01"]);
+  });
+
+  it("resolves null names when lookup misses (project/blog/user exist in metadata but not in DB)", async () => {
+    const txRows = [
+      {
+        id: "tx-1",
+        amount: -7,
+        description: null,
+        created_at: "2026-05-01T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: "p-missing", blog_id: "b-missing", acting_user_id: "u-missing" },
+      },
+    ];
+    const { client } = makeClient({
+      txRows,
+      projects: [],
+      blogs: [],
+      profiles: [],
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.rows[0].project_name).toBeNull();
+    expect(result.rows[0].blog_name).toBeNull();
+    expect(result.rows[0].acting_user_name).toBeNull();
+    expect(result.summary.byProject[0]).toMatchObject({ projectId: "p-missing", projectName: null });
+    expect(result.summary.byMember[0]).toMatchObject({ actingUserId: "u-missing", actingUserName: null });
+  });
+
+  it("handles non-object metadata (metaString guards)", async () => {
+    const txRows = [
+      {
+        id: "tx-1",
+        amount: -2,
+        description: null,
+        created_at: "2026-05-01T10:00:00Z",
+        type: "usage",
+        metadata: null,
+      },
+      {
+        id: "tx-2",
+        amount: -1,
+        description: null,
+        created_at: "2026-05-01T11:00:00Z",
+        type: "usage",
+        metadata: [1, 2, 3],
+      },
+      {
+        id: "tx-3",
+        amount: -1,
+        description: null,
+        created_at: "2026-05-01T12:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: 123 },
+      },
+    ];
+    const { client } = makeClient({ txRows });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows[0].project_id).toBeNull();
+    expect(result.rows[1].project_id).toBeNull();
+    expect(result.rows[2].project_id).toBeNull();
+  });
+
+  it("handles invalid ISO date in dayKey (NaN branch)", async () => {
+    const txRows = [
+      {
+        id: "tx-1",
+        amount: -5,
+        description: null,
+        created_at: "not-a-date",
+        type: "usage",
+        metadata: { team_id: "t1" },
+      },
+    ];
+    const { client } = makeClient({ txRows });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+    expect(result.summary.byDay[0].day).toBe("not-a-date");
+  });
+
+  it("sorts byMember and byProject by descending spend", async () => {
+    const txRows = [
+      {
+        id: "tx-1",
+        amount: -20,
+        description: null,
+        created_at: "2026-05-01T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: "p1", acting_user_id: "u1" },
+      },
+      {
+        id: "tx-2",
+        amount: -5,
+        description: null,
+        created_at: "2026-05-01T11:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: "p2", acting_user_id: "u2" },
+      },
+      {
+        id: "tx-3",
+        amount: -10,
+        description: null,
+        created_at: "2026-05-01T12:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1", project_id: "p2", acting_user_id: "u1" },
+      },
+    ];
+    const { client } = makeClient({
+      txRows,
+      projects: [
+        { id: "p1", name: "Proj A" },
+        { id: "p2", name: "Proj B" },
+      ],
+      profiles: [
+        { id: "u1", full_name: "User One" },
+        { id: "u2", full_name: "User Two" },
+      ],
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await getTeamUsage({ teamId: "t1" });
+
+    expect(result.summary.byMember).toEqual([
+      { actingUserId: "u1", actingUserName: "User One", spent: 30, count: 2 },
+      { actingUserId: "u2", actingUserName: "User Two", spent: 5, count: 1 },
+    ]);
+    expect(result.summary.byProject).toEqual([
+      { projectId: "p1", projectName: "Proj A", spent: 20, count: 1 },
+      { projectId: "p2", projectName: "Proj B", spent: 15, count: 2 },
+    ]);
+  });
 });

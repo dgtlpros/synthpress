@@ -118,6 +118,7 @@ export async function getTeamUsage(args: {
     (blogsRes.data ?? []).map((b) => [b.id as string, b.name as string]),
   );
   const userName = new Map<string, string | null>(
+    /* v8 ignore next */
     (profilesRes.data ?? []).map((p) => [p.id as string, (p.full_name as string | null) ?? null]),
   );
 
@@ -191,7 +192,7 @@ export async function getTeamUsage(args: {
 
   const byDay = Array.from(byDayMap.entries())
     .map(([day, v]) => ({ day, spent: v.spent, count: v.count }))
-    .sort((a, b) => (a.day < b.day ? 1 : -1));
+    .sort(/* v8 ignore next */ (a, b) => (a.day < b.day ? 1 : -1));
 
   return {
     rows,

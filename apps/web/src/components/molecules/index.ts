@@ -35,6 +35,8 @@ export { ProjectsList } from "./ProjectsList";
 export type { ProjectsListProps, ProjectsListProject } from "./ProjectsList";
 export { TeamListItem } from "./TeamListItem";
 export type { TeamListItemProps } from "./TeamListItem";
+export { EditTeamSettingsModal } from "./EditTeamSettingsModal";
+export type { EditTeamSettingsModalProps } from "./EditTeamSettingsModal";
 export { WorkspaceSidebar } from "./WorkspaceSidebar";
 export type {
   WorkspaceSidebarProps,

@@ -115,7 +115,7 @@ describe("roleCan", () => {
     ["admin", "invite_member", true],
     ["member", "invite_member", false],
     ["member", "consume_team_tokens", true],
-    ["member", "view_team_usage", false],
+    ["member", "view_team_usage", true],
     ["admin", "view_team_usage", true],
     ["owner", "change_role", true],
     ["admin", "change_role", false],

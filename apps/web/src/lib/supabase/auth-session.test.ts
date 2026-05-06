@@ -44,6 +44,39 @@ describe("isStaleBrowserSessionError", () => {
       } as AuthError),
     ).toBe(false);
   });
+
+  it("returns true via message fallback when code does not match (not found)", () => {
+    expect(
+      isStaleBrowserSessionError({
+        name: "AuthApiError",
+        message: "Invalid Refresh Token: Refresh Token Not Found",
+        status: 400,
+        code: "unexpected_failure",
+      } as AuthError),
+    ).toBe(true);
+  });
+
+  it("returns true via message fallback when code does not match (invalid)", () => {
+    expect(
+      isStaleBrowserSessionError({
+        name: "AuthApiError",
+        message: "invalid refresh token",
+        status: 400,
+        code: "unexpected_failure",
+      } as AuthError),
+    ).toBe(true);
+  });
+
+  it("returns false when message is not a string", () => {
+    expect(
+      isStaleBrowserSessionError({
+        name: "AuthApiError",
+        message: undefined,
+        status: 400,
+        code: "unexpected_failure",
+      } as unknown as AuthError),
+    ).toBe(false);
+  });
 });
 
 describe("isStaleRefreshTokenLog", () => {
@@ -71,6 +104,16 @@ describe("isStaleRefreshTokenLog", () => {
     expect(isStaleRefreshTokenLog("a string")).toBe(false);
     expect(isStaleRefreshTokenLog({ message: "Invalid Refresh Token" })).toBe(false);
     expect(isStaleRefreshTokenLog(null)).toBe(false);
+  });
+
+  it("returns false when code does not match and message is not a string", () => {
+    expect(
+      isStaleRefreshTokenLog({
+        __isAuthError: true,
+        code: "something_else",
+        message: 42,
+      }),
+    ).toBe(false);
   });
 });
 

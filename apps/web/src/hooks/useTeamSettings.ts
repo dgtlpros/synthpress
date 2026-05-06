@@ -7,6 +7,7 @@ import {
   revokeInviteAction,
 } from "@/actions/team-invites";
 import { changeMemberRole, removeMember } from "@/actions/team-members";
+import { updateTeam, deleteTeam as deleteTeamAction } from "@/actions/workspace";
 import type { TeamRole } from "@/lib/team-roles";
 
 export interface NewInvite {
@@ -40,6 +41,14 @@ export interface UseTeamSettingsResult {
   changeRole: (userId: string, role: TeamRole) => void;
   isChangingRole: string | null;
   changeRoleError: string | null;
+
+  renameTeam: (name: string) => void;
+  isRenamingTeam: boolean;
+  renameTeamError: string | null;
+
+  deleteTeam: () => void;
+  isDeletingTeam: boolean;
+  deleteTeamError: string | null;
 }
 
 export function useTeamSettings({ teamId }: UseTeamSettingsOptions): UseTeamSettingsResult {
@@ -57,6 +66,12 @@ export function useTeamSettings({ teamId }: UseTeamSettingsOptions): UseTeamSett
 
   const [isChangingRole, setIsChangingRole] = useState<string | null>(null);
   const [changeRoleError, setChangeRoleError] = useState<string | null>(null);
+
+  const [isRenamingTeam, startRename] = useTransition();
+  const [renameTeamError, setRenameTeamError] = useState<string | null>(null);
+
+  const [isDeletingTeam, startDelete] = useTransition();
+  const [deleteTeamError, setDeleteTeamError] = useState<string | null>(null);
 
   const dismissNewInvite = useCallback(() => setNewInvite(null), []);
 
@@ -146,6 +161,33 @@ export function useTeamSettings({ teamId }: UseTeamSettingsOptions): UseTeamSett
     [router, teamId],
   );
 
+  const renameTeam = useCallback(
+    (name: string) => {
+      setRenameTeamError(null);
+      startRename(async () => {
+        const result = await updateTeam(teamId, { name });
+        if (result.error) {
+          setRenameTeamError(result.error);
+          return;
+        }
+        router.refresh();
+      });
+    },
+    [router, teamId],
+  );
+
+  const deleteTeam = useCallback(() => {
+    setDeleteTeamError(null);
+    startDelete(async () => {
+      const result = await deleteTeamAction(teamId);
+      if (result.error) {
+        setDeleteTeamError(result.error);
+        return;
+      }
+      router.push("/teams");
+    });
+  }, [router, teamId]);
+
   return {
     newInvite,
     dismissNewInvite,
@@ -161,5 +203,11 @@ export function useTeamSettings({ teamId }: UseTeamSettingsOptions): UseTeamSett
     changeRole,
     isChangingRole,
     changeRoleError,
+    renameTeam,
+    isRenamingTeam,
+    renameTeamError,
+    deleteTeam,
+    isDeletingTeam,
+    deleteTeamError,
   };
 }

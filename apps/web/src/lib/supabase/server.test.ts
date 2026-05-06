@@ -131,6 +131,27 @@ describe("createClient (server)", () => {
     expect(vi.mocked(after)).not.toHaveBeenCalled();
   });
 
+  it("dedup key sort comparator fires with multiple sb-* cookies", async () => {
+    mockGetAll.mockReturnValue([
+      { name: "sb-token-b", value: "bbb" },
+      { name: "sb-token-a", value: "aaa" },
+    ]);
+
+    await getAuthUserOncePerResponse();
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("after callback clears the dedupe entry", async () => {
+    await getAuthUserOncePerResponse();
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+
+    const afterCb = vi.mocked(after).mock.calls[0][0] as () => void;
+    afterCb();
+
+    await getAuthUserOncePerResponse();
+    expect(mockGetUser).toHaveBeenCalledTimes(2);
+  });
+
   it("getAuthUserOncePerResponse silences Supabase's refresh_token_not_found console.error", async () => {
     const originalError = console.error;
     const errorSpy = vi.fn();

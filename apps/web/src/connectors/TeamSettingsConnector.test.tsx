@@ -390,11 +390,13 @@ describe("TeamSettingsConnector — owner view", () => {
     const rowRemoveButtons = screen.getAllByRole("button", { name: /^remove$/i });
     fireEvent.click(rowRemoveButtons[0]);
 
-    // Modal opens with a confirm "Remove" button — there are now 3 'remove'
-    // buttons total (2 rows + 1 modal). The modal one is the only one inside
-    // a <dialog>.
-    const dialog = screen.getByRole("dialog", { hidden: true });
-    const confirmButton = Array.from(dialog.querySelectorAll("button")).find(
+    // Modal opens with a confirm "Remove" button — there are now multiple 'remove'
+    // buttons total (rows + modal). The modal is the ConfirmModal which renders
+    // the title "Remove member" — find that dialog specifically.
+    const dialogs = screen.getAllByRole("dialog", { hidden: true });
+    const confirmDialog = dialogs.find((d) => d.textContent?.includes("Remove member"));
+    expect(confirmDialog).toBeDefined();
+    const confirmButton = Array.from(confirmDialog!.querySelectorAll("button")).find(
       (b) => b.textContent === "Remove",
     );
     expect(confirmButton).toBeDefined();
@@ -490,5 +492,331 @@ describe("TeamSettingsConnector — admin view", () => {
     expect(screen.getByRole("button", { name: /create invite link/i })).toBeInTheDocument();
     // admin can't change_role (owner-only) so no selectors at all
     expect(screen.queryByLabelText(/change role for/i)).toBeNull();
+  });
+});
+
+describe("TeamSettingsConnector — team rename (update_team card)", () => {
+  it("shows Team details card and Rename button for owner", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    expect(screen.getByText("Team details")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rename/i })).toBeInTheDocument();
+  });
+
+  it("opens EditTeamSettingsModal when Rename is clicked", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^rename$/i }));
+    expect(screen.getByLabelText(/team name/i)).toBeInTheDocument();
+  });
+
+  it("calls renameTeam when Save is clicked", () => {
+    const renameTeam = vi.fn();
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam, isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^rename$/i }));
+    fireEvent.change(screen.getByLabelText(/team name/i), { target: { value: "Acme Corp" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(renameTeam).toHaveBeenCalledWith("Acme Corp");
+  });
+
+  it("hides Team details card for member (no update_team permission)", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="u-3" currentUserRole="member"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    expect(screen.queryByText("Team details")).not.toBeInTheDocument();
+  });
+});
+
+describe("TeamSettingsConnector — danger zone (delete_team card)", () => {
+  it("shows Danger zone card only for owner", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    expect(screen.getByText("Danger zone")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete team/i })).toBeInTheDocument();
+  });
+
+  it("hides Danger zone for admin (delete_team is owner-only)", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="u-2" currentUserRole="admin"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    expect(screen.queryByText("Danger zone")).not.toBeInTheDocument();
+  });
+
+  it("opens DeleteConfirmModal when Delete team is clicked", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delete team/i }));
+    expect(screen.getByRole("heading", { name: /delete team/i })).toBeInTheDocument();
+  });
+
+  it("calls hook.deleteTeam after typing the team name and confirming", () => {
+    const deleteTeam = vi.fn();
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam, isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delete team/i }));
+
+    const dialogs = screen.getAllByRole("dialog", { hidden: true });
+    const deleteDialog = dialogs.find((d) => d.textContent?.includes("Delete team"));
+    expect(deleteDialog).toBeDefined();
+
+    const input = deleteDialog!.querySelector("input")!;
+    fireEvent.change(input, { target: { value: "Acme" } });
+
+    const confirmBtn = Array.from(deleteDialog!.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Delete team"),
+    )!;
+    fireEvent.click(confirmBtn);
+    expect(deleteTeam).toHaveBeenCalledOnce();
+  });
+
+  it("shows renameTeamError when present", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: "RENAME-ERR",
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    const alerts = screen.getAllByRole("alert").map((el) => el.textContent);
+    expect(alerts).toContain("RENAME-ERR");
+  });
+
+  it("shows deleteTeamError when present", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: "DELETE-ERR",
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    expect(screen.getByText("DELETE-ERR")).toBeInTheDocument();
+  });
+
+  it("closes rename modal when Cancel is clicked", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^rename$/i }));
+    const dialog = screen.getByLabelText(/team name/i).closest("dialog")!;
+    expect(dialog).toHaveAttribute("open");
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(dialog).not.toHaveAttribute("open");
+  });
+
+  it("closes delete modal when Cancel is clicked inside it", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delete team/i }));
+    expect(screen.getByRole("heading", { name: /delete team/i })).toBeInTheDocument();
+
+    const dialogs = screen.getAllByRole("dialog", { hidden: true });
+    const deleteDialog = dialogs.find((d) => d.textContent?.includes("Delete team"));
+    const cancelBtn = Array.from(deleteDialog!.querySelectorAll("button")).find(
+      (b) => b.textContent === "Cancel",
+    )!;
+    fireEvent.click(cancelBtn);
+    expect(screen.queryByRole("heading", { name: /delete team/i })).not.toBeInTheDocument();
+  });
+
+  it("clears invite email after form submission", () => {
+    const hook = defaultHook();
+    mockedUse.mockReturnValue(hook);
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={baseInvites}
+      />,
+    );
+
+    const email = screen.getByLabelText(/email/i) as HTMLInputElement;
+    fireEvent.change(email, { target: { value: "new@x.co" } });
+    fireEvent.submit(screen.getByRole("button", { name: /create invite link/i }).closest("form")!);
+
+    expect(hook.createInvite).toHaveBeenCalled();
+    expect(email).toHaveValue("");
+  });
+
+  it("allows changing invite role before submitting", () => {
+    const hook = defaultHook();
+    mockedUse.mockReturnValue(hook);
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={baseInvites}
+      />,
+    );
+
+    const roleSelect = screen.getByRole("combobox", { name: /^role$/i }) as HTMLSelectElement;
+    fireEvent.change(roleSelect, { target: { value: "admin" } });
+    fireEvent.click(screen.getByRole("button", { name: /create invite link/i }));
+    expect(hook.createInvite).toHaveBeenCalledWith({ email: "", role: "admin" });
+  });
+
+  it("selects invite link text on focus", () => {
+    mockedUse.mockReturnValue(
+      defaultHook({
+        newInvite: {
+          rawToken: "tok",
+          acceptUrl: "https://app/teams/invite/tok",
+          email: null,
+          role: "member",
+          inviteId: "i-new",
+        },
+      }),
+    );
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={baseInvites}
+      />,
+    );
+
+    const input = screen.getByLabelText(/invite link/i) as HTMLInputElement;
+    const selectSpy = vi.spyOn(input, "select");
+    fireEvent.focus(input);
+    expect(selectSpy).toHaveBeenCalled();
+  });
+
+  it("closes remove confirm modal when Cancel is clicked (onCancel)", () => {
+    const hook = defaultHook();
+    mockedUse.mockReturnValue(hook);
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={baseInvites}
+      />,
+    );
+
+    const rowRemoveButtons = screen.getAllByRole("button", { name: /^remove$/i });
+    fireEvent.click(rowRemoveButtons[0]);
+
+    const dialogs = screen.getAllByRole("dialog", { hidden: true });
+    const confirmDialog = dialogs.find((d) => d.textContent?.includes("Remove member"));
+    expect(confirmDialog).toBeDefined();
+    const cancelButton = Array.from(confirmDialog!.querySelectorAll("button")).find(
+      (b) => b.textContent === "Cancel",
+    );
+    expect(cancelButton).toBeDefined();
+    fireEvent.click(cancelButton!);
+    expect(hook.remove).not.toHaveBeenCalled();
+  });
+
+  it("closes rename modal via dialog cancel (onClose prop)", () => {
+    mockedUse.mockReturnValue(defaultHook({
+      renameTeam: vi.fn(), isRenamingTeam: false, renameTeamError: null,
+      deleteTeam: vi.fn(), isDeletingTeam: false, deleteTeamError: null,
+    }));
+    render(
+      <TeamSettingsConnector
+        teamId="t1" teamName="Acme"
+        currentUserId="owner-1" currentUserRole="owner"
+        ownerUserId="owner-1" members={baseMembers} invites={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^rename$/i }));
+    const dialog = screen.getByLabelText(/team name/i).closest("dialog")!;
+    expect(dialog).toHaveAttribute("open");
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(dialog).not.toHaveAttribute("open");
   });
 });

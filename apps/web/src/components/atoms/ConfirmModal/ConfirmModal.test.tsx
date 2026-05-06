@@ -85,4 +85,11 @@ describe("ConfirmModal", () => {
     dialog.dispatchEvent(new Event("cancel", { bubbles: true }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it("calls onCancel when backdrop (dialog element itself) is clicked", () => {
+    const onCancel = vi.fn();
+    const { container } = render(<ConfirmModal {...defaultProps} onCancel={onCancel} />);
+    fireEvent.click(container.querySelector("dialog")!);
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
 });

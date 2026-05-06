@@ -40,6 +40,9 @@ export type { LinkProps, LinkVariant } from "./Link";
 export { ConfirmModal } from "./ConfirmModal";
 export type { ConfirmModalProps, ConfirmModalVariant } from "./ConfirmModal";
 
+export { DeleteConfirmModal } from "./DeleteConfirmModal";
+export type { DeleteConfirmModalProps } from "./DeleteConfirmModal";
+
 export { Modal } from "./Modal";
 export type { ModalProps, ModalMaxWidth } from "./Modal";
 

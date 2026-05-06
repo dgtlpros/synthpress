@@ -2,11 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/database.types";
+import {
+  assertCan,
+  TeamPermissionError,
+} from "@/services/team-policy-service";
 import {
   createTeamWithOwner,
   generateUniqueBlogSlug,
   generateUniqueProjectSlug,
+  generateUniqueTeamSlug,
   listBlogsForProject,
   listProjectsForTeam,
   listTeamsForUser,
@@ -259,5 +265,210 @@ export async function getBlogsForProject(projectId: string) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Could not load blogs.";
     return { data: null, error: message };
+  }
+}
+
+export async function updateTeam(
+  teamId: string,
+  input: { name: string },
+): Promise<ActionResult<null>> {
+  const name = input.name.trim();
+  if (!name) {
+    return { data: null, error: "Team name is required." };
+  }
+
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "update_team", admin);
+
+    const { data: existing } = await admin
+      .from("teams")
+      .select("name, slug")
+      .eq("id", teamId)
+      .maybeSingle();
+
+    if (!existing) {
+      return { data: null, error: "Team not found." };
+    }
+
+    let slug = existing.slug;
+    if (name !== existing.name.trim()) {
+      slug = await generateUniqueTeamSlug(name, supabase);
+    }
+
+    const { error } = await admin.from("teams").update({ name, slug }).eq("id", teamId);
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath(`/teams/${teamId}/settings`);
+    revalidatePath(`/teams/${teamId}/projects`);
+    revalidatePath("/teams");
+    revalidatePath("/dashboard");
+    return { data: null, error: null };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
+    return { data: null, error: err instanceof Error ? err.message : "Could not rename team." };
+  }
+}
+
+export async function deleteTeam(
+  teamId: string,
+): Promise<ActionResult<{ redirect: string }>> {
+  const { user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "delete_team", admin);
+
+    // Delete in FK-safe order: invites → members → blogs → projects → team
+    await admin.from("team_invites").delete().eq("team_id", teamId);
+    await admin.from("team_members").delete().eq("team_id", teamId);
+
+    const { data: projectRows } = await admin
+      .from("projects")
+      .select("id")
+      .eq("team_id", teamId);
+
+    const projectIds = (projectRows ?? []).map((p) => p.id);
+    if (projectIds.length > 0) {
+      await admin.from("blogs").delete().in("project_id", projectIds);
+      await admin.from("projects").delete().in("id", projectIds);
+    }
+
+    const { error } = await admin.from("teams").delete().eq("id", teamId);
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath("/teams");
+    revalidatePath("/dashboard");
+    return { data: { redirect: "/teams" }, error: null };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
+    return { data: null, error: err instanceof Error ? err.message : "Could not delete team." };
+  }
+}
+
+export async function deleteProject(
+  teamId: string,
+  projectId: string,
+): Promise<ActionResult<{ redirect: string }>> {
+  const { user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "delete_project", admin);
+
+    await admin.from("blogs").delete().eq("project_id", projectId);
+    const { error } = await admin
+      .from("projects")
+      .delete()
+      .eq("id", projectId)
+      .eq("team_id", teamId);
+
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath(`/teams/${teamId}/projects`);
+    revalidatePath("/dashboard");
+    return { data: { redirect: `/teams/${teamId}/projects` }, error: null };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
+    return { data: null, error: err instanceof Error ? err.message : "Could not delete project." };
+  }
+}
+
+export async function updateBlog(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  input: { name: string },
+): Promise<ActionResult<null>> {
+  const name = input.name.trim();
+  if (!name) {
+    return { data: null, error: "Blog name is required." };
+  }
+
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { data: existing } = await supabase
+      .from("blogs")
+      .select("name, slug")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (!existing) {
+      return { data: null, error: "Blog not found." };
+    }
+
+    let slug = existing.slug;
+    if (name !== existing.name.trim()) {
+      slug = await generateUniqueBlogSlug(projectId, name, supabase);
+    }
+
+    const { error } = await supabase
+      .from("blogs")
+      .update({ name, slug })
+      .eq("id", blogId)
+      .eq("project_id", projectId);
+
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs`);
+    revalidatePath(`/teams/${teamId}/projects/${projectId}`);
+    return { data: null, error: null };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
+    return { data: null, error: err instanceof Error ? err.message : "Could not rename blog." };
+  }
+}
+
+export async function deleteBlog(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+): Promise<ActionResult<{ redirect: string }>> {
+  const { user } = await requireUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { error } = await admin
+      .from("blogs")
+      .delete()
+      .eq("id", blogId)
+      .eq("project_id", projectId);
+
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs`);
+    revalidatePath(`/teams/${teamId}/projects/${projectId}`);
+    return {
+      data: { redirect: `/teams/${teamId}/projects/${projectId}/blogs` },
+      error: null,
+    };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
+    return { data: null, error: err instanceof Error ? err.message : "Could not delete blog." };
   }
 }

@@ -206,12 +206,12 @@ export default async function TeamUsagePage({
         </CardContent>
       </Card>
 
-      {isOwner ? (
+      {isOwner || role === "admin" ? (
         <Card>
           <CardHeader>
             <CardTitle>Recent activity</CardTitle>
             <CardDescription>
-              Owner-only ledger. Each row is a single team-scoped consume RPC call.
+              Each row is a single team-scoped token consumption.
             </CardDescription>
           </CardHeader>
           <CardContent>

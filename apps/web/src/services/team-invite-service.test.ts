@@ -358,6 +358,34 @@ describe("acceptInvite", () => {
       acceptInvite({ rawToken: "x", userId: "u1", userEmail: "a@b.co" }),
     ).rejects.toMatchObject({ code: "P0500" });
   });
+
+  it("propagates invite lookup errors", async () => {
+    const lookupErr = { message: "db connection lost" };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: lookupErr });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    const client = { from: vi.fn().mockReturnValue({ select }) };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      acceptInvite({ rawToken: "x", userId: "u1", userEmail: "a@b.co" }),
+    ).rejects.toEqual(lookupErr);
+  });
+
+  it("propagates invite update errors when marking accepted", async () => {
+    const { client } = makeAcceptClient({
+      invite: {
+        id: "i1", team_id: "t1", role: "member", email: null,
+        expires_at: VALID_FUTURE, accepted_at: null, revoked_at: null,
+      },
+      updateError: { message: "update failed" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      acceptInvite({ rawToken: "x", userId: "u1", userEmail: "a@b.co" }),
+    ).rejects.toEqual({ message: "update failed" });
+  });
 });
 
 describe("revokeInvite", () => {
@@ -372,6 +400,19 @@ describe("revokeInvite", () => {
     const update = vi.fn().mockReturnValue({ eq: eqUpdate });
     return { client: { from: vi.fn().mockReturnValue({ select, update }) }, update };
   }
+
+  it("propagates invite lookup errors", async () => {
+    const lookupErr = { message: "db error" };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: lookupErr });
+    const eqSelect = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq: eqSelect });
+    const client = { from: vi.fn().mockReturnValue({ select }) };
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      revokeInvite({ inviteId: "i1", actorUserId: "u1" }),
+    ).rejects.toEqual(lookupErr);
+  });
 
   it("throws not_found when invite missing", async () => {
     const { client } = makeRevokeClient({ invite: null });
@@ -488,6 +529,36 @@ describe("listInvites", () => {
     await expect(listInvites({ teamId: "t1", actorUserId: "u1" })).rejects.toBeInstanceOf(
       TeamPermissionError,
     );
+  });
+
+  it("returns empty array when query data is null", async () => {
+    const finalResult = vi.fn().mockResolvedValue({ data: null, error: null });
+    const isAccepted = vi.fn().mockReturnValue({ is: finalResult });
+    const order = vi.fn().mockReturnValue({ is: isAccepted });
+    const eq = vi.fn().mockReturnValue({ order });
+    const select = vi.fn().mockReturnValue({ eq });
+    const client = { from: vi.fn().mockReturnValue({ select }) };
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedAssertCan.mockResolvedValue("admin");
+
+    const result = await listInvites({ teamId: "t1", actorUserId: "u1" });
+    expect(result).toEqual([]);
+  });
+
+  it("propagates query errors", async () => {
+    const queryErr = { message: "query failed" };
+    const finalResult = vi.fn().mockResolvedValue({ data: null, error: queryErr });
+    const isAccepted = vi.fn().mockReturnValue({ is: finalResult });
+    const order = vi.fn().mockReturnValue({ is: isAccepted });
+    const eq = vi.fn().mockReturnValue({ order });
+    const select = vi.fn().mockReturnValue({ eq });
+    const client = { from: vi.fn().mockReturnValue({ select }) };
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedAssertCan.mockResolvedValue("admin");
+
+    await expect(
+      listInvites({ teamId: "t1", actorUserId: "u1" }),
+    ).rejects.toEqual(queryErr);
   });
 });
 

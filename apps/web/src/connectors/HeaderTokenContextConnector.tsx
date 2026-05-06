@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
+import type { TeamRole } from "@/lib/team-roles";
 
 export interface HeaderTeamPlan {
   teamId: string;
   teamName: string;
   ownerName: string;
   isOwner: boolean;
+  myRole: TeamRole;
   balance: number;
   planKey: string | null;
 }
@@ -39,9 +41,10 @@ export function HeaderTokenContextConnector({
   if (activeTeam) {
     const balance = activeTeam.balance;
     const variant = balance <= 50 ? "warning" : "brand";
+    const roleLabel = activeTeam.myRole === "admin" ? " · Admin" : activeTeam.myRole === "member" ? " · Member" : "";
     const tooltip = activeTeam.isOwner
       ? `Spending your balance for ${activeTeam.teamName}`
-      : `Spending ${activeTeam.teamName} balance (paid by ${activeTeam.ownerName})`;
+      : `Spending ${activeTeam.teamName} balance (paid by ${activeTeam.ownerName})${roleLabel}`;
     return (
       <Link
         href={activeTeam.isOwner ? "/account/billing" : `/teams/${activeTeam.teamId}/usage`}

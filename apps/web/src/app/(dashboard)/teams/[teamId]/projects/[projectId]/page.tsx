@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { listBlogsForProject } from "@/services/workspace-service";
+import { getUserTeamRole } from "@/services/team-policy-service";
 import { ProjectOverviewConnector } from "@/connectors/ProjectOverviewConnector";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,10 @@ export default async function ProjectOverviewPage({
     notFound();
   }
 
+  const admin = createAdminClient();
+  const currentUserRole = await getUserTeamRole(teamId, user.id, admin);
+  if (!currentUserRole) notFound();
+
   const blogs = await listBlogsForProject(projectId, supabase);
 
   return (
@@ -60,6 +66,7 @@ export default async function ProjectOverviewPage({
         projectName={project.name}
         projectDescription={project.description ?? ""}
         blogs={blogs}
+        currentUserRole={currentUserRole}
       />
 
       <p className="text-xs text-muted">

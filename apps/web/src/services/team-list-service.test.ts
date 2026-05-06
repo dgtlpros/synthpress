@@ -270,4 +270,531 @@ describe("listTeamsForUserWithMeta", () => {
     expect(out.owned[0].ownerName).toBe("me@example.com");
     expect(out.owned[0].ownerInitials).toBe("M");
   });
+
+  it("uses first char of single-char team name as initials when owner is anonymous", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-z", role: "member" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () =>
+                  Promise.resolve({ data: [{ team_id: "team-z" }], error: null }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      id: "team-z",
+                      name: "Z",
+                      slug: "z",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u-other",
+                    },
+                  ],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+
+    const admin = {
+      from() {
+        return {
+          select: () => ({
+            in: () =>
+              Promise.resolve({
+                data: [{ id: "u-other", full_name: null, avatar_url: null }],
+                error: null,
+              }),
+          }),
+        };
+      },
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+
+    mockGetTeamPlan.mockResolvedValueOnce(null);
+
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(out.joined[0].ownerInitials).toBe("Z");
+  });
+
+  it("throws when initial membership query errors", async () => {
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: () => Promise.resolve({ data: null, error: new Error("membership error") }),
+        }),
+      }),
+    };
+    const admin = {} as never;
+    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("membership error");
+  });
+
+  it("handles null memberships data (memberships ?? [] branch)", async () => {
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: () => Promise.resolve({ data: null, error: null }),
+        }),
+      }),
+    };
+    const admin = {} as never;
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin);
+    expect(out).toEqual({ owned: [], joined: [] });
+  });
+
+  it("throws when teams query errors", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: () => ({
+              eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }),
+            }),
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: null, error: new Error("teams error") }),
+            }),
+          };
+        }
+        throw new Error(`unexpected ${table}`);
+      },
+    };
+    const admin = {} as never;
+    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("teams error");
+  });
+
+  it("handles null teamRows data (teamRows ?? [] branch)", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }) };
+              }
+              return { in: () => Promise.resolve({ data: [], error: null }) };
+            },
+          };
+        }
+        if (table === "teams") {
+          return { select: () => ({ in: () => Promise.resolve({ data: null, error: null }) }) };
+        }
+        if (table === "projects") {
+          return { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) };
+        }
+        throw new Error(`unexpected ${table}`);
+      },
+    };
+    const admin = {
+      from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(out.owned).toEqual([]);
+    expect(out.joined).toEqual([]);
+  });
+
+  it("throws when member count query errors", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }) };
+              }
+              return { in: () => Promise.resolve({ data: null, error: new Error("memcount error") }) };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [{ id: "t1", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }], error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected ${table}`);
+      },
+    };
+    const admin = {} as never;
+    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("memcount error");
+  });
+
+  it("uses '?' for ownerInitials when teamName is empty (ownerInitialsFromDisplay edge)", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "member" }], error: null }) };
+              }
+              return { in: () => Promise.resolve({ data: [{ team_id: "t1" }], error: null }) };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [{ id: "t1", name: "  ", slug: "empty", created_at: "2026-01-01", billing_user_id: "u-other" }], error: null }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) };
+        }
+        throw new Error(`unexpected ${table}`);
+      },
+    };
+    const admin = {
+      from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [{ id: "u-other", full_name: null, avatar_url: null }], error: null }) }) }),
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+    mockGetTeamPlan.mockResolvedValueOnce(null);
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(out.joined[0].ownerInitials).toBe("?");
+  });
+
+  it("handles null data from member count, project count, and profile queries (null ?? [] branches)", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-a", role: "owner" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () => Promise.resolve({ data: null, error: null }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: null, error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+
+    const admin = {
+      from() {
+        return {
+          select: () => ({
+            in: () => Promise.resolve({ data: null, error: null }),
+          }),
+        };
+      },
+      auth: { admin: { getUserById: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) } },
+    };
+
+    mockGetTeamPlan.mockResolvedValueOnce(null);
+
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(out.owned[0].memberCount).toBe(0);
+    expect(out.owned[0].projectCount).toBe(0);
+    expect(out.owned[0].ownerName).toBe("You");
+  });
+
+  it("throws when project count query errors", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-a", role: "owner" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () =>
+                  Promise.resolve({
+                    data: [{ team_id: "team-a" }],
+                    error: null,
+                  }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: null, error: new Error("project query failed") }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+    const admin = { from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }), auth: { admin: { getUserById: vi.fn() } } };
+    await expect(listTeamsForUserWithMeta("u1", client as never, admin as never)).rejects.toThrow("project query failed");
+  });
+
+  it("throws when profile query errors", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-a", role: "owner" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () =>
+                  Promise.resolve({
+                    data: [{ team_id: "team-a" }],
+                    error: null,
+                  }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+    const admin = {
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: null, error: new Error("profile query failed") }),
+        }),
+      }),
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+    await expect(listTeamsForUserWithMeta("u1", client as never, admin as never)).rejects.toThrow("profile query failed");
+  });
+
+  it("falls back to 'You' when getUserById returns no email for self", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-x", role: "owner" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () =>
+                  Promise.resolve({
+                    data: [{ team_id: "team-x" }],
+                    error: null,
+                  }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [{ id: "team-x", name: "Solo", slug: "solo", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+
+    const getUserById = vi.fn().mockResolvedValue({ data: { user: null }, error: new Error("not found") });
+    const admin = {
+      from() {
+        return {
+          select: () => ({
+            in: () =>
+              Promise.resolve({
+                data: [{ id: "u1", full_name: null, avatar_url: null }],
+                error: null,
+              }),
+          }),
+        };
+      },
+      auth: { admin: { getUserById } },
+    };
+
+    mockGetTeamPlan.mockResolvedValueOnce({ ownerId: "u1", planKey: null, status: null, balance: 0 });
+
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(getUserById).toHaveBeenCalledWith("u1");
+    expect(out.owned[0].ownerName).toBe("You");
+  });
+
+  it("uses first two chars of single-word owner name as initials", async () => {
+    const client = {
+      from(table: string) {
+        if (table === "team_members") {
+          return {
+            select: (cols: string) => {
+              if (cols.includes("role")) {
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "team-w", role: "owner" }],
+                      error: null,
+                    }),
+                };
+              }
+              return {
+                in: () =>
+                  Promise.resolve({ data: [{ team_id: "team-w" }], error: null }),
+              };
+            },
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: () => ({
+              in: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      id: "team-w",
+                      name: "Wonderland",
+                      slug: "wonderland",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
+                  error: null,
+                }),
+            }),
+          };
+        }
+        if (table === "projects") {
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+
+    const admin = {
+      from() {
+        return {
+          select: () => ({
+            in: () =>
+              Promise.resolve({
+                data: [{ id: "u1", full_name: "Alice", avatar_url: null }],
+                error: null,
+              }),
+          }),
+        };
+      },
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+
+    mockGetTeamPlan.mockResolvedValueOnce(null);
+
+    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    expect(out.owned[0].ownerInitials).toBe("AL");
+  });
 });

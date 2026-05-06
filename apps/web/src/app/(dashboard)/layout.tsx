@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
 import { getTeamPlan } from "@/services/team-billing-service";
 import { listTeamsForUser } from "@/services/workspace-service";
+import type { TeamRole } from "@/lib/team-roles";
 import { WorkspaceSidebar, type WorkspaceSidebarTeam } from "@/components/molecules/WorkspaceSidebar";
 import { MobileNavConnector } from "@/connectors/MobileNavConnector";
 import {
@@ -33,6 +34,14 @@ export default async function DashboardLayout({
 
   const teamRows = await listTeamsForUser(user.id, supabase);
   const teamIds = teamRows.map((t) => t.id);
+
+  const { data: membershipRows } =
+    teamIds.length > 0
+      ? await supabase.from("team_members").select("team_id, role").eq("user_id", user.id).in("team_id", teamIds)
+      : { data: [] as { team_id: string; role: string }[] };
+  const roleByTeamId = new Map<string, TeamRole>(
+    (membershipRows ?? []).map((m) => [m.team_id, m.role as TeamRole]),
+  );
   const { data: projectRows } =
     teamIds.length > 0
       ? await supabase.from("projects").select("id,name,team_id").in("team_id", teamIds).order("name")
@@ -69,6 +78,7 @@ export default async function DashboardLayout({
     teamId: team.id,
     teamName: team.name,
     isOwner: plan?.ownerId === user.id,
+    myRole: roleByTeamId.get(team.id) ?? "member",
     ownerName: plan ? ownerNameById.get(plan.ownerId) ?? "the team owner" : "the team owner",
     balance: plan?.balance ?? 0,
     planKey: plan?.planKey ?? null,

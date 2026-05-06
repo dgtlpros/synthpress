@@ -46,7 +46,7 @@ export const PERMISSIONS: Record<TeamAction, readonly TeamRole[]> = {
   delete_project: OWNER_OR_ADMIN,
   manage_blog: ALL_ROLES,
   consume_team_tokens: ALL_ROLES,
-  view_team_usage: OWNER_OR_ADMIN,
+  view_team_usage: ALL_ROLES,
 } as const;
 
 /** Pure helper: does this role have permission for this action? */

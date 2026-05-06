@@ -49,6 +49,9 @@ export function Modal({
         e.preventDefault();
         onClose();
       }}
+      onClick={(e) => {
+        if (e.target === dialogRef.current) onClose();
+      }}
       className={cn(
         "m-auto w-[calc(100%-2rem)] rounded-[var(--sp-radius-xl)] border border-border bg-surface p-0 shadow-[var(--sp-shadow-lg)] backdrop:bg-black/50",
         maxWidthStyles[maxWidth],
