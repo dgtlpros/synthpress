@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-const ALLOWED_REDIRECTS = ["/dashboard", "/projects", "/articles", "/account"];
+const ALLOWED_REDIRECTS = ["/dashboard", "/teams", "/account"];
 
 function getSafeRedirect(next: string | null): string {
   if (!next) return "/dashboard";

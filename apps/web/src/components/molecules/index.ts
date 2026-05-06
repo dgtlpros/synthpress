@@ -10,8 +10,14 @@ export { TokenBalanceCard } from "./TokenBalanceCard";
 export type { TokenBalanceCardProps } from "./TokenBalanceCard";
 export { TopUpCard } from "./TopUpCard";
 export type { TopUpCardProps } from "./TopUpCard";
-export { DashboardSidebar } from "./DashboardSidebar";
-export type { DashboardSidebarProps, SidebarNavItem } from "./DashboardSidebar";
+export { AppCard } from "./AppCard";
+export type { AppCardProps } from "./AppCard";
+export { WorkspaceSidebar } from "./WorkspaceSidebar";
+export type {
+  WorkspaceSidebarProps,
+  WorkspaceSidebarTeam,
+  WorkspaceSidebarProject,
+} from "./WorkspaceSidebar";
 export { CheckoutSuccessHero } from "./CheckoutSuccessHero";
 export type {
   CheckoutSuccessHeroProps,

@@ -3,22 +3,12 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
+import { listTeamsForUser } from "@/services/workspace-service";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
-import {
-  DashboardSidebar,
-  type SidebarNavItem,
-} from "@/components/molecules/DashboardSidebar";
+import { WorkspaceSidebar, type WorkspaceSidebarTeam } from "@/components/molecules/WorkspaceSidebar";
 import { MobileNavConnector } from "@/connectors/MobileNavConnector";
 
 export const dynamic = "force-dynamic";
-
-const NAV_ITEMS: SidebarNavItem[] = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Projects", href: "/projects" },
-  { label: "Articles", href: "/articles" },
-  { label: "Account", href: "/account" },
-  { label: "Billing", href: "/account/billing" },
-];
 
 export default async function DashboardLayout({
   children,
@@ -36,21 +26,28 @@ export default async function DashboardLayout({
 
   const balance = await getBalance(user.id, createAdminClient());
 
+  const teamRows = await listTeamsForUser(user.id, supabase);
+  const teamIds = teamRows.map((t) => t.id);
+  const { data: projectRows } =
+    teamIds.length > 0
+      ? await supabase.from("projects").select("id,name,team_id").in("team_id", teamIds).order("name")
+      : { data: [] as { id: string; name: string; team_id: string }[] };
+
+  const workspaceTeams: WorkspaceSidebarTeam[] = teamRows.map((team) => ({
+    id: team.id,
+    name: team.name,
+    projects: (projectRows ?? [])
+      .filter((p) => p.team_id === team.id)
+      .map((p) => ({ id: p.id, name: p.name, teamId: p.team_id })),
+  }));
+
   return (
     <div className="flex min-h-screen bg-background">
-      <DashboardSidebar
-        navItems={NAV_ITEMS}
-        email={user.email}
-        className="hidden min-h-screen lg:flex"
-      />
+      <WorkspaceSidebar teams={workspaceTeams} email={user.email} className="hidden min-h-screen lg:flex" />
       <main className="flex-1">
         <header className="flex h-16 items-center justify-between border-b border-border px-4 sm:px-6">
           <div className="flex items-center gap-2">
-            <MobileNavConnector
-              navItems={NAV_ITEMS}
-              email={user.email}
-              className="lg:hidden"
-            />
+            <MobileNavConnector teams={workspaceTeams} email={user.email} className="lg:hidden" />
             <Link href="/" className="flex items-center lg:hidden" aria-label="Home">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

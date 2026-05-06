@@ -38,13 +38,13 @@ export type Database = {
         Row: {
           ai_model: string | null
           ai_prompt: string | null
+          blog_id: string
           content: string
           created_at: string
           error_message: string | null
           excerpt: string
           featured_image_url: string | null
           id: string
-          project_id: string
           published_at: string | null
           status: Database["public"]["Enums"]["article_status"]
           title: string
@@ -54,13 +54,13 @@ export type Database = {
         Insert: {
           ai_model?: string | null
           ai_prompt?: string | null
+          blog_id: string
           content?: string
           created_at?: string
           error_message?: string | null
           excerpt?: string
           featured_image_url?: string | null
           id?: string
-          project_id: string
           published_at?: string | null
           status?: Database["public"]["Enums"]["article_status"]
           title?: string
@@ -70,13 +70,13 @@ export type Database = {
         Update: {
           ai_model?: string | null
           ai_prompt?: string | null
+          blog_id?: string
           content?: string
           created_at?: string
           error_message?: string | null
           excerpt?: string
           featured_image_url?: string | null
           id?: string
-          project_id?: string
           published_at?: string | null
           status?: Database["public"]["Enums"]["article_status"]
           title?: string
@@ -85,7 +85,69 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "articles_project_id_fkey"
+            foreignKeyName: "articles_blog_id_fkey"
+            columns: ["blog_id"]
+            isOneToOne: false
+            referencedRelation: "blogs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      blogs: {
+        Row: {
+          ai_prompt_template: string
+          articles_per_day: number
+          created_at: string
+          id: string
+          is_active: boolean
+          keywords: string[]
+          name: string
+          niche: string
+          project_id: string
+          schedule_cron: string
+          slug: string
+          updated_at: string
+          wp_app_password: string
+          wp_url: string
+          wp_username: string
+        }
+        Insert: {
+          ai_prompt_template?: string
+          articles_per_day?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          name: string
+          niche?: string
+          project_id: string
+          schedule_cron?: string
+          slug: string
+          updated_at?: string
+          wp_app_password: string
+          wp_url: string
+          wp_username: string
+        }
+        Update: {
+          ai_prompt_template?: string
+          articles_per_day?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          name?: string
+          niche?: string
+          project_id?: string
+          schedule_cron?: string
+          slug?: string
+          updated_at?: string
+          wp_app_password?: string
+          wp_url?: string
+          wp_username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blogs_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -164,62 +226,38 @@ export type Database = {
       }
       projects: {
         Row: {
-          ai_prompt_template: string
-          articles_per_day: number
           created_at: string
+          description: string
           id: string
-          is_active: boolean
-          keywords: string[]
           name: string
-          niche: string
-          schedule_cron: string
           slug: string
+          team_id: string
           updated_at: string
-          user_id: string
-          wp_app_password: string
-          wp_url: string
-          wp_username: string
         }
         Insert: {
-          ai_prompt_template?: string
-          articles_per_day?: number
           created_at?: string
+          description?: string
           id?: string
-          is_active?: boolean
-          keywords?: string[]
           name: string
-          niche?: string
-          schedule_cron?: string
           slug: string
+          team_id: string
           updated_at?: string
-          user_id: string
-          wp_app_password: string
-          wp_url: string
-          wp_username: string
         }
         Update: {
-          ai_prompt_template?: string
-          articles_per_day?: number
           created_at?: string
+          description?: string
           id?: string
-          is_active?: boolean
-          keywords?: string[]
           name?: string
-          niche?: string
-          schedule_cron?: string
           slug?: string
+          team_id?: string
           updated_at?: string
-          user_id?: string
-          wp_app_password?: string
-          wp_url?: string
-          wp_username?: string
         }
         Relationships: [
           {
-            foreignKeyName: "projects_user_id_fkey"
-            columns: ["user_id"]
+            foreignKeyName: "projects_team_id_fkey"
+            columns: ["team_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
         ]
@@ -292,6 +330,77 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "plans"
             referencedColumns: ["key"]
+          },
+        ]
+      }
+      team_members: {
+        Row: {
+          created_at: string
+          role: Database["public"]["Enums"]["team_role"]
+          team_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          role?: Database["public"]["Enums"]["team_role"]
+          team_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          role?: Database["public"]["Enums"]["team_role"]
+          team_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_members_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      teams: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "teams_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -409,6 +518,10 @@ export type Database = {
         }
         Returns: Json
       }
+      user_is_team_member: {
+        Args: { p_team_id: string; p_user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       article_status:
@@ -418,6 +531,7 @@ export type Database = {
         | "publishing"
         | "published"
         | "failed"
+      team_role: "owner" | "admin" | "member"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -556,6 +670,7 @@ export const Constants = {
         "published",
         "failed",
       ],
+      team_role: ["owner", "admin", "member"],
     },
   },
 } as const

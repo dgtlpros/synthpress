@@ -37,3 +37,8 @@ test("unauthenticated user is redirected from /account to /login", async ({ page
   await page.goto("/account");
   await expect(page).toHaveURL(/\/login/);
 });
+
+test("unauthenticated user is redirected from /teams to /login", async ({ page }) => {
+  await page.goto("/teams");
+  await expect(page).toHaveURL(/\/login/);
+});

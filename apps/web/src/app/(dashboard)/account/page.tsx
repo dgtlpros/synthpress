@@ -143,8 +143,21 @@ export default async function AccountPage() {
         </Card>
       </div>
 
-      {/* Quick actions */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* Workspaces + billing */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <NextLink
+          href="/teams"
+          className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]"
+        >
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Teams &amp; projects</h2>
+            <p className="mt-1 text-sm text-muted">
+              Organize people in teams, scope work in projects, connect blogs per project.
+            </p>
+          </div>
+          <span className="text-sm text-muted transition-transform group-hover:translate-x-0.5">→</span>
+        </NextLink>
+
         <NextLink
           href="/account/billing"
           className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]"
@@ -162,7 +175,7 @@ export default async function AccountPage() {
 
         <NextLink
           href={current ? "/account/billing" : "/pricing"}
-          className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-brand-purple/40 bg-gradient-to-br from-brand-purple/5 to-brand-blue/5 p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:shadow-[var(--sp-shadow-md)]"
+          className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-brand-purple/40 bg-gradient-to-br from-brand-purple/5 to-brand-blue/5 p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:shadow-[var(--sp-shadow-md)] sm:col-span-2 lg:col-span-1"
         >
           <div>
             <h2 className="text-lg font-semibold text-foreground">

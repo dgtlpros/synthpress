@@ -1,23 +1,24 @@
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { MobileNavConnector } from "./MobileNavConnector";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard",
+}));
 
 afterEach(cleanup);
 
-const navItems = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Account", href: "/account" },
-];
+const teams = [{ id: "t1", name: "Team One", projects: [] as { id: string; name: string; teamId: string }[] }];
 
 describe("MobileNavConnector", () => {
   it("renders the open-menu trigger collapsed by default", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     const trigger = screen.getByRole("button", { name: "Open menu" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("toggles the drawer when the trigger is clicked", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     const trigger = screen.getByRole("button", { name: "Open menu" });
     fireEvent.click(trigger);
 
@@ -30,7 +31,7 @@ describe("MobileNavConnector", () => {
   });
 
   it("closes the drawer when a nav link is clicked", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.click(screen.getByRole("link", { name: "Account" }));
@@ -42,7 +43,7 @@ describe("MobileNavConnector", () => {
   });
 
   it("closes the drawer when the backdrop is clicked", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.click(screen.getByTestId("mobile-nav-backdrop"));
@@ -50,7 +51,7 @@ describe("MobileNavConnector", () => {
   });
 
   it("closes the drawer on Escape", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -58,7 +59,7 @@ describe("MobileNavConnector", () => {
   });
 
   it("ignores other keys", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.keyDown(document, { key: "Enter" });
@@ -66,13 +67,13 @@ describe("MobileNavConnector", () => {
   });
 
   it("propagates email to the inner sidebar", () => {
-    render(<MobileNavConnector navItems={navItems} email="user@test.com" />);
+    render(<MobileNavConnector teams={teams} email="user@test.com" />);
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
     expect(screen.getByText("user@test.com")).toBeInTheDocument();
   });
 
   it("locks body scroll while open and restores on close", () => {
-    render(<MobileNavConnector navItems={navItems} />);
+    render(<MobileNavConnector teams={teams} />);
     expect(document.body.style.overflow).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));

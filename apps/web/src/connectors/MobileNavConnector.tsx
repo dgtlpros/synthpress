@@ -4,21 +4,17 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/components/atoms/IconButton";
 import {
-  DashboardSidebar,
-  type SidebarNavItem,
-} from "@/components/molecules/DashboardSidebar";
+  WorkspaceSidebar,
+  type WorkspaceSidebarTeam,
+} from "@/components/molecules/WorkspaceSidebar";
 
 export interface MobileNavConnectorProps {
-  navItems: SidebarNavItem[];
+  teams: WorkspaceSidebarTeam[];
   email?: string | null;
   className?: string;
 }
 
-export function MobileNavConnector({
-  navItems,
-  email,
-  className,
-}: MobileNavConnectorProps) {
+export function MobileNavConnector({ teams, email, className }: MobileNavConnectorProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
@@ -64,7 +60,6 @@ export function MobileNavConnector({
         </svg>
       </IconButton>
 
-      {/* Backdrop */}
       <div
         data-testid="mobile-nav-backdrop"
         onClick={() => setIsOpen(false)}
@@ -75,7 +70,6 @@ export function MobileNavConnector({
         aria-hidden="true"
       />
 
-      {/* Drawer */}
       <div
         id="mobile-nav-drawer"
         role="dialog"
@@ -86,8 +80,8 @@ export function MobileNavConnector({
           isOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <DashboardSidebar
-          navItems={navItems}
+        <WorkspaceSidebar
+          teams={teams}
           email={email}
           onItemClick={() => setIsOpen(false)}
           className="h-full shadow-[var(--sp-shadow-lg)]"
