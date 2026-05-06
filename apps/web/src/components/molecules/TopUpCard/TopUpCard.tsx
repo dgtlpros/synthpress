@@ -35,12 +35,18 @@ export function TopUpCard({
     >
       <div className="mb-4">
         <h3 className="text-base font-semibold text-foreground">{name}</h3>
-        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+        {description && (
+          <p className="mt-1 text-sm text-muted">{description}</p>
+        )}
       </div>
 
       <div className="mb-4">
-        <div className="text-3xl font-bold text-foreground">{formatter.format(tokens)}</div>
-        <p className="text-xs uppercase tracking-wide text-muted">synth tokens</p>
+        <div className="text-3xl font-bold text-foreground">
+          {formatter.format(tokens)}
+        </div>
+        <p className="text-xs uppercase tracking-wide text-muted">
+          synth tokens
+        </p>
       </div>
 
       <div className="mb-6">

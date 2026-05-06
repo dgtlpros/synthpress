@@ -16,11 +16,7 @@ import {
   consumeTokens as consumeTokensService,
   getRecentTransactions,
 } from "@/services/token-service";
-import {
-  getTokenBalance,
-  consumeTokens,
-  getTokenTransactions,
-} from "./tokens";
+import { getTokenBalance, consumeTokens, getTokenTransactions } from "./tokens";
 
 const mockedCreateClient = vi.mocked(createClient);
 const mockedGetBalance = vi.mocked(getBalance);

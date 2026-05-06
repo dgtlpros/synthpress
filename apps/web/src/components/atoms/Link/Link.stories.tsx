@@ -12,5 +12,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = { args: { children: "Learn more", href: "#" } };
-export const Muted: Story = { args: { children: "Privacy Policy", href: "#", variant: "muted" } };
-export const Nav: Story = { args: { children: "Features", href: "#features", variant: "nav" } };
+export const Muted: Story = {
+  args: { children: "Privacy Policy", href: "#", variant: "muted" },
+};
+export const Nav: Story = {
+  args: { children: "Features", href: "#features", variant: "nav" },
+};

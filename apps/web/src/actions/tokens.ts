@@ -37,11 +37,16 @@ export async function getTokenBalance(): Promise<BalanceResult> {
     const balance = await getBalance(user.id);
     return { balance };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Failed to load balance" };
+    return {
+      error: err instanceof Error ? err.message : "Failed to load balance",
+    };
   }
 }
 
-export async function consumeTokens(amount: number, description?: string): Promise<ConsumeResult> {
+export async function consumeTokens(
+  amount: number,
+  description?: string,
+): Promise<ConsumeResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -62,11 +67,15 @@ export async function consumeTokens(amount: number, description?: string): Promi
     if (err instanceof Error && err.message === "insufficient_tokens") {
       return { error: "insufficient_tokens" };
     }
-    return { error: err instanceof Error ? err.message : "Failed to consume tokens" };
+    return {
+      error: err instanceof Error ? err.message : "Failed to consume tokens",
+    };
   }
 }
 
-export async function getTokenTransactions(limit = 10): Promise<TransactionsResult> {
+export async function getTokenTransactions(
+  limit = 10,
+): Promise<TransactionsResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -80,6 +89,8 @@ export async function getTokenTransactions(limit = 10): Promise<TransactionsResu
     const transactions = await getRecentTransactions(user.id, { limit });
     return { transactions };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Failed to load transactions" };
+    return {
+      error: err instanceof Error ? err.message : "Failed to load transactions",
+    };
   }
 }

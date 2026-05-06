@@ -39,7 +39,11 @@ describe("useAcceptInvite", () => {
   it("on success: navigates to team projects and sets ok", async () => {
     const router = makeRouter();
     mockedUseRouter.mockReturnValue(router as never);
-    mockedAccept.mockResolvedValue({ teamId: "t1", role: "member", error: null });
+    mockedAccept.mockResolvedValue({
+      teamId: "t1",
+      role: "member",
+      error: null,
+    });
 
     const { result } = renderHook(() =>
       useAcceptInvite({ rawToken: "tok", teamId: "t1" }),
@@ -58,10 +62,18 @@ describe("useAcceptInvite", () => {
   it("respects redirectTo override", async () => {
     const router = makeRouter();
     mockedUseRouter.mockReturnValue(router as never);
-    mockedAccept.mockResolvedValue({ teamId: "t1", role: "admin", error: null });
+    mockedAccept.mockResolvedValue({
+      teamId: "t1",
+      role: "admin",
+      error: null,
+    });
 
     const { result } = renderHook(() =>
-      useAcceptInvite({ rawToken: "tok", teamId: "t1", redirectTo: "/dashboard" }),
+      useAcceptInvite({
+        rawToken: "tok",
+        teamId: "t1",
+        redirectTo: "/dashboard",
+      }),
     );
 
     await act(async () => {

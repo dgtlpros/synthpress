@@ -40,7 +40,9 @@ export interface ConsumeTeamTokensInput {
  * RPC and the unique partial index on `token_transactions.idempotency_key`
  * catches concurrent retries.
  */
-export async function consumeTeamTokens(input: ConsumeTeamTokensInput): Promise<number> {
+export async function consumeTeamTokens(
+  input: ConsumeTeamTokensInput,
+): Promise<number> {
   if (input.amount <= 0) {
     throw new Error("consumeTeamTokens: amount must be positive");
   }

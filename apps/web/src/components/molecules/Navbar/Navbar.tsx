@@ -15,13 +15,24 @@ export interface NavbarProps {
 
 export function Navbar({ className, user }: NavbarProps) {
   return (
-    <nav className={cn("sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md", className)}>
+    <nav
+      className={cn(
+        "sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md",
+        className,
+      )}
+    >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <NextLink href="/" className="flex items-center gap-2">
           <picture>
-            <source media="(min-width: 768px)" srcSet="/synthpress-full-logo.svg" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/synthpress-logo-icon.svg" alt="SynthPress" className="h-11 w-auto" />
+            <source
+              media="(min-width: 768px)"
+              srcSet="/synthpress-full-logo.svg"
+            />
+            <img
+              src="/synthpress-logo-icon.svg"
+              alt="SynthPress"
+              className="h-11 w-auto"
+            />
           </picture>
         </NextLink>
 

@@ -73,15 +73,21 @@ const PACKS = [
 function preflight() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {
-    console.error("✖ STRIPE_SECRET_KEY is not set. Did you fill it into apps/web/.env.local?");
+    console.error(
+      "✖ STRIPE_SECRET_KEY is not set. Did you fill it into apps/web/.env.local?",
+    );
     process.exit(1);
   }
   if (key.startsWith("sk_live_") && !ALLOW_LIVE) {
-    console.error("✖ Refusing to run against a live key without --live. Pass --live to confirm.");
+    console.error(
+      "✖ Refusing to run against a live key without --live. Pass --live to confirm.",
+    );
     process.exit(1);
   }
   if (!key.startsWith("sk_test_") && !key.startsWith("sk_live_")) {
-    console.error("✖ STRIPE_SECRET_KEY does not look like a Stripe secret key.");
+    console.error(
+      "✖ STRIPE_SECRET_KEY does not look like a Stripe secret key.",
+    );
     process.exit(1);
   }
   const mode = key.startsWith("sk_live_") ? "LIVE" : "test";
@@ -103,7 +109,9 @@ async function findProductByMetadata(stripe, metadataKey, metadataValue) {
       limit: 100,
       ...(starting_after ? { starting_after } : {}),
     });
-    const hit = list.data.find((p) => p.metadata && p.metadata[metadataKey] === metadataValue);
+    const hit = list.data.find(
+      (p) => p.metadata && p.metadata[metadataKey] === metadataValue,
+    );
     if (hit) return hit;
     if (!list.has_more) return null;
     starting_after = list.data[list.data.length - 1]?.id;
@@ -118,7 +126,11 @@ async function findProductByMetadata(stripe, metadataKey, metadataValue) {
  * @param {{ unit_amount: number; currency: string; recurring?: { interval: "month" } }} params
  */
 async function findActivePrice(stripe, productId, params) {
-  const list = await stripe.prices.list({ product: productId, active: true, limit: 100 });
+  const list = await stripe.prices.list({
+    product: productId,
+    active: true,
+    limit: 100,
+  });
   return (
     list.data.find((p) => {
       if (p.unit_amount !== params.unit_amount) return false;
@@ -243,7 +255,11 @@ async function provisionPacks(stripe) {
       createdPrice = true;
     }
 
-    const status = createdProduct ? "created" : createdPrice ? "new price" : "exists";
+    const status = createdProduct
+      ? "created"
+      : createdPrice
+        ? "new price"
+        : "exists";
     console.log(`  ${pack.key.padEnd(11)}  ${status.padEnd(10)}  ${price.id}`);
     out[pack.key] = price.id;
   }

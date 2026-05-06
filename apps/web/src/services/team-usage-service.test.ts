@@ -81,7 +81,9 @@ describe("getTeamUsage", () => {
     const { client } = makeClient({ txRows: [], txError: { message: "boom" } });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    await expect(getTeamUsage({ teamId: "t1" })).rejects.toEqual({ message: "boom" });
+    await expect(getTeamUsage({ teamId: "t1" })).rejects.toEqual({
+      message: "boom",
+    });
   });
 
   it("joins names from projects, blogs, profiles", async () => {
@@ -133,7 +135,12 @@ describe("getTeamUsage", () => {
 
     expect(result.summary.totalSpent).toBe(15);
     expect(result.summary.byMember).toEqual([
-      { actingUserId: "u-actor", actingUserName: "Acting User", spent: 15, count: 2 },
+      {
+        actingUserId: "u-actor",
+        actingUserName: "Acting User",
+        spent: 15,
+        count: 2,
+      },
     ]);
     expect(result.summary.byProject).toEqual([
       { projectId: "p1", projectName: "Marketing", spent: 15, count: 2 },
@@ -205,7 +212,10 @@ describe("getTeamUsage", () => {
         metadata: { team_id: "t1", acting_user_id: "u1" },
       },
     ];
-    const { client } = makeClient({ txRows, profiles: [{ id: "u1", full_name: "X" }] });
+    const { client } = makeClient({
+      txRows,
+      profiles: [{ id: "u1", full_name: "X" }],
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const result = await getTeamUsage({ teamId: "t1" });
@@ -251,7 +261,12 @@ describe("getTeamUsage", () => {
         description: null,
         created_at: "2026-05-01T10:00:00Z",
         type: "usage",
-        metadata: { team_id: "t1", project_id: "p1", blog_id: "b1", acting_user_id: "u1" },
+        metadata: {
+          team_id: "t1",
+          project_id: "p1",
+          blog_id: "b1",
+          acting_user_id: "u1",
+        },
       },
     ];
 
@@ -278,15 +293,40 @@ describe("getTeamUsage", () => {
 
   it("exercises sort comparator in both directions (3+ days)", async () => {
     const txRows = [
-      { id: "tx-1", amount: -1, description: null, created_at: "2026-05-01T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
-      { id: "tx-2", amount: -1, description: null, created_at: "2026-05-02T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
-      { id: "tx-3", amount: -1, description: null, created_at: "2026-05-03T10:00:00Z", type: "usage", metadata: { team_id: "t1" } },
+      {
+        id: "tx-1",
+        amount: -1,
+        description: null,
+        created_at: "2026-05-01T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1" },
+      },
+      {
+        id: "tx-2",
+        amount: -1,
+        description: null,
+        created_at: "2026-05-02T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1" },
+      },
+      {
+        id: "tx-3",
+        amount: -1,
+        description: null,
+        created_at: "2026-05-03T10:00:00Z",
+        type: "usage",
+        metadata: { team_id: "t1" },
+      },
     ];
     const { client } = makeClient({ txRows });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const result = await getTeamUsage({ teamId: "t1" });
-    expect(result.summary.byDay.map((d) => d.day)).toEqual(["2026-05-03", "2026-05-02", "2026-05-01"]);
+    expect(result.summary.byDay.map((d) => d.day)).toEqual([
+      "2026-05-03",
+      "2026-05-02",
+      "2026-05-01",
+    ]);
   });
 
   it("resolves null names when lookup misses (project/blog/user exist in metadata but not in DB)", async () => {
@@ -297,7 +337,12 @@ describe("getTeamUsage", () => {
         description: null,
         created_at: "2026-05-01T10:00:00Z",
         type: "usage",
-        metadata: { team_id: "t1", project_id: "p-missing", blog_id: "b-missing", acting_user_id: "u-missing" },
+        metadata: {
+          team_id: "t1",
+          project_id: "p-missing",
+          blog_id: "b-missing",
+          acting_user_id: "u-missing",
+        },
       },
     ];
     const { client } = makeClient({
@@ -312,8 +357,14 @@ describe("getTeamUsage", () => {
     expect(result.rows[0].project_name).toBeNull();
     expect(result.rows[0].blog_name).toBeNull();
     expect(result.rows[0].acting_user_name).toBeNull();
-    expect(result.summary.byProject[0]).toMatchObject({ projectId: "p-missing", projectName: null });
-    expect(result.summary.byMember[0]).toMatchObject({ actingUserId: "u-missing", actingUserName: null });
+    expect(result.summary.byProject[0]).toMatchObject({
+      projectId: "p-missing",
+      projectName: null,
+    });
+    expect(result.summary.byMember[0]).toMatchObject({
+      actingUserId: "u-missing",
+      actingUserName: null,
+    });
   });
 
   it("handles non-object metadata (metaString guards)", async () => {

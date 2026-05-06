@@ -12,5 +12,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-  args: { icon: "✍️", title: "AI Article Generation", description: "GPT-powered long-form content with proper heading structure and SEO optimization." },
+  args: {
+    icon: "✍️",
+    title: "AI Article Generation",
+    description:
+      "GPT-powered long-form content with proper heading structure and SEO optimization.",
+  },
 };

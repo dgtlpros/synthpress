@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
+import {
+  EmbeddedCheckoutProvider,
+  EmbeddedCheckout,
+} from "@stripe/react-stripe-js";
 import { cn } from "@/lib/cn";
 import { getStripeBrowser } from "@/lib/stripe-browser";
 

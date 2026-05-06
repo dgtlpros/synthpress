@@ -65,7 +65,9 @@ describe("useBillingActions — openPortal", () => {
     act(() => result.current.openPortal());
 
     await waitFor(() =>
-      expect(result.current.portalError).toBe("Could not open the billing portal."),
+      expect(result.current.portalError).toBe(
+        "Could not open the billing portal.",
+      ),
     );
   });
 

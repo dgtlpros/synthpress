@@ -7,7 +7,10 @@ const meta = {
   parameters: { layout: "centered" },
   tags: ["autodocs"],
   argTypes: {
-    variant: { control: "select", options: ["default", "success", "warning", "error", "brand"] },
+    variant: {
+      control: "select",
+      options: ["default", "success", "warning", "error", "brand"],
+    },
     size: { control: "select", options: ["sm", "md", "lg"] },
   },
 } satisfies Meta<typeof Badge>;
@@ -16,8 +19,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = { args: { children: "Draft" } };
-export const Success: Story = { args: { children: "Published", variant: "success" } };
-export const Warning: Story = { args: { children: "Generating", variant: "warning" } };
+export const Success: Story = {
+  args: { children: "Published", variant: "success" },
+};
+export const Warning: Story = {
+  args: { children: "Generating", variant: "warning" },
+};
 export const Error: Story = { args: { children: "Failed", variant: "error" } };
 export const Brand: Story = { args: { children: "Pro", variant: "brand" } };
-export const Small: Story = { args: { children: "New", size: "sm", variant: "brand" } };
+export const Small: Story = {
+  args: { children: "New", size: "sm", variant: "brand" },
+};

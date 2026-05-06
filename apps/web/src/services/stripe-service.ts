@@ -51,7 +51,8 @@ export async function createSubscriptionCheckoutSession(params: {
   returnPath?: string;
 }): Promise<{ id: string; clientSecret: string }> {
   const stripe = getStripe();
-  const returnPath = params.returnPath ?? "/checkout/return?session_id={CHECKOUT_SESSION_ID}";
+  const returnPath =
+    params.returnPath ?? "/checkout/return?session_id={CHECKOUT_SESSION_ID}";
   const interval = params.interval ?? "month";
 
   const session = await stripe.checkout.sessions.create({
@@ -76,7 +77,9 @@ export async function createSubscriptionCheckoutSession(params: {
   });
 
   if (!session.client_secret) {
-    throw new Error("Stripe did not return a client_secret for the embedded session");
+    throw new Error(
+      "Stripe did not return a client_secret for the embedded session",
+    );
   }
 
   return { id: session.id, clientSecret: session.client_secret };
@@ -91,7 +94,8 @@ export async function createTopUpCheckoutSession(params: {
   returnPath?: string;
 }): Promise<{ id: string; clientSecret: string }> {
   const stripe = getStripe();
-  const returnPath = params.returnPath ?? "/checkout/return?session_id={CHECKOUT_SESSION_ID}";
+  const returnPath =
+    params.returnPath ?? "/checkout/return?session_id={CHECKOUT_SESSION_ID}";
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
@@ -115,7 +119,9 @@ export async function createTopUpCheckoutSession(params: {
   });
 
   if (!session.client_secret) {
-    throw new Error("Stripe did not return a client_secret for the embedded session");
+    throw new Error(
+      "Stripe did not return a client_secret for the embedded session",
+    );
   }
 
   return { id: session.id, clientSecret: session.client_secret };
@@ -172,7 +178,9 @@ const INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = [
   "draft",
 ];
 
-function normalizeInvoiceStatus(status: string | null | undefined): InvoiceStatus {
+function normalizeInvoiceStatus(
+  status: string | null | undefined,
+): InvoiceStatus {
   if (status && (INVOICE_STATUSES as readonly string[]).includes(status)) {
     return status as InvoiceStatus;
   }
@@ -213,7 +221,9 @@ export async function getCustomerInvoices(
  * because we want `/account/billing` to render the resumed state immediately
  * after the action returns instead of waiting on the Stripe webhook.
  */
-export async function resumeSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+export async function resumeSubscription(
+  subscriptionId: string,
+): Promise<Stripe.Subscription> {
   const stripe = getStripe();
   return stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: false,
@@ -230,5 +240,9 @@ export async function verifyWebhook(params: {
     throw new Error("Missing STRIPE_WEBHOOK_SECRET");
   }
 
-  return stripe.webhooks.constructEventAsync(params.rawBody, params.signature, secret);
+  return stripe.webhooks.constructEventAsync(
+    params.rawBody,
+    params.signature,
+    secret,
+  );
 }

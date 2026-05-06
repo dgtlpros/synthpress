@@ -29,8 +29,10 @@ export function DeleteConfirmModal({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (open) {
-      setInputValue("");
       dialog?.showModal();
+      void Promise.resolve().then(() => {
+        setInputValue("");
+      });
     } else {
       dialog?.close();
     }
@@ -53,13 +55,15 @@ export function DeleteConfirmModal({
           Delete {entityKind}
         </h2>
         <p className="mt-2 text-sm text-muted">
-          This will permanently delete this {entityKind} and all associated data. This action
-          cannot be undone.
+          This will permanently delete this {entityKind} and all associated
+          data. This action cannot be undone.
         </p>
         <p className="mt-4 text-sm text-muted">
           Type{" "}
-          <span className="font-mono font-semibold text-foreground">{requiredPhrase}</span> to
-          confirm.
+          <span className="font-mono font-semibold text-foreground">
+            {requiredPhrase}
+          </span>{" "}
+          to confirm.
         </p>
         <input
           type="text"

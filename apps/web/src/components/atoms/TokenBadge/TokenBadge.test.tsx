@@ -23,7 +23,9 @@ describe("TokenBadge", () => {
 
   it("renders all variants without crashing", () => {
     for (const variant of ["neutral", "brand", "warning"] as const) {
-      const { unmount } = render(<TokenBadge balance={100} variant={variant} />);
+      const { unmount } = render(
+        <TokenBadge balance={100} variant={variant} />,
+      );
       expect(screen.getByText(/tokens/)).toBeInTheDocument();
       unmount();
     }

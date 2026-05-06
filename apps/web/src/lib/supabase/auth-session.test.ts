@@ -102,7 +102,9 @@ describe("isStaleRefreshTokenLog", () => {
 
   it("ignores values that are not auth errors", () => {
     expect(isStaleRefreshTokenLog("a string")).toBe(false);
-    expect(isStaleRefreshTokenLog({ message: "Invalid Refresh Token" })).toBe(false);
+    expect(isStaleRefreshTokenLog({ message: "Invalid Refresh Token" })).toBe(
+      false,
+    );
     expect(isStaleRefreshTokenLog(null)).toBe(false);
   });
 

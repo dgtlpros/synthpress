@@ -46,7 +46,8 @@ export const Resumed: Story = {
   args: {
     variant: "success",
     title: "Subscription resumed",
-    description: "Your Pro plan will renew automatically on the next billing date.",
+    description:
+      "Your Pro plan will renew automatically on the next billing date.",
   },
 };
 
@@ -54,6 +55,7 @@ export const Info: Story = {
   args: {
     variant: "info",
     title: "Tokens are loading",
-    description: "Stripe is confirming your payment. This usually takes a few seconds.",
+    description:
+      "Stripe is confirming your payment. This usually takes a few seconds.",
   },
 };

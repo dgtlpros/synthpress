@@ -52,7 +52,10 @@ export function PricingCard({
 
       <ul className="mb-8 flex-1 space-y-3">
         {features.map((feature) => (
-          <li key={feature} className="flex items-start gap-2 text-sm text-foreground">
+          <li
+            key={feature}
+            className="flex items-start gap-2 text-sm text-foreground"
+          >
             <span className="mt-0.5 text-success">&#10003;</span>
             {feature}
           </li>

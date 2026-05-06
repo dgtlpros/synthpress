@@ -26,8 +26,18 @@ export interface TeamUsageRow {
 export interface TeamUsageSummary {
   totalSpent: number;
   totalTransactions: number;
-  byMember: { actingUserId: string; actingUserName: string | null; spent: number; count: number }[];
-  byProject: { projectId: string; projectName: string | null; spent: number; count: number }[];
+  byMember: {
+    actingUserId: string;
+    actingUserName: string | null;
+    spent: number;
+    count: number;
+  }[];
+  byProject: {
+    projectId: string;
+    projectName: string | null;
+    spent: number;
+    count: number;
+  }[];
   byDay: { day: string; spent: number; count: number }[];
 }
 
@@ -37,7 +47,10 @@ export interface TeamUsageResult {
 }
 
 /** Pull a string value from a JSON metadata blob without losing types. */
-function metaString(meta: TokenTransaction["metadata"], key: string): string | null {
+function metaString(
+  meta: TokenTransaction["metadata"],
+  key: string,
+): string | null {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
   const v = (meta as Record<string, unknown>)[key];
   return typeof v === "string" ? v : null;
@@ -101,13 +114,19 @@ export async function getTeamUsage(args: {
 
   const [projectsRes, blogsRes, profilesRes] = await Promise.all([
     projectIds.size > 0
-      ? supabase.from("projects").select("id, name").in("id", Array.from(projectIds))
+      ? supabase
+          .from("projects")
+          .select("id, name")
+          .in("id", Array.from(projectIds))
       : Promise.resolve({ data: [], error: null }),
     blogIds.size > 0
       ? supabase.from("blogs").select("id, name").in("id", Array.from(blogIds))
       : Promise.resolve({ data: [], error: null }),
     userIds.size > 0
-      ? supabase.from("profiles").select("id, full_name").in("id", Array.from(userIds))
+      ? supabase
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", Array.from(userIds))
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -119,7 +138,10 @@ export async function getTeamUsage(args: {
   );
   const userName = new Map<string, string | null>(
     /* v8 ignore next */
-    (profilesRes.data ?? []).map((p) => [p.id as string, (p.full_name as string | null) ?? null]),
+    (profilesRes.data ?? []).map((p) => [
+      p.id as string,
+      (p.full_name as string | null) ?? null,
+    ]),
   );
 
   const rows: TeamUsageRow[] = txs.map((t) => {
@@ -136,30 +158,46 @@ export async function getTeamUsage(args: {
       project_id,
       blog_id,
       acting_user_id,
-      project_name: project_id ? projectName.get(project_id) ?? null : null,
-      blog_name: blog_id ? blogName.get(blog_id) ?? null : null,
-      acting_user_name: acting_user_id ? userName.get(acting_user_id) ?? null : null,
+      project_name: project_id ? (projectName.get(project_id) ?? null) : null,
+      blog_name: blog_id ? (blogName.get(blog_id) ?? null) : null,
+      acting_user_name: acting_user_id
+        ? (userName.get(acting_user_id) ?? null)
+        : null,
     };
   });
 
   const totalSpent = rows.reduce((acc, r) => acc + Math.abs(r.amount), 0);
 
-  const byMemberMap = new Map<string, { spent: number; count: number; name: string | null }>();
-  const byProjectMap = new Map<string, { spent: number; count: number; name: string | null }>();
+  const byMemberMap = new Map<
+    string,
+    { spent: number; count: number; name: string | null }
+  >();
+  const byProjectMap = new Map<
+    string,
+    { spent: number; count: number; name: string | null }
+  >();
   const byDayMap = new Map<string, { spent: number; count: number }>();
 
   for (const r of rows) {
     const spent = Math.abs(r.amount);
 
     const memberKey = r.acting_user_id ?? "__unknown__";
-    const m = byMemberMap.get(memberKey) ?? { spent: 0, count: 0, name: r.acting_user_name };
+    const m = byMemberMap.get(memberKey) ?? {
+      spent: 0,
+      count: 0,
+      name: r.acting_user_name,
+    };
     m.spent += spent;
     m.count += 1;
     if (!m.name) m.name = r.acting_user_name;
     byMemberMap.set(memberKey, m);
 
     const projectKey = r.project_id ?? "__none__";
-    const p = byProjectMap.get(projectKey) ?? { spent: 0, count: 0, name: r.project_name };
+    const p = byProjectMap.get(projectKey) ?? {
+      spent: 0,
+      count: 0,
+      name: r.project_name,
+    };
     p.spent += spent;
     p.count += 1;
     if (!p.name) p.name = r.project_name;

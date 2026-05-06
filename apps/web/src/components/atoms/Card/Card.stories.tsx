@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./Card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "./Card";
 
 const meta = {
   title: "Atoms/Card",
@@ -22,7 +29,9 @@ export const Default: Story = {
         <p className="text-sm text-muted">Last published 3 hours ago</p>
       </CardContent>
       <CardFooter>
-        <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full bg-success/10 text-success border border-success/20">Active</span>
+        <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full bg-success/10 text-success border border-success/20">
+          Active
+        </span>
       </CardFooter>
     </Card>
   ),

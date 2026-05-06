@@ -29,7 +29,11 @@ function dollarsLabel(cents: number) {
   return `$${formatter.format(Math.floor(cents / 100))}`;
 }
 
-function checkoutHref(planKey: string, interval: BillingInterval, authed: boolean) {
+function checkoutHref(
+  planKey: string,
+  interval: BillingInterval,
+  authed: boolean,
+) {
   const params = new URLSearchParams({ plan: planKey });
   if (interval === "year") params.set("interval", "year");
   const target = `/checkout?${params.toString()}`;
@@ -64,7 +68,8 @@ export function PricingTableConnector({
 
       <div className="grid items-start gap-8 sm:grid-cols-3">
         {plans.map((plan) => {
-          const usingAnnual = interval === "year" && plan.annualPriceCents !== null;
+          const usingAnnual =
+            interval === "year" && plan.annualPriceCents !== null;
           // `usingAnnual` already guarantees `annualPriceCents` is non-null,
           // so the assertion here is type-safe and removes a dead-code branch.
           const cents = usingAnnual
@@ -81,7 +86,11 @@ export function PricingTableConnector({
               features={plan.features}
               popular={plan.isPopular}
               ctaLabel={authed ? "Subscribe" : "Get Started"}
-              ctaHref={checkoutHref(plan.key, usingAnnual ? "year" : "month", authed)}
+              ctaHref={checkoutHref(
+                plan.key,
+                usingAnnual ? "year" : "month",
+                authed,
+              )}
             />
           );
         })}

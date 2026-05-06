@@ -56,7 +56,9 @@ export function useBlogSettings({
         setDeleteError(result.error);
         return;
       }
-      router.push(result.data?.redirect ?? `/teams/${teamId}/projects/${projectId}/blogs`);
+      router.push(
+        result.data?.redirect ?? `/teams/${teamId}/projects/${projectId}/blogs`,
+      );
     });
   }, [router, teamId, projectId, blogId]);
 

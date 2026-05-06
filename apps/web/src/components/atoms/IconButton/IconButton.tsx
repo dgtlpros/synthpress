@@ -8,7 +8,8 @@ const sizeStyles = {
 } as const;
 
 const variantStyles = {
-  default: "bg-surface border border-border hover:bg-surface-hover hover:border-border-hover text-foreground",
+  default:
+    "bg-surface border border-border hover:bg-surface-hover hover:border-border-hover text-foreground",
   ghost: "bg-transparent hover:bg-surface-hover text-foreground",
   brand: "bg-gradient-accent text-white shadow-sm hover:brightness-110",
 } as const;
@@ -22,7 +23,14 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
   label: string;
 }
 
-export function IconButton({ size = "md", variant = "default", label, className, children, ...props }: IconButtonProps) {
+export function IconButton({
+  size = "md",
+  variant = "default",
+  label,
+  className,
+  children,
+  ...props
+}: IconButtonProps) {
   return (
     <button
       aria-label={label}

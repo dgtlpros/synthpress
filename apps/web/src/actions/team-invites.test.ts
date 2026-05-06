@@ -5,9 +5,9 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
 vi.mock("@/services/team-invite-service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/team-invite-service")>(
-    "@/services/team-invite-service",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/services/team-invite-service")
+  >("@/services/team-invite-service");
   return {
     ...actual,
     createInvite: vi.fn(),
@@ -18,9 +18,9 @@ vi.mock("@/services/team-invite-service", async () => {
 });
 
 vi.mock("@/services/team-policy-service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/team-policy-service")>(
-    "@/services/team-policy-service",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/services/team-policy-service")
+  >("@/services/team-policy-service");
   return { ...actual };
 });
 
@@ -68,7 +68,10 @@ describe("createInviteAction", () => {
   });
 
   it("rejects invalid role", async () => {
-    const result = await createInviteAction({ teamId: "t1", role: "owner" as never });
+    const result = await createInviteAction({
+      teamId: "t1",
+      role: "owner" as never,
+    });
     expect(result.error).toBe("role must be admin or member");
   });
 
@@ -97,19 +100,30 @@ describe("createInviteAction", () => {
       acceptUrl: "https://x/teams/invite/tok",
     });
 
-    const result = await createInviteAction({ teamId: "t1", role: "member", email: "a@b.co" });
+    const result = await createInviteAction({
+      teamId: "t1",
+      role: "member",
+      email: "a@b.co",
+    });
 
     expect(result.error).toBeNull();
     expect(result.rawToken).toBe("tok");
     expect(mockedCreateInvite).toHaveBeenCalledWith(
-      expect.objectContaining({ teamId: "t1", role: "member", email: "a@b.co", invitedBy: "u1" }),
+      expect.objectContaining({
+        teamId: "t1",
+        role: "member",
+        email: "a@b.co",
+        invitedBy: "u1",
+      }),
     );
     expect(mockedRevalidate).toHaveBeenCalledWith("/teams/t1/settings");
   });
 
   it("returns permission error code", async () => {
     mockUser({ id: "u1" });
-    mockedCreateInvite.mockRejectedValue(new TeamPermissionError("forbidden", "invite_member", "member"));
+    mockedCreateInvite.mockRejectedValue(
+      new TeamPermissionError("forbidden", "invite_member", "member"),
+    );
     const result = await createInviteAction({ teamId: "t1", role: "member" });
     expect(result.error).toBe("forbidden");
   });
@@ -163,7 +177,9 @@ describe("acceptInviteAction", () => {
 
   it("returns invite error code", async () => {
     mockUser({ id: "u1", email: "a@b.co" });
-    mockedAcceptInvite.mockRejectedValue(new TeamInviteError("expired", "expired"));
+    mockedAcceptInvite.mockRejectedValue(
+      new TeamInviteError("expired", "expired"),
+    );
     const result = await acceptInviteAction("tok");
     expect(result.error).toBe("expired");
   });
@@ -185,9 +201,10 @@ describe("acceptInviteAction", () => {
 
 describe("revokeInviteAction", () => {
   function mockAdminWithLookup(teamId: string | null) {
-    const maybeSingle = vi
-      .fn()
-      .mockResolvedValue({ data: teamId ? { team_id: teamId } : null, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: teamId ? { team_id: teamId } : null,
+      error: null,
+    });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
     const select = vi.fn().mockReturnValue({ eq });
     const admin = { from: vi.fn().mockReturnValue({ select }) };
@@ -219,7 +236,9 @@ describe("revokeInviteAction", () => {
   it("returns permission error code", async () => {
     mockUser({ id: "u1" });
     mockAdminWithLookup("t1");
-    mockedRevoke.mockRejectedValue(new TeamPermissionError("forbidden", "revoke_invite", "member"));
+    mockedRevoke.mockRejectedValue(
+      new TeamPermissionError("forbidden", "revoke_invite", "member"),
+    );
     const result = await revokeInviteAction("i1");
     expect(result.error).toBe("forbidden");
   });
@@ -288,7 +307,9 @@ describe("listInvitesAction", () => {
 
   it("returns permission error code", async () => {
     mockUser({ id: "u1" });
-    mockedList.mockRejectedValue(new TeamPermissionError("forbidden", "list_invites", "member"));
+    mockedList.mockRejectedValue(
+      new TeamPermissionError("forbidden", "list_invites", "member"),
+    );
     const result = await listInvitesAction("t1");
     expect(result.error).toBe("forbidden");
   });

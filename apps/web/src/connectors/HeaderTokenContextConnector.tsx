@@ -36,18 +36,29 @@ export function HeaderTokenContextConnector({
   const pathname = usePathname();
   const teamMatch = pathname?.match(/^\/teams\/([^/]+)/);
   const teamId = teamMatch?.[1] ?? null;
-  const activeTeam = teamId ? teamPlans.find((t) => t.teamId === teamId) ?? null : null;
+  const activeTeam = teamId
+    ? (teamPlans.find((t) => t.teamId === teamId) ?? null)
+    : null;
 
   if (activeTeam) {
     const balance = activeTeam.balance;
     const variant = balance <= 50 ? "warning" : "brand";
-    const roleLabel = activeTeam.myRole === "admin" ? " · Admin" : activeTeam.myRole === "member" ? " · Member" : "";
+    const roleLabel =
+      activeTeam.myRole === "admin"
+        ? " · Admin"
+        : activeTeam.myRole === "member"
+          ? " · Member"
+          : "";
     const tooltip = activeTeam.isOwner
       ? `Spending your balance for ${activeTeam.teamName}`
       : `Spending ${activeTeam.teamName} balance (paid by ${activeTeam.ownerName})${roleLabel}`;
     return (
       <Link
-        href={activeTeam.isOwner ? "/account/billing" : `/teams/${activeTeam.teamId}/usage`}
+        href={
+          activeTeam.isOwner
+            ? "/account/billing"
+            : `/teams/${activeTeam.teamId}/usage`
+        }
         aria-label={tooltip}
         title={tooltip}
         className="cursor-pointer"

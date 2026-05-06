@@ -4,9 +4,9 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
 vi.mock("@/services/team-policy-service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/team-policy-service")>(
-    "@/services/team-policy-service",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/services/team-policy-service")
+  >("@/services/team-policy-service");
   return { ...actual, assertCan: vi.fn() };
 });
 
@@ -72,7 +72,12 @@ describe("consumeTeamTokens action", () => {
     });
 
     expect(result).toEqual({ balance: 95, error: null });
-    expect(mockedAssertCan).toHaveBeenCalledWith("t1", "u1", "consume_team_tokens", expect.anything());
+    expect(mockedAssertCan).toHaveBeenCalledWith(
+      "t1",
+      "u1",
+      "consume_team_tokens",
+      expect.anything(),
+    );
     expect(mockedConsumeService).toHaveBeenCalledWith({
       teamId: "t1",
       amount: 5,
@@ -104,7 +109,9 @@ describe("consumeTeamTokens action", () => {
   it("returns team_has_no_billing_user code", async () => {
     mockUser({ id: "u1" });
     mockedAssertCan.mockResolvedValue("member");
-    mockedConsumeService.mockRejectedValue(new Error("team_has_no_billing_user"));
+    mockedConsumeService.mockRejectedValue(
+      new Error("team_has_no_billing_user"),
+    );
     const result = await consumeTeamTokens({ teamId: "t1", amount: 5 });
     expect(result.error).toBe("team_has_no_billing_user");
   });
@@ -150,7 +157,12 @@ describe("getTeamBilling action", () => {
 
     const result = await getTeamBilling("t1");
     expect(result).toEqual({
-      plan: { ownerId: "owner-1", planKey: "pro", status: "active", balance: 200 },
+      plan: {
+        ownerId: "owner-1",
+        planKey: "pro",
+        status: "active",
+        balance: 200,
+      },
       error: null,
     });
   });

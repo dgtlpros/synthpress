@@ -5,7 +5,10 @@ vi.mock("@stripe/stripe-js", () => ({
 }));
 
 import { loadStripe } from "@stripe/stripe-js";
-import { getStripeBrowser, resetStripeBrowserForTesting } from "./stripe-browser";
+import {
+  getStripeBrowser,
+  resetStripeBrowserForTesting,
+} from "./stripe-browser";
 
 const mockedLoad = vi.mocked(loadStripe);
 const ORIGINAL_ENV = { ...process.env };
@@ -37,6 +40,8 @@ describe("getStripeBrowser", () => {
 
   it("throws when NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is missing", () => {
     delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-    expect(() => getStripeBrowser()).toThrow(/Missing NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY/);
+    expect(() => getStripeBrowser()).toThrow(
+      /Missing NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY/,
+    );
   });
 });

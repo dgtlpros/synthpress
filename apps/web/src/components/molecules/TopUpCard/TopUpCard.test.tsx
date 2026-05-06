@@ -16,7 +16,9 @@ describe("TopUpCard", () => {
   it("renders name, description, tokens, and price", () => {
     render(<TopUpCard {...baseProps} />);
     expect(screen.getByText("2,000 synth tokens")).toBeInTheDocument();
-    expect(screen.getByText("Best value for the average month")).toBeInTheDocument();
+    expect(
+      screen.getByText("Best value for the average month"),
+    ).toBeInTheDocument();
     expect(screen.getByText("2,000")).toBeInTheDocument();
     expect(screen.getByText("$59")).toBeInTheDocument();
   });
@@ -33,6 +35,8 @@ describe("TopUpCard", () => {
 
   it("renders without a description", () => {
     render(<TopUpCard {...baseProps} description={undefined} />);
-    expect(screen.queryByText("Best value for the average month")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Best value for the average month"),
+    ).not.toBeInTheDocument();
   });
 });

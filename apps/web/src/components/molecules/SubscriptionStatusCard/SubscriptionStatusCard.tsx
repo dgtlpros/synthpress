@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/atoms/Card";
-import { PlanBadge, type SubscriptionStatus } from "@/components/atoms/PlanBadge";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@/components/atoms/Card";
+import {
+  PlanBadge,
+  type SubscriptionStatus,
+} from "@/components/atoms/PlanBadge";
 import { PriceTag } from "@/components/atoms/PriceTag";
 
 export type SubscriptionInterval = "month" | "year";
@@ -68,7 +78,8 @@ export function SubscriptionStatusCard({
   } else if (status === "canceled") {
     footnote = "Subscription canceled.";
   } else if (isFree) {
-    footnote = "You're on the free plan. Subscribe to get monthly synth tokens.";
+    footnote =
+      "You're on the free plan. Subscribe to get monthly synth tokens.";
   }
 
   return (
@@ -77,7 +88,9 @@ export function SubscriptionStatusCard({
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <CardTitle>Subscription</CardTitle>
-            {planDescription && <CardDescription>{planDescription}</CardDescription>}
+            {planDescription && (
+              <CardDescription>{planDescription}</CardDescription>
+            )}
           </div>
           <PlanBadge planName={planName} status={effectiveStatus} />
         </div>
@@ -87,7 +100,9 @@ export function SubscriptionStatusCard({
         {!isFree && priceCents !== undefined && (
           <div className="space-y-1">
             <PriceTag cents={priceCents} period={period} size="lg" />
-            <p className="text-xs uppercase tracking-wide text-muted">{cadenceLabel}</p>
+            <p className="text-xs uppercase tracking-wide text-muted">
+              {cadenceLabel}
+            </p>
           </div>
         )}
         {footnote && <p className="text-sm text-muted">{footnote}</p>}

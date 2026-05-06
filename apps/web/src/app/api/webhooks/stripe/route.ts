@@ -8,7 +8,10 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
   if (!signature) {
-    return NextResponse.json({ error: "Missing stripe-signature header" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing stripe-signature header" },
+      { status: 400 },
+    );
   }
 
   const rawBody = await request.text();
@@ -17,8 +20,12 @@ export async function POST(request: NextRequest) {
   try {
     event = await verifyWebhook({ rawBody, signature });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid signature";
-    return NextResponse.json({ error: `Webhook signature failed: ${message}` }, { status: 400 });
+    const message =
+      error instanceof Error ? error.message : "invalid signature";
+    return NextResponse.json(
+      { error: `Webhook signature failed: ${message}` },
+      { status: 400 },
+    );
   }
 
   try {
@@ -28,7 +35,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "handler failure";
-    return NextResponse.json({ error: `Webhook handler failed: ${message}` }, { status: 500 });
+    return NextResponse.json(
+      { error: `Webhook handler failed: ${message}` },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ received: true });

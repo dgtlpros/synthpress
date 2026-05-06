@@ -34,10 +34,21 @@ const surfaceColors = [
   { name: "Muted", var: "--muted", tw: "bg-muted" },
 ];
 
-function Swatch({ name, value, cssVar }: { name: string; value?: string; cssVar: string }) {
+function Swatch({
+  name,
+  value,
+  cssVar,
+}: {
+  name: string;
+  value?: string;
+  cssVar: string;
+}) {
   return (
     <div className="flex items-center gap-3">
-      <div className="h-12 w-12 rounded-lg border border-border shadow-sm" style={{ background: value || `var(${cssVar})` }} />
+      <div
+        className="h-12 w-12 rounded-lg border border-border shadow-sm"
+        style={{ background: value || `var(${cssVar})` }}
+      />
       <div>
         <p className="text-sm font-medium text-foreground">{name}</p>
         <p className="text-xs text-muted font-mono">{cssVar}</p>
@@ -51,21 +62,33 @@ export const BrandPalette: Story = {
   render: () => (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold mb-4 text-foreground">Brand Colors</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">
+          Brand Colors
+        </h2>
         <div className="grid grid-cols-2 gap-4">
-          {brandColors.map((c) => <Swatch key={c.var} name={c.name} value={c.value} cssVar={c.var} />)}
+          {brandColors.map((c) => (
+            <Swatch key={c.var} name={c.name} value={c.value} cssVar={c.var} />
+          ))}
         </div>
       </div>
       <div>
-        <h2 className="text-xl font-semibold mb-4 text-foreground">Semantic Colors</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">
+          Semantic Colors
+        </h2>
         <div className="grid grid-cols-2 gap-4">
-          {semanticColors.map((c) => <Swatch key={c.var} name={c.name} value={c.value} cssVar={c.var} />)}
+          {semanticColors.map((c) => (
+            <Swatch key={c.var} name={c.name} value={c.value} cssVar={c.var} />
+          ))}
         </div>
       </div>
       <div>
-        <h2 className="text-xl font-semibold mb-4 text-foreground">Surface Colors</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">
+          Surface Colors
+        </h2>
         <div className="grid grid-cols-2 gap-4">
-          {surfaceColors.map((c) => <Swatch key={c.var} name={c.name} cssVar={c.var} />)}
+          {surfaceColors.map((c) => (
+            <Swatch key={c.var} name={c.name} cssVar={c.var} />
+          ))}
         </div>
       </div>
     </div>

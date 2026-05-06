@@ -18,7 +18,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = { args: { options: nicheOptions, placeholder: "Select a niche..." } };
-export const WithValue: Story = { args: { options: nicheOptions, defaultValue: "tech" } };
-export const Error: Story = { args: { options: nicheOptions, placeholder: "Required", error: true } };
-export const Disabled: Story = { args: { options: nicheOptions, defaultValue: "fitness", disabled: true } };
+export const Default: Story = {
+  args: { options: nicheOptions, placeholder: "Select a niche..." },
+};
+export const WithValue: Story = {
+  args: { options: nicheOptions, defaultValue: "tech" },
+};
+export const Error: Story = {
+  args: { options: nicheOptions, placeholder: "Required", error: true },
+};
+export const Disabled: Story = {
+  args: { options: nicheOptions, defaultValue: "fitness", disabled: true },
+};

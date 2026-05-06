@@ -13,13 +13,17 @@ describe("Input", () => {
   it("handles value changes", () => {
     const onChange = vi.fn();
     render(<Input onChange={onChange} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hello" } });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "hello" },
+    });
     expect(onChange).toHaveBeenCalled();
   });
 
   it("shows error styling", () => {
     render(<Input error placeholder="Error" />);
-    expect(screen.getByPlaceholderText("Error").className).toContain("border-error");
+    expect(screen.getByPlaceholderText("Error").className).toContain(
+      "border-error",
+    );
   });
 
   it("can be disabled", () => {

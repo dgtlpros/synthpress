@@ -12,6 +12,21 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function BillingIntervalDemo() {
+  const [value, setValue] = useState<"month" | "year">("month");
+  return (
+    <SegmentedControl
+      ariaLabel="Billing interval"
+      value={value}
+      onChange={setValue}
+      options={[
+        { value: "month", label: "Monthly" },
+        { value: "year", label: "Annual", badge: "Save 17%" },
+      ]}
+    />
+  );
+}
+
 export const BillingInterval: Story = {
   args: {
     ariaLabel: "Billing interval",
@@ -22,21 +37,22 @@ export const BillingInterval: Story = {
       { value: "year", label: "Annual", badge: "Save 17%" },
     ],
   },
-  render: () => {
-    const [value, setValue] = useState<"month" | "year">("month");
-    return (
-      <SegmentedControl
-        ariaLabel="Billing interval"
-        value={value}
-        onChange={setValue}
-        options={[
-          { value: "month", label: "Monthly" },
-          { value: "year", label: "Annual", badge: "Save 17%" },
-        ]}
-      />
-    );
-  },
+  render: () => <BillingIntervalDemo />,
 };
+
+function NoBadgeDemo() {
+  const [value, setValue] = useState<"a" | "b">("a");
+  return (
+    <SegmentedControl
+      value={value}
+      onChange={setValue}
+      options={[
+        { value: "a", label: "Option A" },
+        { value: "b", label: "Option B" },
+      ]}
+    />
+  );
+}
 
 export const NoBadge: Story = {
   args: {
@@ -47,17 +63,5 @@ export const NoBadge: Story = {
       { value: "b", label: "Option B" },
     ],
   },
-  render: () => {
-    const [value, setValue] = useState<"a" | "b">("a");
-    return (
-      <SegmentedControl
-        value={value}
-        onChange={setValue}
-        options={[
-          { value: "a", label: "Option A" },
-          { value: "b", label: "Option B" },
-        ]}
-      />
-    );
-  },
+  render: () => <NoBadgeDemo />,
 };

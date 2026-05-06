@@ -3,7 +3,9 @@ import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { EditProjectSettingsModal } from "./EditProjectSettingsModal";
 
 beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (
+    this: HTMLDialogElement,
+  ) {
     this.setAttribute("open", "");
   });
   HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
@@ -60,7 +62,9 @@ describe("EditProjectSettingsModal", () => {
         footer={null}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "New" } });
+    fireEvent.change(screen.getByLabelText("Project name"), {
+      target: { value: "New" },
+    });
     expect(onChange).toHaveBeenCalledWith("New");
   });
 
@@ -77,7 +81,9 @@ describe("EditProjectSettingsModal", () => {
         footer={null}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Updated" } });
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Updated" },
+    });
     expect(onChange).toHaveBeenCalledWith("Updated");
   });
 

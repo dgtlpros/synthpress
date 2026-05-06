@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { listProjectsForTeam } from "@/services/workspace-service";
 import {
   Card,
@@ -62,8 +65,8 @@ export default async function TeamProjectsPage({
         <div>
           <h1 className="text-2xl font-bold text-foreground">Projects</h1>
           <p className="mt-2 max-w-2xl text-muted">
-            Projects scope features for this team. The first product is AI-powered blogs—each
-            blog connects to WordPress inside a project.
+            Projects scope features for this team. The first product is
+            AI-powered blogs—each blog connects to WordPress inside a project.
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -93,15 +96,24 @@ export default async function TeamProjectsPage({
       </Card>
 
       <section aria-labelledby="project-list-heading">
-        <h2 id="project-list-heading" className="mb-3 text-lg font-semibold text-foreground">
+        <h2
+          id="project-list-heading"
+          className="mb-3 text-lg font-semibold text-foreground"
+        >
           Projects in {team.name}
         </h2>
         {projects.length === 0 ? (
-          <p className="text-sm text-muted">Create a project to add blogs and automation.</p>
+          <p className="text-sm text-muted">
+            Create a project to add blogs and automation.
+          </p>
         ) : (
           <TeamProjectsListConnector
             teamId={teamId}
-            projects={projects.map((p) => ({ id: p.id, name: p.name, created_at: p.created_at }))}
+            projects={projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              created_at: p.created_at,
+            }))}
           />
         )}
       </section>

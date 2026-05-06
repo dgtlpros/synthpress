@@ -11,7 +11,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = { args: { label: "Settings", children: "\u2699" } };
-export const Ghost: Story = { args: { label: "Menu", variant: "ghost", children: "\u2630" } };
-export const Brand: Story = { args: { label: "Add", variant: "brand", children: "+" } };
-export const Small: Story = { args: { label: "Close", size: "sm", children: "\u2715" } };
+export const Default: Story = {
+  args: { label: "Settings", children: "\u2699" },
+};
+export const Ghost: Story = {
+  args: { label: "Menu", variant: "ghost", children: "\u2630" },
+};
+export const Brand: Story = {
+  args: { label: "Add", variant: "brand", children: "+" },
+};
+export const Small: Story = {
+  args: { label: "Close", size: "sm", children: "\u2715" },
+};

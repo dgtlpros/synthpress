@@ -20,7 +20,8 @@ const mockedGetStripe = vi.mocked(getStripe);
 
 function makeRequest(opts: { signature?: string; body?: string } = {}) {
   const headers = new Headers();
-  if (opts.signature !== undefined) headers.set("stripe-signature", opts.signature);
+  if (opts.signature !== undefined)
+    headers.set("stripe-signature", opts.signature);
   return new NextRequest("http://localhost/api/webhooks/stripe", {
     method: "POST",
     headers,
@@ -36,7 +37,9 @@ describe("POST /api/webhooks/stripe", () => {
   it("returns 400 when stripe-signature header is missing", async () => {
     const res = await POST(makeRequest());
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "Missing stripe-signature header" });
+    expect(await res.json()).toEqual({
+      error: "Missing stripe-signature header",
+    });
   });
 
   it("returns 400 when verification fails", async () => {
@@ -44,7 +47,9 @@ describe("POST /api/webhooks/stripe", () => {
 
     const res = await POST(makeRequest({ signature: "t=1,v1=abc" }));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/Webhook signature failed: bad sig/);
+    expect((await res.json()).error).toMatch(
+      /Webhook signature failed: bad sig/,
+    );
   });
 
   it("returns 400 when verification throws a non-Error", async () => {
@@ -65,7 +70,10 @@ describe("POST /api/webhooks/stripe", () => {
 
     const res = await POST(makeRequest({ signature: "ok" }));
 
-    expect(mockedVerify).toHaveBeenCalledWith({ rawBody: "raw-body", signature: "ok" });
+    expect(mockedVerify).toHaveBeenCalledWith({
+      rawBody: "raw-body",
+      signature: "ok",
+    });
     expect(mockedHandle).toHaveBeenCalledWith(
       event,
       expect.objectContaining({ retrieveSubscription: expect.any(Function) }),
@@ -94,9 +102,14 @@ describe("POST /api/webhooks/stripe", () => {
   });
 
   it("returns 500 when the handler throws", async () => {
-    mockedVerify.mockResolvedValue({ id: "evt_2", type: "checkout.session.completed" } as never);
+    mockedVerify.mockResolvedValue({
+      id: "evt_2",
+      type: "checkout.session.completed",
+    } as never);
     mockedHandle.mockRejectedValue(new Error("db down"));
-    mockedGetStripe.mockReturnValue({ subscriptions: { retrieve: vi.fn() } } as never);
+    mockedGetStripe.mockReturnValue({
+      subscriptions: { retrieve: vi.fn() },
+    } as never);
 
     const res = await POST(makeRequest({ signature: "ok" }));
     expect(res.status).toBe(500);
@@ -106,7 +119,9 @@ describe("POST /api/webhooks/stripe", () => {
   it("returns 500 with generic message on non-Error rejection", async () => {
     mockedVerify.mockResolvedValue({ id: "evt_3", type: "x" } as never);
     mockedHandle.mockRejectedValue("oops");
-    mockedGetStripe.mockReturnValue({ subscriptions: { retrieve: vi.fn() } } as never);
+    mockedGetStripe.mockReturnValue({
+      subscriptions: { retrieve: vi.fn() },
+    } as never);
 
     const res = await POST(makeRequest({ signature: "ok" }));
     expect(res.status).toBe(500);

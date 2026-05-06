@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import NextLink from "next/link";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { CheckoutConnector } from "@/connectors/CheckoutConnector";
 import type { CheckoutTarget } from "@/hooks/useCheckout";
 
@@ -10,7 +13,9 @@ interface CheckoutPageProps {
   searchParams: Promise<{ plan?: string; pack?: string; interval?: string }>;
 }
 
-export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
+export default async function CheckoutPage({
+  searchParams,
+}: CheckoutPageProps) {
   const {
     data: { user },
   } = await getAuthUserOncePerResponse();
@@ -64,7 +69,9 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
         <NextLink
-          href={target!.kind === "subscription" ? "/pricing" : "/account/billing"}
+          href={
+            target!.kind === "subscription" ? "/pricing" : "/account/billing"
+          }
           className="text-sm text-muted hover:text-foreground transition-colors"
         >
           ← Back

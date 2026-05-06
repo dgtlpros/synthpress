@@ -8,7 +8,9 @@ describe("TokenBalanceCard", () => {
   it("renders a healthy balance and monthly allowance", () => {
     render(<TokenBalanceCard balance={5400} monthlyAllowance={5000} />);
     expect(screen.getByText("5,400")).toBeInTheDocument();
-    expect(screen.getByText(/Includes 5,000 tokens granted each billing cycle/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Includes 5,000 tokens granted each billing cycle/),
+    ).toBeInTheDocument();
   });
 
   it("uses warning variant on a low balance", () => {

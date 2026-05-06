@@ -4,10 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/database.types";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   createTeamWithOwner,
   generateUniqueBlogSlug,
@@ -18,7 +15,9 @@ import {
   listTeamsForUser,
 } from "@/services/workspace-service";
 
-export type ActionResult<T> = { data: T; error: null } | { data: null; error: string };
+export type ActionResult<T> =
+  | { data: T; error: null }
+  | { data: null; error: string };
 
 async function requireUser() {
   const supabase = await createClient();
@@ -28,7 +27,9 @@ async function requireUser() {
   return { supabase, user };
 }
 
-export async function createTeam(name: string): Promise<ActionResult<{ id: string }>> {
+export async function createTeam(
+  name: string,
+): Promise<ActionResult<{ id: string }>> {
   const trimmed = name.trim();
   if (!trimmed) {
     return { data: null, error: "Team name is required." };
@@ -40,7 +41,11 @@ export async function createTeam(name: string): Promise<ActionResult<{ id: strin
   }
 
   try {
-    const team = await createTeamWithOwner({ name: trimmed, userId: user.id, client: supabase });
+    const team = await createTeamWithOwner({
+      name: trimmed,
+      userId: user.id,
+      client: supabase,
+    });
     revalidatePath("/teams");
     revalidatePath("/dashboard");
     return { data: { id: team.id }, error: null };
@@ -81,7 +86,8 @@ export async function createWorkspaceProject(
     revalidatePath("/dashboard");
     return { data: { id: data.id }, error: null };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Could not create project.";
+    const message =
+      e instanceof Error ? e.message : "Could not create project.";
     return { data: null, error: message };
   }
 }
@@ -98,7 +104,10 @@ export async function updateProjectSettings(
     return { data: null, error: "Project name is required." };
   }
   if (input.description.length > MAX_PROJECT_DESCRIPTION) {
-    return { data: null, error: `Description must be at most ${MAX_PROJECT_DESCRIPTION} characters.` };
+    return {
+      data: null,
+      error: `Description must be at most ${MAX_PROJECT_DESCRIPTION} characters.`,
+    };
   }
 
   const { supabase, user } = await requireUser();
@@ -122,7 +131,8 @@ export async function updateProjectSettings(
     try {
       slug = await generateUniqueProjectSlug(teamId, name, supabase);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Could not update project slug.";
+      const message =
+        e instanceof Error ? e.message : "Could not update project slug.";
       return { data: null, error: message };
     }
   }
@@ -150,7 +160,10 @@ export async function updateProjectDescription(
   description: string,
 ): Promise<ActionResult<null>> {
   if (description.length > MAX_PROJECT_DESCRIPTION) {
-    return { data: null, error: `Description must be at most ${MAX_PROJECT_DESCRIPTION} characters.` };
+    return {
+      data: null,
+      error: `Description must be at most ${MAX_PROJECT_DESCRIPTION} characters.`,
+    };
   }
 
   const { supabase, user } = await requireUser();
@@ -169,7 +182,10 @@ export async function updateProjectDescription(
     return { data: null, error: "Project not found." };
   }
 
-  return updateProjectSettings(teamId, projectId, { name: row.name, description });
+  return updateProjectSettings(teamId, projectId, {
+    name: row.name,
+    description,
+  });
 }
 
 export type CreateBlogInput = {
@@ -181,7 +197,9 @@ export type CreateBlogInput = {
   wpAppPassword: string;
 };
 
-export async function createBlog(input: CreateBlogInput): Promise<ActionResult<{ id: string }>> {
+export async function createBlog(
+  input: CreateBlogInput,
+): Promise<ActionResult<{ id: string }>> {
   const name = input.name.trim();
   if (!name) {
     return { data: null, error: "Blog name is required." };
@@ -190,7 +208,10 @@ export async function createBlog(input: CreateBlogInput): Promise<ActionResult<{
   const wpUsername = input.wpUsername.trim();
   const wpAppPassword = input.wpAppPassword.trim();
   if (!wpUrl || !wpUsername || !wpAppPassword) {
-    return { data: null, error: "WordPress URL, username, and application password are required." };
+    return {
+      data: null,
+      error: "WordPress URL, username, and application password are required.",
+    };
   }
 
   const { supabase, user } = await requireUser();
@@ -209,14 +230,20 @@ export async function createBlog(input: CreateBlogInput): Promise<ActionResult<{
       wp_app_password: wpAppPassword,
     };
 
-    const { data, error } = await supabase.from("blogs").insert(row).select("id").single();
+    const { data, error } = await supabase
+      .from("blogs")
+      .insert(row)
+      .select("id")
+      .single();
 
     if (error) {
       return { data: null, error: error.message };
     }
 
     revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}/blogs`);
-    revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}/blogs/${data.id}`);
+    revalidatePath(
+      `/teams/${input.teamId}/projects/${input.projectId}/blogs/${data.id}`,
+    );
     revalidatePath(`/teams/${input.teamId}/projects/${input.projectId}`);
     revalidatePath("/dashboard");
     return { data: { id: data.id }, error: null };
@@ -301,7 +328,10 @@ export async function updateTeam(
       slug = await generateUniqueTeamSlug(name, supabase);
     }
 
-    const { error } = await admin.from("teams").update({ name, slug }).eq("id", teamId);
+    const { error } = await admin
+      .from("teams")
+      .update({ name, slug })
+      .eq("id", teamId);
     if (error) return { data: null, error: error.message };
 
     revalidatePath(`/teams/${teamId}/settings`);
@@ -310,8 +340,12 @@ export async function updateTeam(
     revalidatePath("/dashboard");
     return { data: null, error: null };
   } catch (err) {
-    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
-    return { data: null, error: err instanceof Error ? err.message : "Could not rename team." };
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not rename team.",
+    };
   }
 }
 
@@ -349,8 +383,12 @@ export async function deleteTeam(
     revalidatePath("/dashboard");
     return { data: { redirect: "/teams" }, error: null };
   } catch (err) {
-    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
-    return { data: null, error: err instanceof Error ? err.message : "Could not delete team." };
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not delete team.",
+    };
   }
 }
 
@@ -380,8 +418,12 @@ export async function deleteProject(
     revalidatePath("/dashboard");
     return { data: { redirect: `/teams/${teamId}/projects` }, error: null };
   } catch (err) {
-    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
-    return { data: null, error: err instanceof Error ? err.message : "Could not delete project." };
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not delete project.",
+    };
   }
 }
 
@@ -434,8 +476,12 @@ export async function updateBlog(
     revalidatePath(`/teams/${teamId}/projects/${projectId}`);
     return { data: null, error: null };
   } catch (err) {
-    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
-    return { data: null, error: err instanceof Error ? err.message : "Could not rename blog." };
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not rename blog.",
+    };
   }
 }
 
@@ -468,7 +514,11 @@ export async function deleteBlog(
       error: null,
     };
   } catch (err) {
-    if (err instanceof TeamPermissionError) return { data: null, error: err.code };
-    return { data: null, error: err instanceof Error ? err.message : "Could not delete blog." };
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not delete blog.",
+    };
   }
 }

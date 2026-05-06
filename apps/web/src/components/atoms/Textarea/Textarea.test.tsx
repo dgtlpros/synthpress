@@ -13,13 +13,17 @@ describe("Textarea", () => {
   it("handles value changes", () => {
     const onChange = vi.fn();
     render(<Textarea onChange={onChange} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "content" } });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "content" },
+    });
     expect(onChange).toHaveBeenCalled();
   });
 
   it("shows error styling", () => {
     render(<Textarea error placeholder="Error" />);
-    expect(screen.getByPlaceholderText("Error").className).toContain("border-error");
+    expect(screen.getByPlaceholderText("Error").className).toContain(
+      "border-error",
+    );
   });
 
   it("can be disabled", () => {

@@ -37,8 +37,12 @@ export function ProjectInstalledAppRow({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted">{appKindLabel}</span>
-          <Badge variant={isActive ? "brand" : "default"}>{isActive ? "Active" : "Paused"}</Badge>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+            {appKindLabel}
+          </span>
+          <Badge variant={isActive ? "brand" : "default"}>
+            {isActive ? "Active" : "Paused"}
+          </Badge>
         </div>
         <p className="mt-0.5 truncate font-medium text-foreground">{title}</p>
         <p className="truncate text-xs text-muted" title={subtitle}>

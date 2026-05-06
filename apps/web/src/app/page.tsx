@@ -7,7 +7,9 @@ import { Pricing } from "@/components/organisms/Pricing";
 import { Footer } from "@/components/organisms/Footer";
 
 export default async function Home() {
-  const { data: { user } } = await getAuthUserOncePerResponse();
+  const {
+    data: { user },
+  } = await getAuthUserOncePerResponse();
 
   return (
     <LandingLayout user={user ? { email: user.email ?? "" } : null}>

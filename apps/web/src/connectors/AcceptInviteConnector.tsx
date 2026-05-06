@@ -18,12 +18,24 @@ const ERROR_COPY: Record<string, string> = {
   not_signed_in: "You need to be signed in to accept this invite.",
 };
 
-export function AcceptInviteConnector({ rawToken, teamId, teamName }: AcceptInviteConnectorProps) {
-  const { accept, isAccepting, error, ok } = useAcceptInvite({ rawToken, teamId });
+export function AcceptInviteConnector({
+  rawToken,
+  teamId,
+  teamName,
+}: AcceptInviteConnectorProps) {
+  const { accept, isAccepting, error, ok } = useAcceptInvite({
+    rawToken,
+    teamId,
+  });
 
   return (
     <div className="space-y-2">
-      <Button type="button" onClick={accept} loading={isAccepting} disabled={ok}>
+      <Button
+        type="button"
+        onClick={accept}
+        loading={isAccepting}
+        disabled={ok}
+      >
         {ok ? "Joined" : `Join ${teamName}`}
       </Button>
       {error ? (

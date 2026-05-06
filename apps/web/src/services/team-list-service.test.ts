@@ -6,7 +6,10 @@ vi.mock("@/services/team-billing-service", () => ({
   getTeamPlan: (...args: unknown[]) => mockGetTeamPlan(...args),
 }));
 
-import { listTeamsForUserWithMeta, teamListPlanLabel } from "./team-list-service";
+import {
+  listTeamsForUserWithMeta,
+  teamListPlanLabel,
+} from "./team-list-service";
 
 describe("teamListPlanLabel", () => {
   it("returns Free for null plan key", () => {
@@ -23,7 +26,12 @@ describe("listTeamsForUserWithMeta", () => {
     vi.clearAllMocks();
     mockGetTeamPlan.mockImplementation(async (teamId: string) => {
       if (teamId === "team-a") {
-        return { ownerId: "u1", planKey: "pro", status: "active", balance: 100 };
+        return {
+          ownerId: "u1",
+          planKey: "pro",
+          status: "active",
+          balance: 100,
+        };
       }
       if (teamId === "team-b") {
         return { ownerId: "u2", planKey: null, status: null, balance: 0 };
@@ -111,7 +119,11 @@ describe("listTeamsForUserWithMeta", () => {
             select: () => ({
               in: () =>
                 Promise.resolve({
-                  data: [{ team_id: "team-a" }, { team_id: "team-a" }, { team_id: "team-b" }],
+                  data: [
+                    { team_id: "team-a" },
+                    { team_id: "team-a" },
+                    { team_id: "team-b" },
+                  ],
                   error: null,
                 }),
             }),
@@ -141,12 +153,18 @@ describe("listTeamsForUserWithMeta", () => {
       },
       auth: {
         admin: {
-          getUserById: vi.fn().mockResolvedValue({ data: { user: null }, error: null }),
+          getUserById: vi
+            .fn()
+            .mockResolvedValue({ data: { user: null }, error: null }),
         },
       },
     };
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
 
     expect(out.owned).toHaveLength(1);
     expect(out.owned[0]).toMatchObject({
@@ -264,7 +282,11 @@ describe("listTeamsForUserWithMeta", () => {
       balance: 0,
     });
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
 
     expect(getUserById).toHaveBeenCalledWith("u1");
     expect(out.owned[0].ownerName).toBe("me@example.com");
@@ -288,7 +310,10 @@ describe("listTeamsForUserWithMeta", () => {
               }
               return {
                 in: () =>
-                  Promise.resolve({ data: [{ team_id: "team-z" }], error: null }),
+                  Promise.resolve({
+                    data: [{ team_id: "team-z" }],
+                    error: null,
+                  }),
               };
             },
           };
@@ -340,7 +365,11 @@ describe("listTeamsForUserWithMeta", () => {
 
     mockGetTeamPlan.mockResolvedValueOnce(null);
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(out.joined[0].ownerInitials).toBe("Z");
   });
 
@@ -348,12 +377,18 @@ describe("listTeamsForUserWithMeta", () => {
     const client = {
       from: () => ({
         select: () => ({
-          eq: () => Promise.resolve({ data: null, error: new Error("membership error") }),
+          eq: () =>
+            Promise.resolve({
+              data: null,
+              error: new Error("membership error"),
+            }),
         }),
       }),
     };
     const admin = {} as never;
-    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("membership error");
+    await expect(
+      listTeamsForUserWithMeta("u1", client as never, admin),
+    ).rejects.toThrow("membership error");
   });
 
   it("handles null memberships data (memberships ?? [] branch)", async () => {
@@ -375,14 +410,22 @@ describe("listTeamsForUserWithMeta", () => {
         if (table === "team_members") {
           return {
             select: () => ({
-              eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }),
+              eq: () =>
+                Promise.resolve({
+                  data: [{ team_id: "t1", role: "owner" }],
+                  error: null,
+                }),
             }),
           };
         }
         if (table === "teams") {
           return {
             select: () => ({
-              in: () => Promise.resolve({ data: null, error: new Error("teams error") }),
+              in: () =>
+                Promise.resolve({
+                  data: null,
+                  error: new Error("teams error"),
+                }),
             }),
           };
         }
@@ -390,7 +433,9 @@ describe("listTeamsForUserWithMeta", () => {
       },
     };
     const admin = {} as never;
-    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("teams error");
+    await expect(
+      listTeamsForUserWithMeta("u1", client as never, admin),
+    ).rejects.toThrow("teams error");
   });
 
   it("handles null teamRows data (teamRows ?? [] branch)", async () => {
@@ -400,26 +445,48 @@ describe("listTeamsForUserWithMeta", () => {
           return {
             select: (cols: string) => {
               if (cols.includes("role")) {
-                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }) };
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "t1", role: "owner" }],
+                      error: null,
+                    }),
+                };
               }
               return { in: () => Promise.resolve({ data: [], error: null }) };
             },
           };
         }
         if (table === "teams") {
-          return { select: () => ({ in: () => Promise.resolve({ data: null, error: null }) }) };
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: null, error: null }),
+            }),
+          };
         }
         if (table === "projects") {
-          return { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) };
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
         }
         throw new Error(`unexpected ${table}`);
       },
     };
     const admin = {
-      from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
       auth: { admin: { getUserById: vi.fn() } },
     };
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(out.owned).toEqual([]);
     expect(out.joined).toEqual([]);
   });
@@ -431,16 +498,40 @@ describe("listTeamsForUserWithMeta", () => {
           return {
             select: (cols: string) => {
               if (cols.includes("role")) {
-                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "owner" }], error: null }) };
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "t1", role: "owner" }],
+                      error: null,
+                    }),
+                };
               }
-              return { in: () => Promise.resolve({ data: null, error: new Error("memcount error") }) };
+              return {
+                in: () =>
+                  Promise.resolve({
+                    data: null,
+                    error: new Error("memcount error"),
+                  }),
+              };
             },
           };
         }
         if (table === "teams") {
           return {
             select: () => ({
-              in: () => Promise.resolve({ data: [{ id: "t1", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }], error: null }),
+              in: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      id: "t1",
+                      name: "A",
+                      slug: "a",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
+                  error: null,
+                }),
             }),
           };
         }
@@ -448,7 +539,9 @@ describe("listTeamsForUserWithMeta", () => {
       },
     };
     const admin = {} as never;
-    await expect(listTeamsForUserWithMeta("u1", client as never, admin)).rejects.toThrow("memcount error");
+    await expect(
+      listTeamsForUserWithMeta("u1", client as never, admin),
+    ).rejects.toThrow("memcount error");
   });
 
   it("uses '?' for ownerInitials when teamName is empty (ownerInitialsFromDisplay edge)", async () => {
@@ -458,31 +551,68 @@ describe("listTeamsForUserWithMeta", () => {
           return {
             select: (cols: string) => {
               if (cols.includes("role")) {
-                return { eq: () => Promise.resolve({ data: [{ team_id: "t1", role: "member" }], error: null }) };
+                return {
+                  eq: () =>
+                    Promise.resolve({
+                      data: [{ team_id: "t1", role: "member" }],
+                      error: null,
+                    }),
+                };
               }
-              return { in: () => Promise.resolve({ data: [{ team_id: "t1" }], error: null }) };
+              return {
+                in: () =>
+                  Promise.resolve({ data: [{ team_id: "t1" }], error: null }),
+              };
             },
           };
         }
         if (table === "teams") {
           return {
             select: () => ({
-              in: () => Promise.resolve({ data: [{ id: "t1", name: "  ", slug: "empty", created_at: "2026-01-01", billing_user_id: "u-other" }], error: null }),
+              in: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      id: "t1",
+                      name: "  ",
+                      slug: "empty",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u-other",
+                    },
+                  ],
+                  error: null,
+                }),
             }),
           };
         }
         if (table === "projects") {
-          return { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) };
+          return {
+            select: () => ({
+              in: () => Promise.resolve({ data: [], error: null }),
+            }),
+          };
         }
         throw new Error(`unexpected ${table}`);
       },
     };
     const admin = {
-      from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [{ id: "u-other", full_name: null, avatar_url: null }], error: null }) }) }),
+      from: () => ({
+        select: () => ({
+          in: () =>
+            Promise.resolve({
+              data: [{ id: "u-other", full_name: null, avatar_url: null }],
+              error: null,
+            }),
+        }),
+      }),
       auth: { admin: { getUserById: vi.fn() } },
     };
     mockGetTeamPlan.mockResolvedValueOnce(null);
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(out.joined[0].ownerInitials).toBe("?");
   });
 
@@ -512,7 +642,15 @@ describe("listTeamsForUserWithMeta", () => {
             select: () => ({
               in: () =>
                 Promise.resolve({
-                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  data: [
+                    {
+                      id: "team-a",
+                      name: "A",
+                      slug: "a",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
                   error: null,
                 }),
             }),
@@ -537,12 +675,22 @@ describe("listTeamsForUserWithMeta", () => {
           }),
         };
       },
-      auth: { admin: { getUserById: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) } },
+      auth: {
+        admin: {
+          getUserById: vi
+            .fn()
+            .mockResolvedValue({ data: { user: null }, error: null }),
+        },
+      },
     };
 
     mockGetTeamPlan.mockResolvedValueOnce(null);
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(out.owned[0].memberCount).toBe(0);
     expect(out.owned[0].projectCount).toBe(0);
     expect(out.owned[0].ownerName).toBe("You");
@@ -578,7 +726,15 @@ describe("listTeamsForUserWithMeta", () => {
             select: () => ({
               in: () =>
                 Promise.resolve({
-                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  data: [
+                    {
+                      id: "team-a",
+                      name: "A",
+                      slug: "a",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
                   error: null,
                 }),
             }),
@@ -587,15 +743,28 @@ describe("listTeamsForUserWithMeta", () => {
         if (table === "projects") {
           return {
             select: () => ({
-              in: () => Promise.resolve({ data: null, error: new Error("project query failed") }),
+              in: () =>
+                Promise.resolve({
+                  data: null,
+                  error: new Error("project query failed"),
+                }),
             }),
           };
         }
         throw new Error(`unexpected table ${table}`);
       },
     };
-    const admin = { from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }), auth: { admin: { getUserById: vi.fn() } } };
-    await expect(listTeamsForUserWithMeta("u1", client as never, admin as never)).rejects.toThrow("project query failed");
+    const admin = {
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+      auth: { admin: { getUserById: vi.fn() } },
+    };
+    await expect(
+      listTeamsForUserWithMeta("u1", client as never, admin as never),
+    ).rejects.toThrow("project query failed");
   });
 
   it("throws when profile query errors", async () => {
@@ -628,7 +797,15 @@ describe("listTeamsForUserWithMeta", () => {
             select: () => ({
               in: () =>
                 Promise.resolve({
-                  data: [{ id: "team-a", name: "A", slug: "a", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  data: [
+                    {
+                      id: "team-a",
+                      name: "A",
+                      slug: "a",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
                   error: null,
                 }),
             }),
@@ -647,12 +824,18 @@ describe("listTeamsForUserWithMeta", () => {
     const admin = {
       from: () => ({
         select: () => ({
-          in: () => Promise.resolve({ data: null, error: new Error("profile query failed") }),
+          in: () =>
+            Promise.resolve({
+              data: null,
+              error: new Error("profile query failed"),
+            }),
         }),
       }),
       auth: { admin: { getUserById: vi.fn() } },
     };
-    await expect(listTeamsForUserWithMeta("u1", client as never, admin as never)).rejects.toThrow("profile query failed");
+    await expect(
+      listTeamsForUserWithMeta("u1", client as never, admin as never),
+    ).rejects.toThrow("profile query failed");
   });
 
   it("falls back to 'You' when getUserById returns no email for self", async () => {
@@ -685,7 +868,15 @@ describe("listTeamsForUserWithMeta", () => {
             select: () => ({
               in: () =>
                 Promise.resolve({
-                  data: [{ id: "team-x", name: "Solo", slug: "solo", created_at: "2026-01-01", billing_user_id: "u1" }],
+                  data: [
+                    {
+                      id: "team-x",
+                      name: "Solo",
+                      slug: "solo",
+                      created_at: "2026-01-01",
+                      billing_user_id: "u1",
+                    },
+                  ],
                   error: null,
                 }),
             }),
@@ -702,7 +893,10 @@ describe("listTeamsForUserWithMeta", () => {
       },
     };
 
-    const getUserById = vi.fn().mockResolvedValue({ data: { user: null }, error: new Error("not found") });
+    const getUserById = vi.fn().mockResolvedValue({
+      data: { user: null },
+      error: new Error("not found"),
+    });
     const admin = {
       from() {
         return {
@@ -718,9 +912,18 @@ describe("listTeamsForUserWithMeta", () => {
       auth: { admin: { getUserById } },
     };
 
-    mockGetTeamPlan.mockResolvedValueOnce({ ownerId: "u1", planKey: null, status: null, balance: 0 });
+    mockGetTeamPlan.mockResolvedValueOnce({
+      ownerId: "u1",
+      planKey: null,
+      status: null,
+      balance: 0,
+    });
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(getUserById).toHaveBeenCalledWith("u1");
     expect(out.owned[0].ownerName).toBe("You");
   });
@@ -742,7 +945,10 @@ describe("listTeamsForUserWithMeta", () => {
               }
               return {
                 in: () =>
-                  Promise.resolve({ data: [{ team_id: "team-w" }], error: null }),
+                  Promise.resolve({
+                    data: [{ team_id: "team-w" }],
+                    error: null,
+                  }),
               };
             },
           };
@@ -794,7 +1000,11 @@ describe("listTeamsForUserWithMeta", () => {
 
     mockGetTeamPlan.mockResolvedValueOnce(null);
 
-    const out = await listTeamsForUserWithMeta("u1", client as never, admin as never);
+    const out = await listTeamsForUserWithMeta(
+      "u1",
+      client as never,
+      admin as never,
+    );
     expect(out.owned[0].ownerInitials).toBe("AL");
   });
 });

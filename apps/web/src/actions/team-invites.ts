@@ -23,12 +23,24 @@ export interface CreateInviteInput {
 }
 
 export type CreateInviteResult =
-  | { invite: TeamInviteListRow; rawToken: string; acceptUrl: string; error: null }
+  | {
+      invite: TeamInviteListRow;
+      rawToken: string;
+      acceptUrl: string;
+      error: null;
+    }
   | { invite: null; rawToken: null; acceptUrl: null; error: string };
 
-export async function createInviteAction(input: CreateInviteInput): Promise<CreateInviteResult> {
+export async function createInviteAction(
+  input: CreateInviteInput,
+): Promise<CreateInviteResult> {
   if (!input.teamId) {
-    return { invite: null, rawToken: null, acceptUrl: null, error: "teamId is required" };
+    return {
+      invite: null,
+      rawToken: null,
+      acceptUrl: null,
+      error: "teamId is required",
+    };
   }
   if (input.role !== "admin" && input.role !== "member") {
     return {
@@ -44,7 +56,12 @@ export async function createInviteAction(input: CreateInviteInput): Promise<Crea
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return { invite: null, rawToken: null, acceptUrl: null, error: "Not signed in" };
+    return {
+      invite: null,
+      rawToken: null,
+      acceptUrl: null,
+      error: "Not signed in",
+    };
   }
 
   try {
@@ -79,7 +96,9 @@ export type AcceptInviteResult =
   | { teamId: string; role: TeamRole; error: null }
   | { teamId: null; role: null; error: string };
 
-export async function acceptInviteAction(rawToken: string): Promise<AcceptInviteResult> {
+export async function acceptInviteAction(
+  rawToken: string,
+): Promise<AcceptInviteResult> {
   if (!rawToken) {
     return { teamId: null, role: null, error: "Missing invite token." };
   }
@@ -115,9 +134,13 @@ export async function acceptInviteAction(rawToken: string): Promise<AcceptInvite
   }
 }
 
-export type RevokeInviteResult = { ok: true; error: null } | { ok: false; error: string };
+export type RevokeInviteResult =
+  | { ok: true; error: null }
+  | { ok: false; error: string };
 
-export async function revokeInviteAction(inviteId: string): Promise<RevokeInviteResult> {
+export async function revokeInviteAction(
+  inviteId: string,
+): Promise<RevokeInviteResult> {
   if (!inviteId) {
     return { ok: false, error: "inviteId is required" };
   }
@@ -138,7 +161,11 @@ export async function revokeInviteAction(inviteId: string): Promise<RevokeInvite
       .eq("id", inviteId)
       .maybeSingle();
 
-    await revokeInviteService({ inviteId, actorUserId: user.id, client: admin });
+    await revokeInviteService({
+      inviteId,
+      actorUserId: user.id,
+      client: admin,
+    });
 
     if (row?.team_id) {
       revalidatePath(`/teams/${row.team_id}/settings`);
@@ -151,7 +178,10 @@ export async function revokeInviteAction(inviteId: string): Promise<RevokeInvite
     if (err instanceof TeamInviteError) {
       return { ok: false, error: err.code };
     }
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to revoke invite" };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to revoke invite",
+    };
   }
 }
 

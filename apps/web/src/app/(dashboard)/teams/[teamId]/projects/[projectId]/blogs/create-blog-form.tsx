@@ -6,7 +6,13 @@ import { createBlog } from "@/actions/workspace";
 import { Button } from "@/components/atoms/Button";
 import { Input } from "@/components/atoms/Input";
 
-export function CreateBlogForm({ teamId, projectId }: { teamId: string; projectId: string }) {
+export function CreateBlogForm({
+  teamId,
+  projectId,
+}: {
+  teamId: string;
+  projectId: string;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -42,13 +48,26 @@ export function CreateBlogForm({ teamId, projectId }: { teamId: string; projectI
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <label htmlFor="blog-name" className="mb-1 block text-xs font-medium text-muted">
+          <label
+            htmlFor="blog-name"
+            className="mb-1 block text-xs font-medium text-muted"
+          >
             Blog name
           </label>
-          <Input id="blog-name" name="name" type="text" required disabled={pending} placeholder="Main site" />
+          <Input
+            id="blog-name"
+            name="name"
+            type="text"
+            required
+            disabled={pending}
+            placeholder="Main site"
+          />
         </div>
         <div className="sm:col-span-2">
-          <label htmlFor="wp-url" className="mb-1 block text-xs font-medium text-muted">
+          <label
+            htmlFor="wp-url"
+            className="mb-1 block text-xs font-medium text-muted"
+          >
             WordPress site URL
           </label>
           <Input
@@ -62,13 +81,26 @@ export function CreateBlogForm({ teamId, projectId }: { teamId: string; projectI
           />
         </div>
         <div>
-          <label htmlFor="wp-user" className="mb-1 block text-xs font-medium text-muted">
+          <label
+            htmlFor="wp-user"
+            className="mb-1 block text-xs font-medium text-muted"
+          >
             WordPress username
           </label>
-          <Input id="wp-user" name="wpUsername" type="text" required disabled={pending} autoComplete="username" />
+          <Input
+            id="wp-user"
+            name="wpUsername"
+            type="text"
+            required
+            disabled={pending}
+            autoComplete="username"
+          />
         </div>
         <div>
-          <label htmlFor="wp-app-pass" className="mb-1 block text-xs font-medium text-muted">
+          <label
+            htmlFor="wp-app-pass"
+            className="mb-1 block text-xs font-medium text-muted"
+          >
             Application password
           </label>
           <Input

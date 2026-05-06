@@ -168,11 +168,17 @@ describe("createWorkspaceProject", () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueProjectSlug.mockResolvedValue("my-project");
 
-    const single = vi.fn().mockResolvedValue({ data: { id: "p1" }, error: null });
-    const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "p1" }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ insert })),
     } as never);
 
@@ -199,10 +205,16 @@ describe("createWorkspaceProject", () => {
   it("returns error when insert fails", async () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueProjectSlug.mockResolvedValue("my-project");
-    const single = vi.fn().mockResolvedValue({ data: null, error: { message: "dup" } });
-    const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: "dup" } });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ insert })),
     } as never);
     const result = await createWorkspaceProject("tid", "X");
@@ -211,9 +223,13 @@ describe("createWorkspaceProject", () => {
 
   it("returns Error message when a regular Error is thrown in try", async () => {
     mockAuth({ id: "u1" });
-    mockedGenerateUniqueProjectSlug.mockRejectedValue(new Error("slug gen failed"));
+    mockedGenerateUniqueProjectSlug.mockRejectedValue(
+      new Error("slug gen failed"),
+    );
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createWorkspaceProject("tid", "X");
     expect(result.error).toBe("slug gen failed");
@@ -223,7 +239,9 @@ describe("createWorkspaceProject", () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueProjectSlug.mockRejectedValue("random");
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createWorkspaceProject("tid", "X");
     expect(result.error).toBe("Could not create project.");
@@ -248,11 +266,17 @@ describe("createBlog", () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockResolvedValue("main-blog");
 
-    const single = vi.fn().mockResolvedValue({ data: { id: "b1" }, error: null });
-    const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "b1" }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ insert })),
     } as never);
 
@@ -277,9 +301,15 @@ describe("createBlog", () => {
         wp_app_password: "secret",
       }),
     );
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid/blogs");
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid/blogs/b1");
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/tid/projects/pid/blogs",
+    );
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/tid/projects/pid/blogs/b1",
+    );
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/tid/projects/pid",
+    );
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -287,11 +317,17 @@ describe("createBlog", () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockRejectedValue(new Error("slug boom"));
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createBlog({
-      teamId: "tid", projectId: "pid", name: "Blog",
-      wpUrl: "https://wp.example.com", wpUsername: "admin", wpAppPassword: "secret",
+      teamId: "tid",
+      projectId: "pid",
+      name: "Blog",
+      wpUrl: "https://wp.example.com",
+      wpUsername: "admin",
+      wpAppPassword: "secret",
     });
     expect(result.error).toBe("slug boom");
   });
@@ -300,11 +336,17 @@ describe("createBlog", () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockRejectedValue("random");
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createBlog({
-      teamId: "tid", projectId: "pid", name: "Blog",
-      wpUrl: "https://wp.example.com", wpUsername: "admin", wpAppPassword: "secret",
+      teamId: "tid",
+      projectId: "pid",
+      name: "Blog",
+      wpUrl: "https://wp.example.com",
+      wpUsername: "admin",
+      wpAppPassword: "secret",
     });
     expect(result.error).toBe("Could not create blog.");
   });
@@ -313,13 +355,19 @@ describe("createBlog", () => {
 describe("updateProjectSettings", () => {
   it("returns error when name empty", async () => {
     mockAuth({ id: "u1" });
-    const result = await updateProjectSettings("tid", "pid", { name: "   ", description: "x" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "   ",
+      description: "x",
+    });
     expect(result.error).toMatch(/name is required/i);
   });
 
   it("returns error when description exceeds max", async () => {
     mockAuth({ id: "u1" });
-    const result = await updateProjectSettings("tid", "pid", { name: "Valid", description: "x".repeat(5001) });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "Valid",
+      description: "x".repeat(5001),
+    });
     expect(result.error).toMatch(/at most/i);
   });
 
@@ -332,11 +380,16 @@ describe("updateProjectSettings", () => {
       }),
     });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select })),
     } as never);
 
-    const result = await updateProjectSettings("tid", "pid", { name: "N", description: "D" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "N",
+      description: "D",
+    });
     expect(result.error).toMatch(/not found/i);
   });
 
@@ -358,11 +411,16 @@ describe("updateProjectSettings", () => {
     const update = vi.fn().mockReturnValue({ eq: eqIdU });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select, update })),
     } as never);
 
-    const result = await updateProjectSettings("tid", "pid", { name: "Renamed", description: "  New desc  " });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "Renamed",
+      description: "  New desc  ",
+    });
 
     expect(result.error).toBeNull();
     expect(update).toHaveBeenCalledWith({
@@ -370,18 +428,25 @@ describe("updateProjectSettings", () => {
       description: "New desc",
       slug: "renamed-slug",
     });
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/tid/projects/pid",
+    );
   });
 
   it("returns error when not signed in", async () => {
     mockAuth(null);
-    const result = await updateProjectSettings("tid", "pid", { name: "X", description: "Y" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "X",
+      description: "Y",
+    });
     expect(result.error).toMatch(/signed in/);
   });
 
   it("returns error when slug generation fails with Error", async () => {
     mockAuth({ id: "u1" });
-    mockedGenerateUniqueProjectSlug.mockRejectedValue(new Error("slug collision"));
+    mockedGenerateUniqueProjectSlug.mockRejectedValue(
+      new Error("slug collision"),
+    );
 
     const maybeSingle = vi.fn().mockResolvedValue({
       data: { name: "Old", slug: "old-slug" },
@@ -393,24 +458,41 @@ describe("updateProjectSettings", () => {
       }),
     });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select })),
     } as never);
 
-    const result = await updateProjectSettings("tid", "pid", { name: "New", description: "D" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "New",
+      description: "D",
+    });
     expect(result.error).toBe("slug collision");
   });
 
   it("returns slug fallback when a non-Error is thrown", async () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueProjectSlug.mockRejectedValue("random");
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { name: "Old", slug: "old-slug" }, error: null });
-    const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle }) }) });
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: { name: "Old", slug: "old-slug" },
+      error: null,
+    });
+    const select = vi.fn().mockReturnValue({
+      eq: vi
+        .fn()
+        .mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle }) }),
+    });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select })),
     } as never);
-    const result = await updateProjectSettings("tid", "pid", { name: "New", description: "D" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "New",
+      description: "D",
+    });
     expect(result.error).toBe("Could not update project slug.");
   });
 
@@ -426,16 +508,23 @@ describe("updateProjectSettings", () => {
         eq: vi.fn().mockReturnValue({ maybeSingle }),
       }),
     });
-    const eqTeamU = vi.fn().mockResolvedValue({ error: { message: "update failed" } });
+    const eqTeamU = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "update failed" } });
     const eqIdU = vi.fn().mockReturnValue({ eq: eqTeamU });
     const update = vi.fn().mockReturnValue({ eq: eqIdU });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select, update })),
     } as never);
 
-    const result = await updateProjectSettings("tid", "pid", { name: "X", description: "Y" });
+    const result = await updateProjectSettings("tid", "pid", {
+      name: "X",
+      description: "Y",
+    });
     expect(result.error).toBe("update failed");
   });
 });
@@ -450,7 +539,11 @@ describe("updateProjectDescription", () => {
 
   it("returns error when description exceeds max length", async () => {
     mockAuth({ id: "u1" });
-    const result = await updateProjectDescription("tid", "pid", "x".repeat(5001));
+    const result = await updateProjectDescription(
+      "tid",
+      "pid",
+      "x".repeat(5001),
+    );
     expect(result.error).toMatch(/at most/);
   });
 
@@ -459,7 +552,10 @@ describe("updateProjectDescription", () => {
     const maybeSingle = vi
       .fn()
       .mockResolvedValueOnce({ data: { name: "Project P" }, error: null })
-      .mockResolvedValueOnce({ data: { name: "Project P", slug: "project-p" }, error: null });
+      .mockResolvedValueOnce({
+        data: { name: "Project P", slug: "project-p" },
+        error: null,
+      });
     const select = vi.fn().mockReturnValue({
       eq: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({ maybeSingle }),
@@ -470,7 +566,9 @@ describe("updateProjectDescription", () => {
     const update = vi.fn().mockReturnValue({ eq: eqIdU });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({ select, update })),
     } as never);
 
@@ -483,7 +581,9 @@ describe("updateProjectDescription", () => {
       description: "Roadmap",
       slug: "project-p",
     });
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects/pid");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/tid/projects/pid",
+    );
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/tid/projects");
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/dashboard");
   });
@@ -491,12 +591,16 @@ describe("updateProjectDescription", () => {
   it("returns error when project not found", async () => {
     mockAuth({ id: "u1" });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: null, error: null }),
             }),
           }),
         }),
@@ -510,8 +614,12 @@ describe("updateProjectDescription", () => {
 describe("createBlog — validation", () => {
   it("returns error when blog name is empty", async () => {
     const result = await createBlog({
-      teamId: "tid", projectId: "pid", name: "  ",
-      wpUrl: "https://wp.co", wpUsername: "u", wpAppPassword: "p",
+      teamId: "tid",
+      projectId: "pid",
+      name: "  ",
+      wpUrl: "https://wp.co",
+      wpUsername: "u",
+      wpAppPassword: "p",
     });
     expect(result.error).toBe("Blog name is required.");
   });
@@ -519,8 +627,12 @@ describe("createBlog — validation", () => {
   it("returns error when not signed in", async () => {
     mockAuth(null);
     const result = await createBlog({
-      teamId: "tid", projectId: "pid", name: "Blog",
-      wpUrl: "https://wp.co", wpUsername: "u", wpAppPassword: "p",
+      teamId: "tid",
+      projectId: "pid",
+      name: "Blog",
+      wpUrl: "https://wp.co",
+      wpUsername: "u",
+      wpAppPassword: "p",
     });
     expect(result.error).toMatch(/signed in/);
   });
@@ -528,16 +640,26 @@ describe("createBlog — validation", () => {
   it("returns error when insert fails", async () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockResolvedValue("blog");
-    const single = vi.fn().mockResolvedValue({ data: null, error: { message: "dup slug" } });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: "dup slug" } });
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: vi.fn(() => ({
-        insert: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) }),
+        insert: vi
+          .fn()
+          .mockReturnValue({ select: vi.fn().mockReturnValue({ single }) }),
       })),
     } as never);
     const result = await createBlog({
-      teamId: "tid", projectId: "pid", name: "Blog",
-      wpUrl: "https://wp.co", wpUsername: "u", wpAppPassword: "p",
+      teamId: "tid",
+      projectId: "pid",
+      name: "Blog",
+      wpUrl: "https://wp.co",
+      wpUsername: "u",
+      wpAppPassword: "p",
     });
     expect(result.error).toBe("dup slug");
   });
@@ -570,7 +692,10 @@ describe("getTeamsForCurrentUser", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual(rows);
-    expect(mockedListTeamsForUser).toHaveBeenCalledWith("u1", expect.anything());
+    expect(mockedListTeamsForUser).toHaveBeenCalledWith(
+      "u1",
+      expect.anything(),
+    );
   });
 
   it("returns Error message when service throws a regular Error", async () => {
@@ -598,9 +723,18 @@ describe("getProjectsForTeam", () => {
 
   it("returns projects from service", async () => {
     mockAuth({ id: "u1" });
-    const { listProjectsForTeam: mockedListProjects } = await import("@/services/workspace-service");
+    const { listProjectsForTeam: mockedListProjects } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListProjects).mockResolvedValue([
-      { id: "p1", name: "P", slug: "p", team_id: "tid", description: null, created_at: "", updated_at: "" },
+      {
+        id: "p1",
+        name: "P",
+        slug: "p",
+        team_id: "tid",
+        description: null,
+        created_at: "",
+        updated_at: "",
+      },
     ] as never);
     const result = await getProjectsForTeam("tid");
     expect(result.error).toBeNull();
@@ -609,7 +743,8 @@ describe("getProjectsForTeam", () => {
 
   it("returns Error message when service throws a regular Error", async () => {
     mockAuth({ id: "u1" });
-    const { listProjectsForTeam: mockedListProjects } = await import("@/services/workspace-service");
+    const { listProjectsForTeam: mockedListProjects } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListProjects).mockRejectedValue(new Error("pg timeout"));
     const result = await getProjectsForTeam("tid");
     expect(result.error).toBe("pg timeout");
@@ -617,7 +752,8 @@ describe("getProjectsForTeam", () => {
 
   it("returns generic fallback when a non-Error is thrown", async () => {
     mockAuth({ id: "u1" });
-    const { listProjectsForTeam: mockedListProjects } = await import("@/services/workspace-service");
+    const { listProjectsForTeam: mockedListProjects } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListProjects).mockRejectedValue("random");
     const result = await getProjectsForTeam("tid");
     expect(result.error).toBe("Could not load projects.");
@@ -634,7 +770,8 @@ describe("getBlogsForProject", () => {
 
   it("returns blogs from service", async () => {
     mockAuth({ id: "u1" });
-    const { listBlogsForProject: mockedListBlogs } = await import("@/services/workspace-service");
+    const { listBlogsForProject: mockedListBlogs } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListBlogs).mockResolvedValue([] as never);
     const result = await getBlogsForProject("pid");
     expect(result.error).toBeNull();
@@ -643,7 +780,8 @@ describe("getBlogsForProject", () => {
 
   it("returns Error message when service throws a regular Error", async () => {
     mockAuth({ id: "u1" });
-    const { listBlogsForProject: mockedListBlogs } = await import("@/services/workspace-service");
+    const { listBlogsForProject: mockedListBlogs } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListBlogs).mockRejectedValue(new Error("table not found"));
     const result = await getBlogsForProject("pid");
     expect(result.error).toBe("table not found");
@@ -651,7 +789,8 @@ describe("getBlogsForProject", () => {
 
   it("returns generic fallback when a non-Error is thrown", async () => {
     mockAuth({ id: "u1" });
-    const { listBlogsForProject: mockedListBlogs } = await import("@/services/workspace-service");
+    const { listBlogsForProject: mockedListBlogs } =
+      await import("@/services/workspace-service");
     vi.mocked(mockedListBlogs).mockRejectedValue("random");
     const result = await getBlogsForProject("pid");
     expect(result.error).toBe("Could not load blogs.");
@@ -674,7 +813,9 @@ describe("updateTeam", () => {
 
   it("returns forbidden when assertCan throws TeamPermissionError", async () => {
     mockAuth({ id: "u1" });
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "update_team", "member"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "update_team", "member"),
+    );
     mockAdmin({});
     const result = await updateTeam("t1", { name: "Acme" });
     expect(result.error).toBe("forbidden");
@@ -685,7 +826,11 @@ describe("updateTeam", () => {
     mockedAssertCan.mockResolvedValue("owner");
     mockAdmin({
       teams: {
-        select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({ data: null, error: null }),
+          }),
+        }),
       },
     });
     const result = await updateTeam("t1", { name: "New Name" });
@@ -705,7 +850,10 @@ describe("updateTeam", () => {
         select: () => ({
           eq: () => ({
             maybeSingle: () =>
-              Promise.resolve({ data: { name: "Old Name", slug: "old-name" }, error: null }),
+              Promise.resolve({
+                data: { name: "Old Name", slug: "old-name" },
+                error: null,
+              }),
           }),
         }),
         update,
@@ -732,7 +880,10 @@ describe("updateTeam", () => {
         select: () => ({
           eq: () => ({
             maybeSingle: () =>
-              Promise.resolve({ data: { name: "Acme", slug: "acme" }, error: null }),
+              Promise.resolve({
+                data: { name: "Acme", slug: "acme" },
+                error: null,
+              }),
           }),
         }),
         update,
@@ -750,7 +901,9 @@ describe("updateTeam", () => {
     mockedAssertCan.mockResolvedValue("owner");
     mockedGenerateUniqueTeamSlug.mockResolvedValue("new-name");
 
-    const updateEq = vi.fn().mockResolvedValue({ error: { message: "update failed" } });
+    const updateEq = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "update failed" } });
     const update = vi.fn().mockReturnValue({ eq: updateEq });
 
     mockAdmin({
@@ -758,7 +911,10 @@ describe("updateTeam", () => {
         select: () => ({
           eq: () => ({
             maybeSingle: () =>
-              Promise.resolve({ data: { name: "Old", slug: "old" }, error: null }),
+              Promise.resolve({
+                data: { name: "Old", slug: "old" },
+                error: null,
+              }),
           }),
         }),
         update,
@@ -797,7 +953,9 @@ describe("deleteTeam", () => {
 
   it("returns forbidden when assertCan throws", async () => {
     mockAuth({ id: "u1" });
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "delete_team", "admin"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "delete_team", "admin"),
+    );
     mockAdmin({});
     const result = await deleteTeam("t1");
     expect(result.error).toBe("forbidden");
@@ -823,14 +981,29 @@ describe("deleteTeam", () => {
     mockAuth({ id: "u1" });
     mockedAssertCan.mockResolvedValue("owner");
 
-    const teamDeleteEq = vi.fn().mockResolvedValue({ error: { message: "FK violation" } });
+    const teamDeleteEq = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "FK violation" } });
     const teamDelete = vi.fn().mockReturnValue({ eq: teamDeleteEq });
 
     mockedCreateAdminClient.mockReturnValue({
       from: (table: string) => {
         if (table === "teams") return { delete: teamDelete };
-        if (table === "projects") return { select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: null, error: null }) }), delete: vi.fn().mockReturnValue({ in: vi.fn().mockResolvedValue({ error: null }) }) };
-        return { delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }), in: vi.fn().mockResolvedValue({ error: null }) }) };
+        if (table === "projects")
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+            }),
+            delete: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({ error: null }),
+            }),
+          };
+        return {
+          delete: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ error: null }),
+            in: vi.fn().mockResolvedValue({ error: null }),
+          }),
+        };
       },
     } as never);
 
@@ -842,7 +1015,9 @@ describe("deleteTeam", () => {
     mockAuth({ id: "u1" });
     mockedAssertCan.mockResolvedValue("admin");
 
-    const projectDeleteEq2 = vi.fn().mockResolvedValue({ error: { message: "delete denied" } });
+    const projectDeleteEq2 = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "delete denied" } });
     const projectDeleteEq1 = vi.fn().mockReturnValue({ eq: projectDeleteEq2 });
     const projectsDelete = vi.fn().mockReturnValue({ eq: projectDeleteEq1 });
     const blogsDeleteEq = vi.fn().mockResolvedValue({ error: null });
@@ -867,7 +1042,9 @@ describe("deleteTeam", () => {
     const memberDeleteEq = vi.fn().mockResolvedValue({ error: null });
     const memberDelete = vi.fn().mockReturnValue({ eq: memberDeleteEq });
 
-    const projectSelectEq = vi.fn().mockResolvedValue({ data: [{ id: "p1" }, { id: "p2" }], error: null });
+    const projectSelectEq = vi
+      .fn()
+      .mockResolvedValue({ data: [{ id: "p1" }, { id: "p2" }], error: null });
     const projectSelect = vi.fn().mockReturnValue({ eq: projectSelectEq });
     const blogsDeleteIn = vi.fn().mockResolvedValue({ error: null });
     const blogsDelete = vi.fn().mockReturnValue({ in: blogsDeleteIn });
@@ -888,7 +1065,10 @@ describe("deleteTeam", () => {
           return { select: projectSelect, delete: projectsDelete };
         }
         if (table === "blogs") return { delete: blogsDelete };
-        if (table === "projects") { projectDeleteCalled = true; return { delete: projectsDelete }; }
+        if (table === "projects") {
+          projectDeleteCalled = true;
+          return { delete: projectsDelete };
+        }
         if (table === "teams") return { delete: teamDelete };
         return adminFromMap[table] ?? {};
       },
@@ -915,7 +1095,9 @@ describe("deleteProject", () => {
 
   it("returns forbidden on permission error", async () => {
     mockAuth({ id: "u1" });
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "delete_project", "member"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "delete_project", "member"),
+    );
     mockAdmin({});
     const result = await deleteProject("t1", "p1");
     expect(result.error).toBe("forbidden");
@@ -981,11 +1163,15 @@ describe("updateBlog", () => {
     mockedAssertCan.mockResolvedValue("member");
     mockAdmin({});
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }),
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
           }),
         }),
       }),
@@ -1005,12 +1191,18 @@ describe("updateBlog", () => {
     const update = vi.fn().mockReturnValue({ eq: updateEq1 });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
             eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: { name: "Old Blog", slug: "old-blog" }, error: null }),
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "Old Blog", slug: "old-blog" },
+                  error: null,
+                }),
             }),
           }),
         }),
@@ -1022,7 +1214,9 @@ describe("updateBlog", () => {
 
     expect(result.error).toBeNull();
     expect(update).toHaveBeenCalledWith({ name: "New Blog", slug: "new-blog" });
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/t1/projects/p1/blogs/b1");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs/b1",
+    );
   });
 
   it("returns error when update query fails", async () => {
@@ -1030,18 +1224,25 @@ describe("updateBlog", () => {
     mockedAssertCan.mockResolvedValue("member");
     mockAdmin({});
 
-    const updateEq2 = vi.fn().mockResolvedValue({ error: { message: "update failed" } });
+    const updateEq2 = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "update failed" } });
     const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
     const update = vi.fn().mockReturnValue({ eq: updateEq1 });
 
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
             eq: () => ({
               maybeSingle: () =>
-                Promise.resolve({ data: { name: "Blog", slug: "blog" }, error: null }),
+                Promise.resolve({
+                  data: { name: "Blog", slug: "blog" },
+                  error: null,
+                }),
             }),
           }),
         }),
@@ -1065,7 +1266,9 @@ describe("deleteBlog", () => {
 
   it("returns forbidden on permission error", async () => {
     mockAuth({ id: "u1" });
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "manage_blog", "member"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "manage_blog", "member"),
+    );
     mockAdmin({});
     const result = await deleteBlog("t1", "p1", "b1");
     expect(result.error).toBe("forbidden");
@@ -1086,14 +1289,18 @@ describe("deleteBlog", () => {
     expect(result.error).toBeNull();
     expect(result.data).toEqual({ redirect: "/teams/t1/projects/p1/blogs" });
     expect(deleteBlogs).toHaveBeenCalled();
-    expect(mockedRevalidatePath).toHaveBeenCalledWith("/teams/t1/projects/p1/blogs");
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs",
+    );
   });
 
   it("returns error when delete query fails", async () => {
     mockAuth({ id: "u1" });
     mockedAssertCan.mockResolvedValue("member");
 
-    const deleteEq2 = vi.fn().mockResolvedValue({ error: { message: "delete failed" } });
+    const deleteEq2 = vi
+      .fn()
+      .mockResolvedValue({ error: { message: "delete failed" } });
     const deleteEq1 = vi.fn().mockReturnValue({ eq: deleteEq2 });
     const deleteFn = vi.fn().mockReturnValue({ eq: deleteEq1 });
 
@@ -1125,14 +1332,24 @@ describe("deleteBlog", () => {
 describe("updateBlog — catch branches", () => {
   it("returns TeamPermissionError code on permission failure", async () => {
     mockAuth({ id: "u1" });
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "manage_blog", "member"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "manage_blog", "member"),
+    );
     mockAdmin({});
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({ maybeSingle: () => Promise.resolve({ data: { name: "X", slug: "x" }, error: null }) }),
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "X", slug: "x" },
+                  error: null,
+                }),
+            }),
           }),
         }),
       }),
@@ -1146,11 +1363,19 @@ describe("updateBlog — catch branches", () => {
     mockedAssertCan.mockRejectedValue(new Error("connection refused"));
     mockAdmin({});
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({ maybeSingle: () => Promise.resolve({ data: { name: "X", slug: "x" }, error: null }) }),
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "X", slug: "x" },
+                  error: null,
+                }),
+            }),
           }),
         }),
       }),
@@ -1164,11 +1389,19 @@ describe("updateBlog — catch branches", () => {
     mockedAssertCan.mockRejectedValue("random");
     mockAdmin({});
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({ maybeSingle: () => Promise.resolve({ data: { name: "X", slug: "x" }, error: null }) }),
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "X", slug: "x" },
+                  error: null,
+                }),
+            }),
           }),
         }),
       }),

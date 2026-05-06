@@ -18,7 +18,10 @@ export interface PlanBadgeProps {
   className?: string;
 }
 
-const statusConfig: Record<SubscriptionStatus, { variant: BadgeVariant; suffix?: string }> = {
+const statusConfig: Record<
+  SubscriptionStatus,
+  { variant: BadgeVariant; suffix?: string }
+> = {
   active: { variant: "brand" },
   trialing: { variant: "brand", suffix: "Trialing" },
   canceling: { variant: "warning", suffix: "Canceling" },
@@ -30,7 +33,11 @@ const statusConfig: Record<SubscriptionStatus, { variant: BadgeVariant; suffix?:
   free: { variant: "default" },
 };
 
-export function PlanBadge({ planName, status = "active", className }: PlanBadgeProps) {
+export function PlanBadge({
+  planName,
+  status = "active",
+  className,
+}: PlanBadgeProps) {
   const config = statusConfig[status];
   const label = config.suffix ? `${planName} · ${config.suffix}` : planName;
 

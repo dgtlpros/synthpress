@@ -31,6 +31,8 @@ test("navbar has Sign Up link pointing to /signup", async ({ page }) => {
 
 test("hero Get Started CTA points to /signup", async ({ page }) => {
   await page.goto("/");
-  const heroCta = page.locator("section").getByRole("link", { name: "Get Started" });
+  const heroCta = page
+    .locator("section")
+    .getByRole("link", { name: "Get Started" });
   await expect(heroCta).toHaveAttribute("href", "/signup");
 });

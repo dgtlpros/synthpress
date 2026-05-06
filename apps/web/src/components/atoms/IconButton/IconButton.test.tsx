@@ -12,7 +12,11 @@ describe("IconButton", () => {
 
   it("handles click events", () => {
     const onClick = vi.fn();
-    render(<IconButton label="Close" onClick={onClick}>X</IconButton>);
+    render(
+      <IconButton label="Close" onClick={onClick}>
+        X
+      </IconButton>,
+    );
     fireEvent.click(screen.getByLabelText("Close"));
     expect(onClick).toHaveBeenCalledOnce();
   });
@@ -20,14 +24,22 @@ describe("IconButton", () => {
   it("renders all variants", () => {
     const variants = ["default", "ghost", "brand"] as const;
     variants.forEach((variant) => {
-      const { unmount } = render(<IconButton label="Test" variant={variant}>X</IconButton>);
+      const { unmount } = render(
+        <IconButton label="Test" variant={variant}>
+          X
+        </IconButton>,
+      );
       expect(screen.getByLabelText("Test")).toBeInTheDocument();
       unmount();
     });
   });
 
   it("applies disabled styling", () => {
-    render(<IconButton label="Disabled" disabled>X</IconButton>);
+    render(
+      <IconButton label="Disabled" disabled>
+        X
+      </IconButton>,
+    );
     expect(screen.getByLabelText("Disabled")).toBeDisabled();
     expect(screen.getByLabelText("Disabled").className).toContain("opacity-50");
   });

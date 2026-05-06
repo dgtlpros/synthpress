@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { deleteProject, updateProjectSettings } from "@/actions/workspace";
 import type { BlogListRow } from "@/services/workspace-service";
 import { Button } from "@/components/atoms/Button";
@@ -47,12 +47,12 @@ export function ProjectOverviewConnector({
 
   const canDelete = roleCan(currentUserRole, "delete_project");
 
-  useEffect(() => {
-    if (!settingsOpen) {
+  if (!settingsOpen) {
+    if (nameDraft !== projectName || descDraft !== projectDescription) {
       setNameDraft(projectName);
       setDescDraft(projectDescription);
     }
-  }, [projectName, projectDescription, settingsOpen]);
+  }
 
   const blogBase = `/teams/${teamId}/projects/${projectId}/blogs`;
 
@@ -124,12 +124,15 @@ export function ProjectOverviewConnector({
       <section aria-labelledby="apps-heading" className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 id="apps-heading" className="text-base font-semibold text-foreground">
+            <h2
+              id="apps-heading"
+              className="text-base font-semibold text-foreground"
+            >
               Installed apps
             </h2>
             <p className="mt-0.5 max-w-2xl text-sm text-muted">
-              Each row is one installed app instance (for example, one Blog per WordPress site). Open a row
-              for that app&apos;s settings.
+              Each row is one installed app instance (for example, one Blog per
+              WordPress site). Open a row for that app&apos;s settings.
             </p>
           </div>
           <div className="flex shrink-0 gap-2 self-start sm:self-auto">
@@ -170,10 +173,21 @@ export function ProjectOverviewConnector({
         pending={pending}
         footer={
           <>
-            <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => setSettingsOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => setSettingsOpen(false)}
+            >
               Cancel
             </Button>
-            <Button type="button" size="sm" loading={pending} onClick={saveSettings}>
+            <Button
+              type="button"
+              size="sm"
+              loading={pending}
+              onClick={saveSettings}
+            >
               Save
             </Button>
           </>

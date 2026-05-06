@@ -1,6 +1,15 @@
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, afterEach } from "vitest";
-import { PricingTableConnector, type PricingTablePlan } from "./PricingTableConnector";
+import {
+  PricingTableConnector,
+  type PricingTablePlan,
+} from "./PricingTableConnector";
 
 afterEach(cleanup);
 
@@ -43,9 +52,9 @@ describe("PricingTableConnector", () => {
 
     expect(screen.getAllByText("/mo").length).toBe(3);
 
-    const proCta = screen.getAllByRole("link", { name: "Subscribe" }).find((el) =>
-      el.getAttribute("href")?.includes("plan=pro"),
-    );
+    const proCta = screen
+      .getAllByRole("link", { name: "Subscribe" })
+      .find((el) => el.getAttribute("href")?.includes("plan=pro"));
     expect(proCta).toBeDefined();
     expect(proCta).toHaveAttribute("href", "/checkout?plan=pro");
   });
@@ -57,9 +66,9 @@ describe("PricingTableConnector", () => {
     expect(screen.getByText("$290")).toBeInTheDocument();
     expect(screen.getByText("$790")).toBeInTheDocument();
 
-    const proCta = screen.getAllByRole("link", { name: "Subscribe" }).find((el) =>
-      el.getAttribute("href")?.includes("plan=pro"),
-    );
+    const proCta = screen
+      .getAllByRole("link", { name: "Subscribe" })
+      .find((el) => el.getAttribute("href")?.includes("plan=pro"));
     expect(proCta).toHaveAttribute("href", "/checkout?plan=pro&interval=year");
   });
 
@@ -70,16 +79,17 @@ describe("PricingTableConnector", () => {
     // Scale still shows $199 (no annual configured)
     expect(screen.getByText("$199")).toBeInTheDocument();
 
-    const scaleCta = screen.getAllByRole("link", { name: "Subscribe" }).find((el) =>
-      el.getAttribute("href")?.includes("plan=scale"),
-    );
+    const scaleCta = screen
+      .getAllByRole("link", { name: "Subscribe" })
+      .find((el) => el.getAttribute("href")?.includes("plan=scale"));
     // No interval=year since plan has no annual price
     expect(scaleCta).toHaveAttribute("href", "/checkout?plan=scale");
   });
 
   it("routes unauthenticated users through /signup with the checkout target", () => {
     render(<PricingTableConnector plans={plans} authed={false} />);
-    const expectedHref = "/signup?next=" + encodeURIComponent("/checkout?plan=pro");
+    const expectedHref =
+      "/signup?next=" + encodeURIComponent("/checkout?plan=pro");
     const proCta = screen
       .getAllByRole("link", { name: "Get Started" })
       .find((el) => el.getAttribute("href") === expectedHref);
@@ -90,13 +100,17 @@ describe("PricingTableConnector", () => {
   it("hides the toggle when no plans support annual pricing", () => {
     const monthlyOnly = plans.map((p) => ({ ...p, annualPriceCents: null }));
     render(<PricingTableConnector plans={monthlyOnly} authed />);
-    expect(screen.queryByRole("tablist", { name: "Billing interval" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "Billing interval" }),
+    ).not.toBeInTheDocument();
   });
 
   it("marks the popular tier", () => {
     render(<PricingTableConnector plans={plans} authed />);
     const popularCard = screen.getByText("Most Popular").closest("div");
     expect(popularCard).not.toBeNull();
-    expect(within(popularCard as HTMLElement).getByText("Pro")).toBeInTheDocument();
+    expect(
+      within(popularCard as HTMLElement).getByText("Pro"),
+    ).toBeInTheDocument();
   });
 });

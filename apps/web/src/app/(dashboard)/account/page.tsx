@@ -1,13 +1,22 @@
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentPlan } from "@/services/billing-service";
 import { getBalance } from "@/services/token-service";
 import { Avatar } from "@/components/atoms/Avatar";
-import { PlanBadge, type SubscriptionStatus } from "@/components/atoms/PlanBadge";
+import {
+  PlanBadge,
+  type SubscriptionStatus,
+} from "@/components/atoms/PlanBadge";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/atoms/Card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/atoms/Card";
 import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +38,10 @@ function normalizeStatus(status: string): SubscriptionStatus {
     : "active";
 }
 
-function getInitials(name: string | null | undefined, email: string | null | undefined) {
+function getInitials(
+  name: string | null | undefined,
+  email: string | null | undefined,
+) {
   if (name && name.trim().length > 0) {
     return name
       .split(/\s+/)
@@ -52,7 +64,6 @@ export default async function AccountPage() {
     redirect("/login");
   }
 
-  const supabase = await createClient();
   const admin = createAdminClient();
   const [current, balance] = await Promise.all([
     getCurrentPlan(user.id, admin),
@@ -61,16 +72,21 @@ export default async function AccountPage() {
 
   const fullName = user.user_metadata?.full_name as string | undefined;
   const planName = current?.plan.name ?? "Free";
-  const status = current ? normalizeStatus(current.subscription.status) : "free";
+  const status = current
+    ? normalizeStatus(current.subscription.status)
+    : "free";
   const memberSince = new Date(user.created_at).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
   });
-  const memberSinceShort = new Date(user.created_at).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-  });
+  const memberSinceShort = new Date(user.created_at).toLocaleDateString(
+    "en-US",
+    {
+      year: "numeric",
+      month: "short",
+    },
+  );
 
   return (
     <div className="space-y-8">
@@ -107,7 +123,9 @@ export default async function AccountPage() {
         <Card>
           <CardHeader>
             <CardDescription>Synth tokens</CardDescription>
-            <CardTitle className="text-3xl">{numberFormatter.format(balance)}</CardTitle>
+            <CardTitle className="text-3xl">
+              {numberFormatter.format(balance)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted">
@@ -150,12 +168,17 @@ export default async function AccountPage() {
           className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]"
         >
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Teams &amp; projects</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              Teams &amp; projects
+            </h2>
             <p className="mt-1 text-sm text-muted">
-              Organize people in teams, scope work in projects, connect blogs per project.
+              Organize people in teams, scope work in projects, connect blogs
+              per project.
             </p>
           </div>
-          <span className="text-sm text-muted transition-transform group-hover:translate-x-0.5">→</span>
+          <span className="text-sm text-muted transition-transform group-hover:translate-x-0.5">
+            →
+          </span>
         </NextLink>
 
         <NextLink
@@ -163,7 +186,9 @@ export default async function AccountPage() {
           className="group flex items-center justify-between rounded-[var(--sp-radius-xl)] border border-border bg-surface p-6 shadow-[var(--sp-shadow-sm)] transition-all hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]"
         >
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Billing &amp; tokens</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              Billing &amp; tokens
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Manage your plan, top up tokens, view invoices.
             </p>
@@ -197,26 +222,36 @@ export default async function AccountPage() {
       <Card>
         <CardHeader>
           <CardTitle>Profile</CardTitle>
-          <CardDescription>The information your account is associated with.</CardDescription>
+          <CardDescription>
+            The information your account is associated with.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <dl className="grid gap-4 sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Email</dt>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                Email
+              </dt>
               <dd className="mt-1 text-sm text-foreground">{user.email}</dd>
             </div>
             {fullName?.trim() && (
               <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-muted">Name</dt>
+                <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                  Name
+                </dt>
                 <dd className="mt-1 text-sm text-foreground">{fullName}</dd>
               </div>
             )}
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Account ID</dt>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                Account ID
+              </dt>
               <dd className="mt-1 font-mono text-xs text-muted">{user.id}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Account created</dt>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                Account created
+              </dt>
               <dd className="mt-1 text-sm text-foreground">{memberSince}</dd>
             </div>
           </dl>
@@ -227,7 +262,9 @@ export default async function AccountPage() {
       <Card>
         <CardHeader>
           <CardTitle>Session</CardTitle>
-          <CardDescription>Sign out of your account on this device.</CardDescription>
+          <CardDescription>
+            Sign out of your account on this device.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <SignOutButton />

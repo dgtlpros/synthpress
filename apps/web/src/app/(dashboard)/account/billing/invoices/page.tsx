@@ -26,14 +26,17 @@ export default async function InvoicesPage() {
         >
           ← Back to billing
         </NextLink>
-        <h1 className="mt-2 text-2xl font-bold text-foreground">Billing history</h1>
+        <h1 className="mt-2 text-2xl font-bold text-foreground">
+          Billing history
+        </h1>
         <p className="mt-1 text-sm text-muted">
-          Every charge generates a Stripe-hosted invoice with a downloadable PDF.
+          Every charge generates a Stripe-hosted invoice with a downloadable
+          PDF.
         </p>
       </div>
 
       {/* The shell renders immediately. The list streams in once the live
-        * `stripe.invoices.list` call resolves — typically 80–200ms. */}
+       * `stripe.invoices.list` call resolves — typically 80–200ms. */}
       <Suspense fallback={<InvoiceListSkeleton />}>
         <InvoiceListLoader userId={user.id} />
       </Suspense>
@@ -62,7 +65,8 @@ async function InvoiceListLoader({ userId }: { userId: string }) {
         id: invoice.id,
         number: invoice.number,
         status: invoice.status,
-        amountCents: invoice.amountPaid > 0 ? invoice.amountPaid : invoice.amountDue,
+        amountCents:
+          invoice.amountPaid > 0 ? invoice.amountPaid : invoice.amountDue,
         currency: invoice.currency,
         createdAt: invoice.createdAt,
         periodStart: invoice.periodStart,

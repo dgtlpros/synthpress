@@ -201,11 +201,16 @@ export default async function AccountBillingPage() {
   return (
     <div className="space-y-8">
       <div>
-        <NextLink href="/account" className="text-sm text-muted hover:text-foreground transition-colors">
+        <NextLink
+          href="/account"
+          className="text-sm text-muted hover:text-foreground transition-colors"
+        >
           ← Back to account
         </NextLink>
         <h1 className="mt-2 text-2xl font-bold text-foreground">Billing</h1>
-        <p className="mt-1 text-sm text-muted">Manage your plan, synth tokens, and recent activity.</p>
+        <p className="mt-1 text-sm text-muted">
+          Manage your plan, synth tokens, and recent activity.
+        </p>
       </div>
 
       {notice && (
@@ -217,7 +222,11 @@ export default async function AccountBillingPage() {
             <BillingActionsConnector
               mode={notice.actionMode}
               label={notice.actionLabel}
-              variant={notice.variant === "warning" || notice.variant === "danger" ? "primary" : "secondary"}
+              variant={
+                notice.variant === "warning" || notice.variant === "danger"
+                  ? "primary"
+                  : "secondary"
+              }
             />
           }
         />
@@ -259,7 +268,9 @@ export default async function AccountBillingPage() {
       <div className="rounded-[var(--sp-radius-xl)] border border-border bg-surface px-6 py-4 shadow-[var(--sp-shadow-sm)]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">Billing history</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              Billing history
+            </h3>
             <p className="text-xs text-muted">
               Download PDF receipts for every charge.
             </p>

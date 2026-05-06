@@ -1,10 +1,16 @@
 import type { Preview, Decorator } from "@storybook/react";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import "../src/app/globals.css";
 
-const withTheme: Decorator = (Story, context) => {
-  const theme = context.globals.theme || "light";
-
+function StorybookThemeShell({
+  theme,
+  padding,
+  children,
+}: {
+  theme: string;
+  padding: string | undefined;
+  children: ReactNode;
+}) {
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") {
@@ -20,11 +26,21 @@ const withTheme: Decorator = (Story, context) => {
         background: "var(--background)",
         color: "var(--foreground)",
         minHeight: "100%",
-        padding: context.parameters.layout === "centered" ? undefined : "1rem",
+        padding,
       }}
     >
-      <Story />
+      {children}
     </div>
+  );
+}
+
+const withTheme: Decorator = (Story, context) => {
+  const theme = context.globals.theme || "light";
+  const padding = context.parameters.layout === "centered" ? undefined : "1rem";
+  return (
+    <StorybookThemeShell theme={theme} padding={padding}>
+      <Story />
+    </StorybookThemeShell>
   );
 };
 

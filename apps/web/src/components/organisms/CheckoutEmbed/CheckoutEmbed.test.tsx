@@ -53,7 +53,9 @@ describe("CheckoutEmbed", () => {
   });
 
   it("merges custom className on the wrapper", () => {
-    const { container } = render(<CheckoutEmbed clientSecret="cs_b" className="custom-x" />);
+    const { container } = render(
+      <CheckoutEmbed clientSecret="cs_b" className="custom-x" />,
+    );
     expect(container.firstChild).toHaveClass("custom-x");
   });
 });

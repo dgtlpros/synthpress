@@ -17,7 +17,9 @@ describe("CheckoutSuccessHero", () => {
     const hero = screen.getByTestId("checkout-success-hero");
     expect(hero).toHaveAttribute("data-variant", "success");
     expect(screen.getByText("Payment successful")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Welcome to Pro" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Welcome to Pro" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Your tokens are loaded.")).toBeInTheDocument();
     expect(screen.getByTestId("checkout-success-confetti")).toBeInTheDocument();
   });
@@ -35,7 +37,9 @@ describe("CheckoutSuccessHero", () => {
       "data-variant",
       "pending",
     );
-    expect(screen.queryByTestId("checkout-success-confetti")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("checkout-success-confetti"),
+    ).not.toBeInTheDocument();
   });
 
   it("uses an error visual for the error variant", () => {
@@ -52,19 +56,18 @@ describe("CheckoutSuccessHero", () => {
       "data-variant",
       "error",
     );
-    expect(screen.queryByTestId("checkout-success-confetti")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("checkout-success-confetti"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
   });
 
   it("does not render an eyebrow when none is provided", () => {
-    render(
-      <CheckoutSuccessHero
-        title="Welcome"
-        description="You're in."
-      />,
-    );
+    render(<CheckoutSuccessHero title="Welcome" description="You're in." />);
 
-    expect(screen.queryByTestId("checkout-success-eyebrow")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("checkout-success-eyebrow"),
+    ).not.toBeInTheDocument();
   });
 
   it("forwards a custom className", () => {
@@ -76,6 +79,8 @@ describe("CheckoutSuccessHero", () => {
       />,
     );
 
-    expect(screen.getByTestId("checkout-success-hero")).toHaveClass("custom-class");
+    expect(screen.getByTestId("checkout-success-hero")).toHaveClass(
+      "custom-class",
+    );
   });
 });

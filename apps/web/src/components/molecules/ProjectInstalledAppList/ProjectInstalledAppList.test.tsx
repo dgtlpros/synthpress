@@ -18,11 +18,20 @@ const sample = [
 describe("ProjectInstalledAppList", () => {
   it("renders rows", () => {
     render(<ProjectInstalledAppList items={sample} />);
-    expect(screen.getByRole("link", { name: /Site/i })).toHaveAttribute("href", "/a");
+    expect(screen.getByRole("link", { name: /Site/i })).toHaveAttribute(
+      "href",
+      "/a",
+    );
   });
 
   it("renders empty state", () => {
-    render(<ProjectInstalledAppList items={[]} emptyTitle="Nothing" emptyDescription="Add one" />);
+    render(
+      <ProjectInstalledAppList
+        items={[]}
+        emptyTitle="Nothing"
+        emptyDescription="Add one"
+      />,
+    );
     expect(screen.getByText("Nothing")).toBeInTheDocument();
     expect(screen.getByText("Add one")).toBeInTheDocument();
   });

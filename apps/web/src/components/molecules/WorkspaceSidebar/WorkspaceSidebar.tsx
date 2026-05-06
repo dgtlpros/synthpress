@@ -63,7 +63,12 @@ const sidebarSubsectionLabel =
 const sidebarListboxOption =
   "flex w-full cursor-pointer items-center gap-2 py-2 pl-3 pr-2.5 text-sm font-medium transition-colors duration-150";
 
-export function WorkspaceSidebar({ teams, email, onItemClick, className }: WorkspaceSidebarProps) {
+export function WorkspaceSidebar({
+  teams,
+  email,
+  onItemClick,
+  className,
+}: WorkspaceSidebarProps) {
   const pathname = usePathname();
   const activeTeamId = activeTeamIdFromPath(pathname);
   const activeProjectId = activeProjectIdFromPath(pathname);
@@ -77,12 +82,18 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
   const teamsRootActive = pathname === "/teams";
 
   const sortedTeams = useMemo(
-    () => [...teams].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    () =>
+      [...teams].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      ),
     [teams],
   );
 
   const activeTeam = useMemo(
-    () => (activeTeamId ? sortedTeams.find((t) => t.id === activeTeamId) ?? null : null),
+    () =>
+      activeTeamId
+        ? (sortedTeams.find((t) => t.id === activeTeamId) ?? null)
+        : null,
     [activeTeamId, sortedTeams],
   );
 
@@ -145,7 +156,10 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <nav className="flex-1 space-y-5 p-3 sm:p-4" aria-label="Main navigation">
+        <nav
+          className="flex-1 space-y-5 p-3 sm:p-4"
+          aria-label="Main navigation"
+        >
           <div>
             <p className={sidebarSectionLabel}>Workspace</p>
             <ul className="space-y-0.5">
@@ -153,7 +167,10 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                 <NextLink
                   href="/dashboard"
                   onClick={onItemClick}
-                  className={cn(sidebarNavRow, dashboardActive ? sidebarNavActive : sidebarNavInactive)}
+                  className={cn(
+                    sidebarNavRow,
+                    dashboardActive ? sidebarNavActive : sidebarNavInactive,
+                  )}
                   aria-current={dashboardActive ? "page" : undefined}
                 >
                   Dashboard
@@ -169,7 +186,10 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                 <NextLink
                   href="/teams"
                   onClick={onItemClick}
-                  className={cn(sidebarNavRow, teamsRootActive ? sidebarNavActive : sidebarNavInactive)}
+                  className={cn(
+                    sidebarNavRow,
+                    teamsRootActive ? sidebarNavActive : sidebarNavInactive,
+                  )}
                   aria-current={teamsRootActive ? "page" : undefined}
                 >
                   All teams
@@ -183,14 +203,20 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                       type="button"
                       className={cn(
                         "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-[var(--sp-radius-lg)] border border-border/90 bg-surface px-2.5 py-2 text-left text-sm font-medium text-foreground shadow-[var(--sp-shadow-sm)] transition-all duration-150 hover:border-border-hover hover:bg-surface-hover hover:shadow-[var(--sp-shadow-md)]",
-                        activeTeam && !teamsRootActive && "border-brand-blue/20 ring-1 ring-brand-blue/[0.08]",
-                        teamPickerOpen && "border-brand-blue/25 ring-1 ring-brand-blue/10",
+                        activeTeam &&
+                          !teamsRootActive &&
+                          "border-brand-blue/20 ring-1 ring-brand-blue/[0.08]",
+                        teamPickerOpen &&
+                          "border-brand-blue/25 ring-1 ring-brand-blue/10",
                       )}
                       aria-label="Choose or switch team"
                       aria-expanded={teamPickerOpen}
                       aria-haspopup="listbox"
                       aria-controls="workspace-team-picker"
-                      onClick={() => { setTeamPickerOpen((o) => !o); setSettingsPopoverOpen(false); }}
+                      onClick={() => {
+                        setTeamPickerOpen((o) => !o);
+                        setSettingsPopoverOpen(false);
+                      }}
                     >
                       <Avatar
                         fallback={teamInitial(activeTeam?.name ?? "Team")}
@@ -202,13 +228,20 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                       </span>
                       <svg
                         viewBox="0 0 24 24"
-                        className={cn("h-4 w-4 shrink-0 text-muted transition-transform", teamPickerOpen && "rotate-180")}
+                        className={cn(
+                          "h-4 w-4 shrink-0 text-muted transition-transform",
+                          teamPickerOpen && "rotate-180",
+                        )}
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="2"
                         aria-hidden="true"
                       >
-                        <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                        <path
+                          d="M6 9l6 6 6-6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
                       </svg>
                     </button>
 
@@ -217,14 +250,27 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                         type="button"
                         aria-label="Team settings"
                         title="Team settings"
-                        onClick={() => { setSettingsPopoverOpen((o) => !o); setTeamPickerOpen(false); }}
+                        onClick={() => {
+                          setSettingsPopoverOpen((o) => !o);
+                          setTeamPickerOpen(false);
+                        }}
                         className={cn(
                           "flex shrink-0 cursor-pointer items-center justify-center rounded-[var(--sp-radius-md)] border border-border/90 bg-surface p-1.5 text-muted shadow-[var(--sp-shadow-sm)] transition-all duration-150 hover:border-border-hover hover:bg-surface-hover hover:text-foreground hover:shadow-[var(--sp-shadow-md)]",
-                          settingsPopoverOpen && "border-brand-blue/25 ring-1 ring-brand-blue/10 text-foreground",
+                          settingsPopoverOpen &&
+                            "border-brand-blue/25 ring-1 ring-brand-blue/10 text-foreground",
                         )}
                       >
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
-                          <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                        <svg
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="h-4 w-4"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                            clipRule="evenodd"
+                          />
                         </svg>
                       </button>
                     ) : null}
@@ -233,13 +279,22 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                   {settingsPopoverOpen && activeTeam ? (
                     <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-[var(--sp-radius-lg)] border border-border/90 bg-surface py-1 shadow-[var(--sp-shadow-lg)] ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
                       {[
-                        { label: "Settings", href: `/teams/${activeTeam.id}/settings` },
-                        { label: "Usage", href: `/teams/${activeTeam.id}/usage` },
+                        {
+                          label: "Settings",
+                          href: `/teams/${activeTeam.id}/settings`,
+                        },
+                        {
+                          label: "Usage",
+                          href: `/teams/${activeTeam.id}/usage`,
+                        },
                       ].map(({ label, href }) => (
                         <NextLink
                           key={label}
                           href={href}
-                          onClick={() => { setSettingsPopoverOpen(false); onItemClick?.(); }}
+                          onClick={() => {
+                            setSettingsPopoverOpen(false);
+                            onItemClick?.();
+                          }}
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted hover:bg-surface-hover hover:text-foreground"
                         >
                           {label}
@@ -271,7 +326,11 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                             )}
                             onClick={pickTeam}
                           >
-                            <Avatar fallback={teamInitial(team.name)} size="sm" className="shrink-0" />
+                            <Avatar
+                              fallback={teamInitial(team.name)}
+                              size="sm"
+                              className="shrink-0"
+                            />
                             <span className="truncate">{team.name}</span>
                           </NextLink>
                         );
@@ -280,7 +339,9 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                   ) : null}
                 </li>
               ) : (
-                <li className="px-2.5 py-2 text-sm text-muted">No teams yet — create one from All teams.</li>
+                <li className="px-2.5 py-2 text-sm text-muted">
+                  No teams yet — create one from All teams.
+                </li>
               )}
 
               {activeTeam ? (
@@ -291,7 +352,9 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                     role="list"
                   >
                     {projectsForSidebar.length === 0 ? (
-                      <li className="px-2.5 py-2 text-sm text-muted">No projects yet</li>
+                      <li className="px-2.5 py-2 text-sm text-muted">
+                        No projects yet
+                      </li>
                     ) : (
                       projectsForSidebar.map((p) => {
                         const href = `/teams/${activeTeam.id}/projects/${p.id}`;
@@ -304,7 +367,9 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                               className={cn(
                                 sidebarNavRow,
                                 "min-w-0 truncate",
-                                projectActive ? sidebarNavActive : sidebarNavInactive,
+                                projectActive
+                                  ? sidebarNavActive
+                                  : sidebarNavInactive,
                               )}
                               aria-current={projectActive ? "page" : undefined}
                             >
@@ -315,7 +380,6 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                       })
                     )}
                   </ul>
-
                 </li>
               ) : null}
             </ul>
@@ -328,7 +392,10 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
                 <NextLink
                   href="/account"
                   onClick={onItemClick}
-                  className={cn(sidebarNavRow, accountActive ? sidebarNavActive : sidebarNavInactive)}
+                  className={cn(
+                    sidebarNavRow,
+                    accountActive ? sidebarNavActive : sidebarNavInactive,
+                  )}
                   aria-current={accountActive ? "page" : undefined}
                 >
                   Account
@@ -342,8 +409,13 @@ export function WorkspaceSidebar({ teams, email, onItemClick, className }: Works
       {email ? (
         <div className="border-t border-border/80 p-3">
           <div className="rounded-[var(--sp-radius-lg)] border border-border/70 bg-surface px-3 py-2.5 shadow-[var(--sp-shadow-sm)]">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Signed in</p>
-            <p className="mt-1 truncate text-xs text-foreground/90" title={email}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+              Signed in
+            </p>
+            <p
+              className="mt-1 truncate text-xs text-foreground/90"
+              title={email}
+            >
               {email}
             </p>
           </div>

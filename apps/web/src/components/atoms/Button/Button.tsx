@@ -2,8 +2,10 @@ import { type ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
 
 const variantStyles = {
-  primary: "bg-gradient-accent text-white shadow-md hover:shadow-lg hover:brightness-110",
-  secondary: "bg-surface text-foreground border border-border hover:bg-surface-hover hover:border-border-hover shadow-sm",
+  primary:
+    "bg-gradient-accent text-white shadow-md hover:shadow-lg hover:brightness-110",
+  secondary:
+    "bg-surface text-foreground border border-border hover:bg-surface-hover hover:border-border-hover shadow-sm",
   ghost: "bg-transparent text-foreground hover:bg-surface-hover",
   danger: "bg-error text-white hover:brightness-110 shadow-sm",
 } as const;
@@ -60,8 +62,19 @@ function Spinner() {
       aria-hidden="true"
       data-testid="button-spinner"
     >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
     </svg>
   );
 }

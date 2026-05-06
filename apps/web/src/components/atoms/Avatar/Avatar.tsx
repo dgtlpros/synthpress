@@ -16,7 +16,14 @@ export interface AvatarProps extends HTMLAttributes<HTMLDivElement> {
   size?: AvatarSize;
 }
 
-export function Avatar({ src, alt, fallback, size = "md", className, ...props }: AvatarProps) {
+export function Avatar({
+  src,
+  alt,
+  fallback,
+  size = "md",
+  className,
+  ...props
+}: AvatarProps) {
   return (
     <div
       className={cn(
@@ -26,9 +33,14 @@ export function Avatar({ src, alt, fallback, size = "md", className, ...props }:
       )}
       {...props}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       {src ? (
-        <img src={src} alt={alt || fallback} className="h-full w-full object-cover" />
+        // User-provided URLs; next/image remotePatterns would be broader than we want here.
+        // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs
+        <img
+          src={src}
+          alt={alt || fallback}
+          className="h-full w-full object-cover"
+        />
       ) : (
         <span aria-label={alt || fallback}>{fallback}</span>
       )}

@@ -60,10 +60,18 @@ export function Modal({
     >
       <div className="border-b border-border px-6 py-4">
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-        {description ? <p className="mt-1 text-sm text-muted">{description}</p> : null}
+        {description ? (
+          <p className="mt-1 text-sm text-muted">{description}</p>
+        ) : null}
       </div>
-      <div className="max-h-[min(70vh,32rem)] overflow-y-auto px-6 py-4">{children}</div>
-      {footer ? <div className="flex flex-wrap justify-end gap-3 border-t border-border px-6 py-4">{footer}</div> : null}
+      <div className="max-h-[min(70vh,32rem)] overflow-y-auto px-6 py-4">
+        {children}
+      </div>
+      {footer ? (
+        <div className="flex flex-wrap justify-end gap-3 border-t border-border px-6 py-4">
+          {footer}
+        </div>
+      ) : null}
     </dialog>
   );
 }

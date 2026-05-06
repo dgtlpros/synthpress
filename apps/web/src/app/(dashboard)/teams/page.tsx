@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { listTeamsForUserWithMeta, teamListPlanLabel } from "@/services/team-list-service";
+import {
+  listTeamsForUserWithMeta,
+  teamListPlanLabel,
+} from "@/services/team-list-service";
 import {
   Card,
   CardContent,
@@ -30,23 +36,30 @@ export default async function TeamsPage() {
 
   const supabase = await createClient();
   const admin = createAdminClient();
-  const { owned, joined } = await listTeamsForUserWithMeta(user.id, supabase, admin);
+  const { owned, joined } = await listTeamsForUserWithMeta(
+    user.id,
+    supabase,
+    admin,
+  );
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Teams</h1>
         <p className="mt-2 max-w-2xl text-muted">
-          Teams group people together. Inside a team you create projects (each project is a
-          workspace for features like AI blogs). The team owner&apos;s subscription powers
-          everyone&apos;s features and member-triggered jobs spend the owner&apos;s tokens.
+          Teams group people together. Inside a team you create projects (each
+          project is a workspace for features like AI blogs). The team
+          owner&apos;s subscription powers everyone&apos;s features and
+          member-triggered jobs spend the owner&apos;s tokens.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>New team</CardTitle>
-          <CardDescription>You can belong to multiple teams. You will be the owner.</CardDescription>
+          <CardDescription>
+            You can belong to multiple teams. You will be the owner.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <CreateTeamForm />
@@ -54,12 +67,19 @@ export default async function TeamsPage() {
       </Card>
 
       <section aria-labelledby="teams-owned-heading" className="space-y-4">
-        <h2 id="teams-owned-heading" className="text-lg font-semibold text-foreground">
+        <h2
+          id="teams-owned-heading"
+          className="text-lg font-semibold text-foreground"
+        >
           Teams you own
-          <span className="ml-2 text-sm font-normal text-muted">({owned.length})</span>
+          <span className="ml-2 text-sm font-normal text-muted">
+            ({owned.length})
+          </span>
         </h2>
         {owned.length === 0 ? (
-          <p className="text-sm text-muted">Create a team above to get started.</p>
+          <p className="text-sm text-muted">
+            Create a team above to get started.
+          </p>
         ) : (
           <ul className="space-y-2" role="list">
             {owned.map((team) => (
@@ -83,13 +103,19 @@ export default async function TeamsPage() {
       </section>
 
       <section aria-labelledby="teams-joined-heading" className="space-y-4">
-        <h2 id="teams-joined-heading" className="text-lg font-semibold text-foreground">
+        <h2
+          id="teams-joined-heading"
+          className="text-lg font-semibold text-foreground"
+        >
           Teams you joined
-          <span className="ml-2 text-sm font-normal text-muted">({joined.length})</span>
+          <span className="ml-2 text-sm font-normal text-muted">
+            ({joined.length})
+          </span>
         </h2>
         {joined.length === 0 ? (
           <p className="text-sm text-muted">
-            You haven&apos;t joined any teams yet. Ask a team owner to send you an invite.
+            You haven&apos;t joined any teams yet. Ask a team owner to send you
+            an invite.
           </p>
         ) : (
           <ul className="space-y-2" role="list">

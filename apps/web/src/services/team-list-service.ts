@@ -40,7 +40,8 @@ function ownerInitialsFromDisplay(ownerName: string, teamName: string): string {
   }
   if (n.includes("@")) return n.charAt(0).toUpperCase();
   const parts = n.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+  if (parts.length >= 2)
+    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
   const compact = n.slice(0, 2).toUpperCase();
   /* v8 ignore next */
   return compact || "?";
@@ -126,7 +127,9 @@ export async function listTeamsForUserWithMeta(
     }
   }
 
-  const planResults = await Promise.all(teams.map((t) => getTeamPlan(t.id, admin)));
+  const planResults = await Promise.all(
+    teams.map((t) => getTeamPlan(t.id, admin)),
+  );
 
   const entries: TeamListEntry[] = teams.map((team, i) => {
     const myRole = roleByTeamId.get(team.id)!;
@@ -163,8 +166,12 @@ export async function listTeamsForUserWithMeta(
     };
   });
 
-  const owned = entries.filter((e) => e.myRole === "owner").sort(/* v8 ignore next */ (a, b) => a.name.localeCompare(b.name));
-  const joined = entries.filter((e) => e.myRole !== "owner").sort(/* v8 ignore next */ (a, b) => a.name.localeCompare(b.name));
+  const owned = entries
+    .filter((e) => e.myRole === "owner")
+    .sort(/* v8 ignore next */ (a, b) => a.name.localeCompare(b.name));
+  const joined = entries
+    .filter((e) => e.myRole !== "owner")
+    .sort(/* v8 ignore next */ (a, b) => a.name.localeCompare(b.name));
 
   return { owned, joined };
 }

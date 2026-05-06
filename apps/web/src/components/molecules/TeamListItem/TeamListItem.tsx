@@ -1,7 +1,10 @@
 import NextLink from "next/link";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/atoms/Avatar";
-import { PlanBadge, type SubscriptionStatus } from "@/components/atoms/PlanBadge";
+import {
+  PlanBadge,
+  type SubscriptionStatus,
+} from "@/components/atoms/PlanBadge";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
 
 const KNOWN_STATUSES: SubscriptionStatus[] = [
@@ -16,10 +19,15 @@ const KNOWN_STATUSES: SubscriptionStatus[] = [
   "free",
 ];
 
-function normalizePlanStatus(status: string | null | undefined, hasPlan: boolean): SubscriptionStatus {
+function normalizePlanStatus(
+  status: string | null | undefined,
+  hasPlan: boolean,
+): SubscriptionStatus {
   if (!hasPlan) return "free";
   if (!status) return "active";
-  return (KNOWN_STATUSES as string[]).includes(status) ? (status as SubscriptionStatus) : "active";
+  return (KNOWN_STATUSES as string[]).includes(status)
+    ? (status as SubscriptionStatus)
+    : "active";
 }
 
 export interface TeamListItemProps {
@@ -65,9 +73,16 @@ export function TeamListItem({
       )}
     >
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <Avatar src={ownerAvatarUrl ?? undefined} alt="" fallback={ownerInitials} size="sm" />
+        <Avatar
+          src={ownerAvatarUrl ?? undefined}
+          alt=""
+          fallback={ownerInitials}
+          size="sm"
+        />
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+          <p className="truncate text-sm font-semibold text-foreground">
+            {name}
+          </p>
           <p className="truncate text-xs text-muted">{ownerLabel}</p>
         </div>
       </div>

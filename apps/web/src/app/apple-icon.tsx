@@ -14,8 +14,7 @@ const BODY_GRADIENT =
   "linear-gradient(135deg, #4C19DB 0%, #2467FF 50%, #16D8EF 100%)";
 const VISOR_GRADIENT =
   "radial-gradient(circle at 50% 35%, #171C5F 0%, #090E3B 55%, #03051E 100%)";
-const ANTENNA_GRADIENT =
-  "linear-gradient(to bottom, #ED42F4 0%, #1842DE 100%)";
+const ANTENNA_GRADIENT = "linear-gradient(to bottom, #ED42F4 0%, #1842DE 100%)";
 const ORB_GRADIENT =
   "radial-gradient(circle at 40% 40%, #FF7BFF 0%, #D72DFF 50%, #414BFF 100%)";
 const LEFT_EYE_GRADIENT =
@@ -25,79 +24,77 @@ const RIGHT_EYE_GRADIENT =
 
 export default function AppleIcon() {
   return new ImageResponse(
-    (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        background: BODY_GRADIENT,
+      }}
+    >
+      {/* Orb */}
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          position: "absolute",
+          top: 6,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          background: ORB_GRADIENT,
+        }}
+      />
+      {/* Antenna */}
+      <div
+        style={{
+          position: "absolute",
+          top: 26,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 8,
+          height: 18,
+          borderRadius: 4,
+          background: ANTENNA_GRADIENT,
+        }}
+      />
+      {/* Visor band */}
+      <div
+        style={{
+          position: "absolute",
+          top: 70,
+          left: 26,
+          right: 26,
+          height: 52,
+          borderRadius: 26,
+          background: VISOR_GRADIENT,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          position: "relative",
-          background: BODY_GRADIENT,
+          gap: 36,
         }}
       >
-        {/* Orb */}
         <div
           style={{
-            position: "absolute",
-            top: 6,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            background: ORB_GRADIENT,
-          }}
-        />
-        {/* Antenna */}
-        <div
-          style={{
-            position: "absolute",
-            top: 26,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 8,
+            width: 18,
             height: 18,
-            borderRadius: 4,
-            background: ANTENNA_GRADIENT,
+            borderRadius: 9,
+            background: LEFT_EYE_GRADIENT,
           }}
         />
-        {/* Visor band */}
         <div
           style={{
-            position: "absolute",
-            top: 70,
-            left: 26,
-            right: 26,
-            height: 52,
-            borderRadius: 26,
-            background: VISOR_GRADIENT,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 36,
+            width: 18,
+            height: 18,
+            borderRadius: 9,
+            background: RIGHT_EYE_GRADIENT,
           }}
-        >
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 9,
-              background: LEFT_EYE_GRADIENT,
-            }}
-          />
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 9,
-              background: RIGHT_EYE_GRADIENT,
-            }}
-          />
-        </div>
+        />
       </div>
-    ),
+    </div>,
     { ...size },
   );
 }

@@ -22,20 +22,33 @@ describe("BillingNotice", () => {
       />,
     );
 
-    expect(screen.getByTestId("billing-notice")).toHaveAttribute("data-variant", "warning");
-    expect(screen.getByText("Subscription is set to cancel")).toBeInTheDocument();
-    expect(screen.getByText("You'll keep access until June 5, 2026.")).toBeInTheDocument();
+    expect(screen.getByTestId("billing-notice")).toHaveAttribute(
+      "data-variant",
+      "warning",
+    );
+    expect(
+      screen.getByText("Subscription is set to cancel"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("You'll keep access until June 5, 2026."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 
   it("supports the danger variant", () => {
     render(<BillingNotice variant="danger" title="Payment failed" />);
-    expect(screen.getByTestId("billing-notice")).toHaveAttribute("data-variant", "danger");
+    expect(screen.getByTestId("billing-notice")).toHaveAttribute(
+      "data-variant",
+      "danger",
+    );
   });
 
   it("supports the success variant", () => {
     render(<BillingNotice variant="success" title="Subscription resumed" />);
-    expect(screen.getByTestId("billing-notice")).toHaveAttribute("data-variant", "success");
+    expect(screen.getByTestId("billing-notice")).toHaveAttribute(
+      "data-variant",
+      "success",
+    );
   });
 
   it("renders without a description when none is provided", () => {

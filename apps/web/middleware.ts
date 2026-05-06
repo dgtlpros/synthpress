@@ -12,7 +12,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  const isProtected = protectedRoutes.some((route) => pathname.startsWith(route));
+  const isProtected = protectedRoutes.some((route) =>
+    pathname.startsWith(route),
+  );
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
 
   const { user, supabaseResponse } = await updateSession(request, {

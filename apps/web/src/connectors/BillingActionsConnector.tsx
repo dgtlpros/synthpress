@@ -23,18 +23,30 @@ export function BillingActionsConnector({
   label,
   className,
 }: BillingActionsConnectorProps) {
-  const { openPortal, isOpeningPortal, portalError, resume, isResuming, resumeError } =
-    useBillingActions();
+  const {
+    openPortal,
+    isOpeningPortal,
+    portalError,
+    resume,
+    isResuming,
+    resumeError,
+  } = useBillingActions();
 
   const buttonLabel = label ?? defaultLabels[mode];
-  const buttonVariant = variant ?? (mode === "resume" ? "primary" : "secondary");
+  const buttonVariant =
+    variant ?? (mode === "resume" ? "primary" : "secondary");
   const onClick = mode === "resume" ? resume : openPortal;
   const loading = mode === "resume" ? isResuming : isOpeningPortal;
   const error = mode === "resume" ? resumeError : portalError;
 
   return (
     <div className={className}>
-      <Button type="button" variant={buttonVariant} onClick={onClick} loading={loading}>
+      <Button
+        type="button"
+        variant={buttonVariant}
+        onClick={onClick}
+        loading={loading}
+      >
         {buttonLabel}
       </Button>
       {error && (

@@ -35,11 +35,16 @@ export function PriceTag({
 }: PriceTagProps) {
   const styles = sizeStyles[size];
   return (
-    <div className={cn("inline-flex items-baseline gap-1", className)} {...props}>
+    <div
+      className={cn("inline-flex items-baseline gap-1", className)}
+      {...props}
+    >
       <span className={cn("font-bold text-foreground", styles.amount)}>
         {formatAmount(cents, currency)}
       </span>
-      {period && <span className={cn("text-muted", styles.period)}>{period}</span>}
+      {period && (
+        <span className={cn("text-muted", styles.period)}>{period}</span>
+      )}
     </div>
   );
 }

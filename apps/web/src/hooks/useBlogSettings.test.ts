@@ -34,13 +34,18 @@ describe("useBlogSettings", () => {
       result.current.renameBlog("New Name");
     });
 
-    expect(mockUpdateBlog).toHaveBeenCalledWith("t1", "p1", "b1", { name: "New Name" });
+    expect(mockUpdateBlog).toHaveBeenCalledWith("t1", "p1", "b1", {
+      name: "New Name",
+    });
     expect(mockRefresh).toHaveBeenCalledOnce();
     expect(result.current.renameError).toBeNull();
   });
 
   it("sets renameError on failure", async () => {
-    mockUpdateBlog.mockResolvedValue({ data: null, error: "Blog name is required." });
+    mockUpdateBlog.mockResolvedValue({
+      data: null,
+      error: "Blog name is required.",
+    });
 
     const { result } = renderHook(() =>
       useBlogSettings({ teamId: "t1", projectId: "p1", blogId: "b1" }),

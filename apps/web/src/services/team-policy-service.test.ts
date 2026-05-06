@@ -16,7 +16,10 @@ import {
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 
-function makeClient(roleResult: { data: TeamRole | null; error: { message: string } | null }) {
+function makeClient(roleResult: {
+  data: TeamRole | null;
+  error: { message: string } | null;
+}) {
   return {
     rpc: vi.fn().mockResolvedValue(roleResult),
   };
@@ -55,7 +58,9 @@ describe("getUserTeamRole", () => {
   it("throws on supabase error", async () => {
     const client = makeClient({ data: null, error: { message: "boom" } });
     mockedCreateAdmin.mockReturnValue(client as never);
-    await expect(getUserTeamRole("t1", "u1")).rejects.toEqual({ message: "boom" });
+    await expect(getUserTeamRole("t1", "u1")).rejects.toEqual({
+      message: "boom",
+    });
   });
 });
 
@@ -95,14 +100,20 @@ describe("assertCan", () => {
     withRole("admin");
     await expect(assertCan("t1", "u1", "invite_member")).resolves.toBe("admin");
     withRole("admin");
-    await expect(assertCan("t1", "u1", "delete_team")).rejects.toBeInstanceOf(TeamPermissionError);
+    await expect(assertCan("t1", "u1", "delete_team")).rejects.toBeInstanceOf(
+      TeamPermissionError,
+    );
   });
 
   it("member can consume_team_tokens but cannot remove_member", async () => {
     withRole("member");
-    await expect(assertCan("t1", "u1", "consume_team_tokens")).resolves.toBe("member");
+    await expect(assertCan("t1", "u1", "consume_team_tokens")).resolves.toBe(
+      "member",
+    );
     withRole("member");
-    await expect(assertCan("t1", "u1", "remove_member")).rejects.toBeInstanceOf(TeamPermissionError);
+    await expect(assertCan("t1", "u1", "remove_member")).rejects.toBeInstanceOf(
+      TeamPermissionError,
+    );
   });
 });
 

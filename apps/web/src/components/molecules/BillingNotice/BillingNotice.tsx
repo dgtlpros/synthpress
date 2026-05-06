@@ -65,7 +65,9 @@ export function BillingNotice({
         {icon ?? <DefaultIcon variant={variant} />}
       </div>
       <div className="flex-1 space-y-1">
-        <h2 className={cn("text-base font-semibold sm:text-lg", config.title)}>{title}</h2>
+        <h2 className={cn("text-base font-semibold sm:text-lg", config.title)}>
+          {title}
+        </h2>
         {description && (
           <p className="text-sm text-muted leading-relaxed">{description}</p>
         )}
@@ -100,13 +102,7 @@ function DefaultIcon({ variant }: { variant: BillingNoticeVariant }) {
           strokeLinecap="round"
         />
         <circle cx="10" cy="14.5" r="1" fill="currentColor" />
-        <circle
-          cx="10"
-          cy="10"
-          r="8"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        />
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     );
   }

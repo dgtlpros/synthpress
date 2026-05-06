@@ -43,9 +43,14 @@ const mockedGrantTokens = vi.mocked(grantTokens);
 const mockedRecordRefund = vi.mocked(recordTokenRefund);
 const mockedRecordEvent = vi.mocked(recordSubscriptionEvent);
 
-type ChainResult<T> = { data: T; error: { code?: string; message?: string } | null };
+type ChainResult<T> = {
+  data: T;
+  error: { code?: string; message?: string } | null;
+};
 
-function makeChain(initial: ChainResult<unknown> = { data: null, error: null }) {
+function makeChain(
+  initial: ChainResult<unknown> = { data: null, error: null },
+) {
   // Mirror Supabase JS's PostgrestBuilder: every filter method returns the
   // same chain so callers can compose, AND the chain itself is thenable so
   // `await chain.filter(...)` resolves directly. Terminal helpers
@@ -76,7 +81,9 @@ interface MockClient {
   __tables: Record<string, ReturnType<typeof makeChain>>;
 }
 
-function makeClient(seed: Record<string, ChainResult<unknown>> = {}): MockClient {
+function makeClient(
+  seed: Record<string, ChainResult<unknown>> = {},
+): MockClient {
   const tables: Record<string, ReturnType<typeof makeChain>> = {};
   for (const [name, result] of Object.entries(seed)) {
     tables[name] = makeChain(result);
@@ -97,11 +104,17 @@ beforeEach(() => {
 describe("getOrCreateStripeCustomer", () => {
   it("returns existing customer id without calling Stripe", async () => {
     const client = makeClient({
-      stripe_customers: { data: { stripe_customer_id: "cus_existing" }, error: null },
+      stripe_customers: {
+        data: { stripe_customer_id: "cus_existing" },
+        error: null,
+      },
     });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    const id = await getOrCreateStripeCustomer({ userId: "u1", email: "u@test.com" });
+    const id = await getOrCreateStripeCustomer({
+      userId: "u1",
+      email: "u@test.com",
+    });
     expect(id).toBe("cus_existing");
     expect(mockedFindOrCreate).not.toHaveBeenCalled();
   });
@@ -113,9 +126,15 @@ describe("getOrCreateStripeCustomer", () => {
     mockedCreateAdmin.mockReturnValue(client as never);
     mockedFindOrCreate.mockResolvedValue("cus_new");
 
-    const id = await getOrCreateStripeCustomer({ userId: "u1", email: "u@test.com" });
+    const id = await getOrCreateStripeCustomer({
+      userId: "u1",
+      email: "u@test.com",
+    });
     expect(id).toBe("cus_new");
-    expect(mockedFindOrCreate).toHaveBeenCalledWith({ email: "u@test.com", userId: "u1" });
+    expect(mockedFindOrCreate).toHaveBeenCalledWith({
+      email: "u@test.com",
+      userId: "u1",
+    });
     expect(client.__tables.stripe_customers.insert).toHaveBeenCalledWith({
       user_id: "u1",
       stripe_customer_id: "cus_new",
@@ -132,7 +151,10 @@ describe("getOrCreateStripeCustomer", () => {
     mockedCreateAdmin.mockReturnValue(client as never);
     mockedFindOrCreate.mockResolvedValue("cus_race");
 
-    const id = await getOrCreateStripeCustomer({ userId: "u1", email: "u@test.com" });
+    const id = await getOrCreateStripeCustomer({
+      userId: "u1",
+      email: "u@test.com",
+    });
     expect(id).toBe("cus_race");
   });
 
@@ -173,10 +195,12 @@ describe("getActiveSubscription", () => {
 
     const result = await getActiveSubscription("u1");
     expect(result).toEqual(sub);
-    expect(client.__tables.subscriptions.in).toHaveBeenCalledWith(
-      "status",
-      ["active", "trialing", "past_due", "incomplete"],
-    );
+    expect(client.__tables.subscriptions.in).toHaveBeenCalledWith("status", [
+      "active",
+      "trialing",
+      "past_due",
+      "incomplete",
+    ]);
   });
 
   it("returns null when no active sub", async () => {
@@ -194,7 +218,9 @@ describe("getActiveSubscription", () => {
       subscriptions: { data: null, error: { message: "boom" } },
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    await expect(getActiveSubscription("u1")).rejects.toEqual({ message: "boom" });
+    await expect(getActiveSubscription("u1")).rejects.toEqual({
+      message: "boom",
+    });
   });
 });
 
@@ -236,7 +262,10 @@ describe("getCurrentPlan", () => {
     const sub = { id: "s1", plan_key: "pro" };
     const client = makeClient();
     client.__tables.subscriptions = makeChain({ data: sub, error: null });
-    client.__tables.plans = makeChain({ data: null, error: { message: "boom" } });
+    client.__tables.plans = makeChain({
+      data: null,
+      error: { message: "boom" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(getCurrentPlan("u1")).rejects.toEqual({ message: "boom" });
@@ -279,14 +308,20 @@ describe("getPlanByStripePriceId / getPlanByKey", () => {
   });
 
   it("propagates errors from getPlanByStripePriceId", async () => {
-    const client = makeClient({ plans: { data: null, error: { message: "boom" } } });
+    const client = makeClient({
+      plans: { data: null, error: { message: "boom" } },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    await expect(getPlanByStripePriceId("p1")).rejects.toEqual({ message: "boom" });
+    await expect(getPlanByStripePriceId("p1")).rejects.toEqual({
+      message: "boom",
+    });
   });
 
   it("propagates errors from getPlanByKey", async () => {
-    const client = makeClient({ plans: { data: null, error: { message: "boom" } } });
+    const client = makeClient({
+      plans: { data: null, error: { message: "boom" } },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(getPlanByKey("p1")).rejects.toEqual({ message: "boom" });
@@ -400,7 +435,10 @@ describe("syncSubscriptionFromStripe", () => {
       items: {
         data: [
           {
-            price: { id: "price_custom_unknown", recurring: { interval: "month" } },
+            price: {
+              id: "price_custom_unknown",
+              recurring: { interval: "month" },
+            },
             current_period_start: 1700000000,
             current_period_end: 1702592000,
           },
@@ -419,7 +457,9 @@ describe("syncSubscriptionFromStripe", () => {
   it("returns null when supabase_user_id metadata is missing", async () => {
     const sub = { ...(baseStripeSub as Record<string, unknown>), metadata: {} };
     mockedCreateAdmin.mockReturnValue(makeClient() as never);
-    const result = await syncSubscriptionFromStripe({ stripeSub: sub as never });
+    const result = await syncSubscriptionFromStripe({
+      stripeSub: sub as never,
+    });
     expect(result).toBeNull();
   });
 
@@ -432,7 +472,9 @@ describe("syncSubscriptionFromStripe", () => {
     client.__tables.plans = makeChain({ data: null, error: null });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    const result = await syncSubscriptionFromStripe({ stripeSub: sub as never });
+    const result = await syncSubscriptionFromStripe({
+      stripeSub: sub as never,
+    });
     expect(result).toBeNull();
   });
 
@@ -462,7 +504,9 @@ describe("syncSubscriptionFromStripe", () => {
     client.__tables.plans = makeChain({ data: null, error: null });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    const result = await syncSubscriptionFromStripe({ stripeSub: sub as never });
+    const result = await syncSubscriptionFromStripe({
+      stripeSub: sub as never,
+    });
     expect(result).toBeNull();
   });
 
@@ -560,15 +604,19 @@ describe("handleCheckoutCompleted", () => {
 
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(retrieve).toHaveBeenCalledWith("sub_1");
-    expect(mockedGrantTokens).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "u1",
-      amount: 5000,
-      type: "subscription_grant",
-      stripeEventId: "evt_1",
-    }));
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 5000,
+        type: "subscription_grant",
+        stripeEventId: "evt_1",
+      }),
+    );
   });
 
   it("grants 12x the monthly tokens for an annual subscription on initial checkout", async () => {
@@ -587,14 +635,20 @@ describe("handleCheckoutCompleted", () => {
         object: {
           mode: "subscription",
           subscription: "sub_y",
-          metadata: { supabase_user_id: "u1", plan_key: "pro", interval: "year" },
+          metadata: {
+            supabase_user_id: "u1",
+            plan_key: "pro",
+            interval: "year",
+          },
         },
       },
     };
 
     const retrieve = vi.fn().mockResolvedValue(annualStripeSub as never);
 
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -628,7 +682,9 @@ describe("handleCheckoutCompleted", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(retrieve).toHaveBeenCalledWith("sub_2");
   });
 
@@ -654,12 +710,14 @@ describe("handleCheckoutCompleted", () => {
 
     await handleCheckoutCompleted(event as never);
 
-    expect(mockedGrantTokens).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "u1",
-      amount: 2000,
-      type: "top_up_purchase",
-      stripeEventId: "evt_2",
-    }));
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 2000,
+        type: "top_up_purchase",
+        stripeEventId: "evt_2",
+      }),
+    );
   });
 
   it("ignores events without supabase_user_id", async () => {
@@ -743,7 +801,8 @@ describe("handleCheckoutCompleted", () => {
       ...makeChain(),
       maybeSingle: vi.fn().mockImplementation(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve({ data: { key: "pro" }, error: null });
+        if (callCount === 1)
+          return Promise.resolve({ data: { key: "pro" }, error: null });
         return Promise.resolve({ data: null, error: null });
       }),
     } as never;
@@ -870,7 +929,9 @@ describe("handleCheckoutCompleted - extra coverage", () => {
     };
 
     const retrieve = vi.fn().mockResolvedValue(weeklyStripeSub as never);
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -905,7 +966,9 @@ describe("handleCheckoutCompleted - extra coverage", () => {
       },
     };
     const retrieve = vi.fn().mockResolvedValue(subWithStringInvoice as never);
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -939,11 +1002,15 @@ describe("handleCheckoutCompleted - extra coverage", () => {
       },
     };
     const retrieve = vi.fn().mockResolvedValue(subWithObjectInvoice as never);
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ stripe_invoice_id: "in_obj_initial" }),
+        metadata: expect.objectContaining({
+          stripe_invoice_id: "in_obj_initial",
+        }),
       }),
     );
   });
@@ -973,7 +1040,9 @@ describe("handleCheckoutCompleted - extra coverage", () => {
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ stripe_payment_intent_id: "pi_obj" }),
+        metadata: expect.objectContaining({
+          stripe_payment_intent_id: "pi_obj",
+        }),
       }),
     );
   });
@@ -1003,7 +1072,9 @@ describe("handleCheckoutCompleted - extra coverage", () => {
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ stripe_payment_intent_id: "pi_str" }),
+        metadata: expect.objectContaining({
+          stripe_payment_intent_id: "pi_str",
+        }),
       }),
     );
   });
@@ -1043,7 +1114,9 @@ describe("handleCheckoutCompleted - extra coverage", () => {
     };
 
     const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
-    await handleCheckoutCompleted(event as never, { retrieveSubscription: retrieve });
+    await handleCheckoutCompleted(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 5000 }),
@@ -1464,15 +1537,19 @@ describe("handleInvoicePaymentSucceeded", () => {
 
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
-    expect(mockedGrantTokens).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "u1",
-      amount: 5000,
-      type: "subscription_grant",
-      stripeEventId: "evt_renew",
-      description: expect.stringContaining("renewal"),
-    }));
+    expect(mockedGrantTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        amount: 5000,
+        type: "subscription_grant",
+        stripeEventId: "evt_renew",
+        description: expect.stringContaining("renewal"),
+      }),
+    );
   });
 
   it("grants 12x monthly tokens on the annual renewal cycle", async () => {
@@ -1497,7 +1574,9 @@ describe("handleInvoicePaymentSucceeded", () => {
 
     const retrieve = vi.fn().mockResolvedValue(annualStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1529,13 +1608,19 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(retrieve).toHaveBeenCalledWith("sub_obj");
   });
 
   it("skips when billing_reason is unrelated (subscription_create / manual / threshold)", async () => {
     mockedCreateAdmin.mockReturnValue(makeClient() as never);
-    for (const reason of ["subscription_create", "manual", "subscription_threshold"]) {
+    for (const reason of [
+      "subscription_create",
+      "manual",
+      "subscription_threshold",
+    ]) {
       const event = {
         id: `evt_${reason}`,
         type: "invoice.payment_succeeded",
@@ -1555,7 +1640,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     const event = {
       id: "evt_nosub",
       type: "invoice.payment_succeeded",
-      data: { object: { billing_reason: "subscription_cycle", subscription: null } },
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: null },
+      },
     };
     await handleInvoicePaymentSucceeded(event as never, {
       retrieveSubscription: vi.fn(),
@@ -1571,7 +1658,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     const event = {
       id: "evt_metaless",
       type: "invoice.payment_succeeded",
-      data: { object: { billing_reason: "subscription_cycle", subscription: "sub_1" } },
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: "sub_1" },
+      },
     };
     await handleInvoicePaymentSucceeded(event as never, {
       retrieveSubscription: vi.fn().mockResolvedValue({
@@ -1587,7 +1676,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     const event = {
       id: "evt_no_retrieve",
       type: "invoice.payment_succeeded",
-      data: { object: { billing_reason: "subscription_cycle", subscription: "sub_1" } },
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: "sub_1" },
+      },
     };
     await handleInvoicePaymentSucceeded(event as never);
     expect(mockedGrantTokens).not.toHaveBeenCalled();
@@ -1601,7 +1692,8 @@ describe("handleInvoicePaymentSucceeded", () => {
       ...makeChain(),
       maybeSingle: vi.fn().mockImplementation(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve({ data: { key: "pro" }, error: null });
+        if (callCount === 1)
+          return Promise.resolve({ data: { key: "pro" }, error: null });
         return Promise.resolve({ data: null, error: null });
       }),
     } as never;
@@ -1610,7 +1702,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     const event = {
       id: "evt_no_plan",
       type: "invoice.payment_succeeded",
-      data: { object: { billing_reason: "subscription_cycle", subscription: "sub_1" } },
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: "sub_1" },
+      },
     };
     await handleInvoicePaymentSucceeded(event as never, {
       retrieveSubscription: vi.fn().mockResolvedValue({
@@ -1669,7 +1763,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(upgradedSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(planLookups).toBeGreaterThan(0);
     expect(mockedGrantTokens).toHaveBeenCalledWith(
@@ -1732,7 +1828,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(annualScaleSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1773,7 +1871,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(mockedGrantTokens).not.toHaveBeenCalled();
   });
 
@@ -1804,7 +1904,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(mockedGrantTokens).not.toHaveBeenCalled();
   });
 
@@ -1834,7 +1936,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
         amount: 5000,
@@ -1873,7 +1977,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
     await expect(
-      handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve }),
+      handleInvoicePaymentSucceeded(event as never, {
+        retrieveSubscription: retrieve,
+      }),
     ).rejects.toEqual({ message: "lookup failed" });
   });
 
@@ -1937,7 +2043,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1986,7 +2094,9 @@ describe("handleInvoicePaymentSucceeded", () => {
     };
     const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
 
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2058,12 +2168,18 @@ describe("handleInvoicePaymentSucceeded", () => {
       id: "evt_renew_no_recurring",
       type: "invoice.payment_succeeded",
       data: {
-        object: { billing_reason: "subscription_cycle", subscription: "sub_nr_renew", id: "in_nr" },
+        object: {
+          billing_reason: "subscription_cycle",
+          subscription: "sub_nr_renew",
+          id: "in_nr",
+        },
       },
     };
 
     const retrieve = vi.fn().mockResolvedValue(noRecurringSub as never);
-    await handleInvoicePaymentSucceeded(event as never, { retrieveSubscription: retrieve });
+    await handleInvoicePaymentSucceeded(event as never, {
+      retrieveSubscription: retrieve,
+    });
 
     expect(mockedGrantTokens).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2140,7 +2256,9 @@ describe("handleInvoicePaymentFailed", () => {
 
   it("does nothing when subscription is missing", async () => {
     const update = vi.fn();
-    const client = { from: vi.fn().mockReturnValue({ update }) } as unknown as MockClient;
+    const client = {
+      from: vi.fn().mockReturnValue({ update }),
+    } as unknown as MockClient;
     mockedCreateAdmin.mockReturnValue(client as never);
 
     const event = {
@@ -2155,7 +2273,9 @@ describe("handleInvoicePaymentFailed", () => {
 
   it("propagates errors", async () => {
     const update = vi.fn().mockReturnThis();
-    const eq = vi.fn().mockResolvedValue({ data: null, error: { message: "boom" } });
+    const eq = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: "boom" } });
     const client = {
       from: vi.fn().mockReturnValue({ update, eq }),
     } as unknown as MockClient;
@@ -2166,7 +2286,9 @@ describe("handleInvoicePaymentFailed", () => {
       type: "invoice.payment_failed",
       data: { object: { subscription: "sub_1" } },
     };
-    await expect(handleInvoicePaymentFailed(event as never)).rejects.toEqual({ message: "boom" });
+    await expect(handleInvoicePaymentFailed(event as never)).rejects.toEqual({
+      message: "boom",
+    });
   });
 });
 
@@ -2182,7 +2304,11 @@ describe("handleChargeRefunded", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 100 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 5000,
+      deducted: 5000,
+      balance: 100,
+    });
 
     const event = {
       id: "evt_refund_full",
@@ -2236,7 +2362,11 @@ describe("handleChargeRefunded", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 100 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 1000,
+      deducted: 1000,
+      balance: 100,
+    });
 
     const event = {
       id: "evt_refund_partial",
@@ -2270,7 +2400,11 @@ describe("handleChargeRefunded", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 2000, deducted: 2000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 2000,
+      deducted: 2000,
+      balance: 0,
+    });
 
     const event = {
       id: "evt_refund_topup",
@@ -2308,7 +2442,12 @@ describe("handleChargeRefunded", () => {
       id: "evt_no_user",
       type: "charge.refunded",
       data: {
-        object: { id: "ch_x", customer: "cus_unknown", amount: 100, amount_refunded: 100 },
+        object: {
+          id: "ch_x",
+          customer: "cus_unknown",
+          amount: 100,
+          amount_refunded: 100,
+        },
       },
     };
 
@@ -2349,7 +2488,14 @@ describe("handleChargeRefunded", () => {
     const event = {
       id: "evt_nocust",
       type: "charge.refunded",
-      data: { object: { id: "ch_n", customer: null, amount: 100, amount_refunded: 100 } },
+      data: {
+        object: {
+          id: "ch_n",
+          customer: null,
+          amount: 100,
+          amount_refunded: 100,
+        },
+      },
     };
 
     await handleChargeRefunded(event as never);
@@ -2572,7 +2718,11 @@ describe("handleChargeRefunded - extra coverage", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 5000,
+      deducted: 5000,
+      balance: 0,
+    });
 
     const event = {
       id: "evt_obj_invoice",
@@ -2639,7 +2789,11 @@ describe("handleChargeDisputeClosed", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 5000, deducted: 5000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 5000,
+      deducted: 5000,
+      balance: 0,
+    });
 
     const retrieveCharge = vi.fn().mockResolvedValue({
       id: "ch_1",
@@ -2732,7 +2886,9 @@ describe("handleChargeDisputeClosed", () => {
     const event = {
       id: "evt_dispute_orphan",
       type: "charge.dispute.closed",
-      data: { object: { id: "dp_orphan", status: "lost", charge: "ch_orphan" } },
+      data: {
+        object: { id: "dp_orphan", status: "lost", charge: "ch_orphan" },
+      },
     };
 
     await handleChargeDisputeClosed(event as never, { retrieveCharge });
@@ -2752,7 +2908,9 @@ describe("handleChargeDisputeClosed", () => {
     const event = {
       id: "evt_dispute_unlinked",
       type: "charge.dispute.closed",
-      data: { object: { id: "dp_unlinked", status: "lost", charge: "ch_unlinked" } },
+      data: {
+        object: { id: "dp_unlinked", status: "lost", charge: "ch_unlinked" },
+      },
     };
 
     await handleChargeDisputeClosed(event as never, { retrieveCharge });
@@ -2770,7 +2928,11 @@ describe("handleChargeDisputeClosed", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 2000, deducted: 2000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 2000,
+      deducted: 2000,
+      balance: 0,
+    });
 
     const retrieveCharge = vi.fn().mockResolvedValue({
       id: "ch_topup",
@@ -2840,7 +3002,9 @@ describe("handleChargeDisputeClosed", () => {
     const event = {
       id: "evt_dispute_no_link",
       type: "charge.dispute.closed",
-      data: { object: { id: "dp_no_link", status: "lost", charge: "ch_unlinked" } },
+      data: {
+        object: { id: "dp_no_link", status: "lost", charge: "ch_unlinked" },
+      },
     };
 
     await handleChargeDisputeClosed(event as never, { retrieveCharge });
@@ -2858,7 +3022,11 @@ describe("handleChargeDisputeClosed", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 1000,
+      deducted: 1000,
+      balance: 0,
+    });
 
     const retrieveCharge = vi.fn().mockResolvedValue({
       id: "ch_obj_dispute",
@@ -2934,10 +3102,14 @@ describe("handleWebhookEvent", () => {
     const event = {
       id: "evt_inv_succ",
       type: "invoice.payment_succeeded",
-      data: { object: { billing_reason: "subscription_cycle", subscription: "sub_1" } },
+      data: {
+        object: { billing_reason: "subscription_cycle", subscription: "sub_1" },
+      },
     };
     const retrieve = vi.fn().mockResolvedValue(baseStripeSub as never);
-    await handleWebhookEvent(event as never, { retrieveSubscription: retrieve });
+    await handleWebhookEvent(event as never, {
+      retrieveSubscription: retrieve,
+    });
     expect(mockedGrantTokens).toHaveBeenCalled();
   });
 
@@ -2969,7 +3141,11 @@ describe("handleWebhookEvent", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 1000,
+      deducted: 1000,
+      balance: 0,
+    });
 
     const event = {
       id: "evt_refund_dispatch",
@@ -3000,7 +3176,11 @@ describe("handleWebhookEvent", () => {
       error: null,
     });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedRecordRefund.mockResolvedValue({ requested: 1000, deducted: 1000, balance: 0 });
+    mockedRecordRefund.mockResolvedValue({
+      requested: 1000,
+      deducted: 1000,
+      balance: 0,
+    });
 
     const retrieveCharge = vi.fn().mockResolvedValue({
       id: "ch_lost",
@@ -3020,7 +3200,11 @@ describe("handleWebhookEvent", () => {
 
   it("ignores unknown event types", async () => {
     mockedCreateAdmin.mockReturnValue(makeClient() as never);
-    const event = { id: "evt_x", type: "some.other.type", data: { object: {} } };
+    const event = {
+      id: "evt_x",
+      type: "some.other.type",
+      data: { object: {} },
+    };
     await expect(handleWebhookEvent(event as never)).resolves.toBeUndefined();
   });
 });

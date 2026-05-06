@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
 import { listTeamsForUser } from "@/services/workspace-service";
@@ -25,13 +28,19 @@ function greeting(): string {
   return "Good evening";
 }
 
-function displayName(fullName: string | null | undefined, email: string | null | undefined) {
+function displayName(
+  fullName: string | null | undefined,
+  email: string | null | undefined,
+) {
   const n = fullName?.trim();
   if (n) return n;
   return email ?? "there";
 }
 
-function initials(fullName: string | null | undefined, email: string | null | undefined) {
+function initials(
+  fullName: string | null | undefined,
+  email: string | null | undefined,
+) {
   const n = fullName?.trim();
   if (n) {
     return n
@@ -56,7 +65,11 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const admin = createAdminClient();
   const [{ data: profile }, teams, balance] = await Promise.all([
-    supabase.from("profiles").select("full_name,avatar_url").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("full_name,avatar_url")
+      .eq("id", user.id)
+      .maybeSingle(),
     listTeamsForUser(user.id, supabase),
     getBalance(user.id, admin),
   ]);
@@ -71,7 +84,10 @@ export default async function DashboardPage() {
       .in("team_id", teamIds);
     projectCount = pc ?? 0;
 
-    const { data: projectRows } = await supabase.from("projects").select("id").in("team_id", teamIds);
+    const { data: projectRows } = await supabase
+      .from("projects")
+      .select("id")
+      .in("team_id", teamIds);
     const projectIds = (projectRows ?? []).map((p) => p.id);
     if (projectIds.length > 0) {
       const { count: bc } = await supabase
@@ -89,9 +105,15 @@ export default async function DashboardPage() {
   const recentTeamIds = recentTeams.map((t) => t.id);
   const projectCountByTeam = new Map<string, number>();
   if (recentTeamIds.length > 0) {
-    const { data: rp } = await supabase.from("projects").select("team_id").in("team_id", recentTeamIds);
+    const { data: rp } = await supabase
+      .from("projects")
+      .select("team_id")
+      .in("team_id", recentTeamIds);
     for (const row of rp ?? []) {
-      projectCountByTeam.set(row.team_id, (projectCountByTeam.get(row.team_id) ?? 0) + 1);
+      projectCountByTeam.set(
+        row.team_id,
+        (projectCountByTeam.get(row.team_id) ?? 0) + 1,
+      );
     }
   }
 
@@ -112,7 +134,9 @@ export default async function DashboardPage() {
             <div>
               <p className="text-sm text-muted">{greeting()}</p>
               <h1 className="text-2xl font-bold text-foreground">{name}</h1>
-              <p className="mt-1 text-sm text-muted">Here is a snapshot of your workspace.</p>
+              <p className="mt-1 text-sm text-muted">
+                Here is a snapshot of your workspace.
+              </p>
             </div>
           </div>
           <Link
@@ -120,7 +144,11 @@ export default async function DashboardPage() {
             className="self-start sm:self-center"
             aria-label="View billing and synth tokens"
           >
-            <TokenBadge balance={balance} variant={balance <= 50 ? "warning" : "brand"} size="lg" />
+            <TokenBadge
+              balance={balance}
+              variant={balance <= 50 ? "warning" : "brand"}
+              size="lg"
+            />
           </Link>
         </div>
       </div>
@@ -129,37 +157,54 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardDescription>Teams</CardDescription>
-            <CardTitle className="text-3xl">{numberFormatter.format(teams.length)}</CardTitle>
+            <CardTitle className="text-3xl">
+              {numberFormatter.format(teams.length)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted">People and access are grouped per team.</p>
+            <p className="text-xs text-muted">
+              People and access are grouped per team.
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Projects</CardDescription>
-            <CardTitle className="text-3xl">{numberFormatter.format(projectCount)}</CardTitle>
+            <CardTitle className="text-3xl">
+              {numberFormatter.format(projectCount)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted">Each project scopes apps like Blog.</p>
+            <p className="text-xs text-muted">
+              Each project scopes apps like Blog.
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Blogs</CardDescription>
-            <CardTitle className="text-3xl">{numberFormatter.format(blogCount)}</CardTitle>
+            <CardTitle className="text-3xl">
+              {numberFormatter.format(blogCount)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted">WordPress connections across all projects.</p>
+            <p className="text-xs text-muted">
+              WordPress connections across all projects.
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Synth tokens</CardDescription>
-            <CardTitle className="text-3xl">{numberFormatter.format(balance)}</CardTitle>
+            <CardTitle className="text-3xl">
+              {numberFormatter.format(balance)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <Link href="/account/billing" className="text-xs font-medium text-brand-blue hover:underline">
+            <Link
+              href="/account/billing"
+              className="text-xs font-medium text-brand-blue hover:underline"
+            >
               Manage billing
             </Link>
           </CardContent>
@@ -168,10 +213,16 @@ export default async function DashboardPage() {
 
       <section aria-labelledby="recent-teams-heading">
         <div className="mb-4 flex items-end justify-between gap-4">
-          <h2 id="recent-teams-heading" className="text-lg font-semibold text-foreground">
+          <h2
+            id="recent-teams-heading"
+            className="text-lg font-semibold text-foreground"
+          >
             Recent teams
           </h2>
-          <Link href="/teams" className="text-sm font-medium text-brand-blue hover:underline">
+          <Link
+            href="/teams"
+            className="text-sm font-medium text-brand-blue hover:underline"
+          >
             View all
           </Link>
         </div>
@@ -180,8 +231,8 @@ export default async function DashboardPage() {
             <CardHeader>
               <CardTitle>Create your first team</CardTitle>
               <CardDescription>
-                Teams hold projects; projects hold apps like Blog. Start here to wire WordPress and AI
-                publishing.
+                Teams hold projects; projects hold apps like Blog. Start here to
+                wire WordPress and AI publishing.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -203,7 +254,9 @@ export default async function DashboardPage() {
                     href={`/teams/${team.id}/projects`}
                     className="flex items-center justify-between rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm shadow-sm transition-colors hover:bg-surface-hover"
                   >
-                    <span className="font-medium text-foreground">{team.name}</span>
+                    <span className="font-medium text-foreground">
+                      {team.name}
+                    </span>
                     <span className="text-xs text-muted">
                       {pc} {pc === 1 ? "project" : "projects"}
                     </span>
@@ -220,10 +273,14 @@ export default async function DashboardPage() {
           <Card className="h-full transition-all hover:shadow-[var(--sp-shadow-md)]">
             <CardHeader>
               <CardTitle>Teams &amp; projects</CardTitle>
-              <CardDescription>Open the workspace tree: teams, nested projects, and apps.</CardDescription>
+              <CardDescription>
+                Open the workspace tree: teams, nested projects, and apps.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <span className="text-sm font-medium text-brand-blue group-hover:underline">Go to teams →</span>
+              <span className="text-sm font-medium text-brand-blue group-hover:underline">
+                Go to teams →
+              </span>
             </CardContent>
           </Card>
         </Link>
@@ -232,10 +289,14 @@ export default async function DashboardPage() {
           <Card className="h-full transition-all hover:shadow-[var(--sp-shadow-md)]">
             <CardHeader>
               <CardTitle>Account</CardTitle>
-              <CardDescription>Profile, billing, invoices, and sign out.</CardDescription>
+              <CardDescription>
+                Profile, billing, invoices, and sign out.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <span className="text-sm font-medium text-brand-blue group-hover:underline">Open account →</span>
+              <span className="text-sm font-medium text-brand-blue group-hover:underline">
+                Open account →
+              </span>
             </CardContent>
           </Card>
         </Link>

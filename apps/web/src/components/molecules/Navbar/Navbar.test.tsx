@@ -17,7 +17,10 @@ describe("Navbar", () => {
       ["Pricing", "/pricing"],
     ])("links %s to %s", (label, href) => {
       render(<Navbar />);
-      expect(screen.getByText(label).closest("a")).toHaveAttribute("href", href);
+      expect(screen.getByText(label).closest("a")).toHaveAttribute(
+        "href",
+        href,
+      );
     });
   });
 

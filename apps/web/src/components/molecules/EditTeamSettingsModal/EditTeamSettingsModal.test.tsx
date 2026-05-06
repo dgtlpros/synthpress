@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { EditTeamSettingsModal } from "./EditTeamSettingsModal";
 
 beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (
+    this: HTMLDialogElement,
+  ) {
     this.setAttribute("open", "");
   });
   HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
@@ -40,7 +42,9 @@ describe("EditTeamSettingsModal", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText(/team name/i), { target: { value: "Beta" } });
+    fireEvent.change(screen.getByLabelText(/team name/i), {
+      target: { value: "Beta" },
+    });
     expect(onChange).toHaveBeenCalledWith("Beta");
   });
 

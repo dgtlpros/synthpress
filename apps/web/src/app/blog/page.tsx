@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Blog — SynthPress",
-  description: "Notes on AI publishing, SEO, and running content networks at scale.",
+  description:
+    "Notes on AI publishing, SEO, and running content networks at scale.",
 };
 
 const placeholders = [
@@ -41,13 +42,16 @@ export default async function BlogPage() {
       <section className="px-6 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="text-center">
-            <span className="text-xs font-semibold uppercase tracking-wider text-brand-blue">SynthPress Blog</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-brand-blue">
+              SynthPress Blog
+            </span>
             <h1 className="mt-3 text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
               Notes from the team
             </h1>
             <p className="mx-auto mt-4 max-w-2xl text-lg text-muted">
-              Deep dives on AI publishing, SEO, and running content networks at scale. New posts dropping soon — in
-              the meantime, here&apos;s what&apos;s on our writing list.
+              Deep dives on AI publishing, SEO, and running content networks at
+              scale. New posts dropping soon — in the meantime, here&apos;s
+              what&apos;s on our writing list.
             </p>
           </div>
 
@@ -60,14 +64,20 @@ export default async function BlogPage() {
                 <span className="inline-flex w-fit rounded-[var(--sp-radius-full)] bg-surface-hover px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-blue">
                   {p.category}
                 </span>
-                <h3 className="mt-4 text-lg font-semibold text-foreground">{p.title}</h3>
-                <p className="mt-3 text-sm leading-relaxed text-muted">{p.description}</p>
+                <h3 className="mt-4 text-lg font-semibold text-foreground">
+                  {p.title}
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-muted">
+                  {p.description}
+                </p>
               </article>
             ))}
           </div>
 
           <div className="mx-auto mt-20 max-w-2xl rounded-[var(--sp-radius-xl)] border border-border bg-surface p-8 text-center shadow-[var(--sp-shadow-sm)]">
-            <h2 className="text-xl font-semibold text-foreground">Want a heads-up when we publish?</h2>
+            <h2 className="text-xl font-semibold text-foreground">
+              Want a heads-up when we publish?
+            </h2>
             <p className="mt-2 text-sm text-muted">
               Drop us a line at{" "}
               <a

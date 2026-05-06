@@ -36,7 +36,9 @@ export function TokenBadge({
   ...props
 }: TokenBadgeProps) {
   const formatted = formatter.format(balance);
-  const label = compact ? formatted : `${formatted} ${balance === 1 ? "token" : "tokens"}`;
+  const label = compact
+    ? formatted
+    : `${formatted} ${balance === 1 ? "token" : "tokens"}`;
   const sizing = sizeStyles[size];
 
   return (

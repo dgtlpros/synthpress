@@ -3,7 +3,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PERMISSIONS, roleCan, type TeamAction, type TeamRole } from "@/lib/team-roles";
+import {
+  PERMISSIONS,
+  roleCan,
+  type TeamAction,
+  type TeamRole,
+} from "@/lib/team-roles";
 
 type Client = SupabaseClient<Database>;
 
@@ -36,8 +41,15 @@ export class TeamPermissionError extends Error {
   readonly action: TeamAction;
   readonly role: TeamRole | null;
 
-  constructor(code: "not_a_member" | "forbidden", action: TeamAction, role: TeamRole | null) {
-    super(`Forbidden: cannot ${action}` + (role ? ` as ${role}` : " (not a member)"));
+  constructor(
+    code: "not_a_member" | "forbidden",
+    action: TeamAction,
+    role: TeamRole | null,
+  ) {
+    super(
+      `Forbidden: cannot ${action}` +
+        (role ? ` as ${role}` : " (not a member)"),
+    );
     this.name = "TeamPermissionError";
     this.code = code;
     this.action = action;
@@ -68,4 +80,3 @@ export async function assertCan(
 
   return role;
 }
-

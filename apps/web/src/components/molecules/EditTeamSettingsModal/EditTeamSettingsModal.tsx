@@ -43,7 +43,9 @@ export function EditTeamSettingsModal({
             autoComplete="off"
           />
         </div>
-        {errorMessage ? <p className="text-sm text-error">{errorMessage}</p> : null}
+        {errorMessage ? (
+          <p className="text-sm text-error">{errorMessage}</p>
+        ) : null}
       </div>
     </Modal>
   );

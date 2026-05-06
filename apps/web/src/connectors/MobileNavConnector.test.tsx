@@ -8,7 +8,13 @@ vi.mock("next/navigation", () => ({
 
 afterEach(cleanup);
 
-const teams = [{ id: "t1", name: "Team One", projects: [] as { id: string; name: string; teamId: string }[] }];
+const teams = [
+  {
+    id: "t1",
+    name: "Team One",
+    projects: [] as { id: string; name: string; teamId: string }[],
+  },
+];
 
 describe("MobileNavConnector", () => {
   it("renders the open-menu trigger collapsed by default", () => {
@@ -47,7 +53,9 @@ describe("MobileNavConnector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.click(screen.getByTestId("mobile-nav-backdrop"));
-    expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open menu" }),
+    ).toBeInTheDocument();
   });
 
   it("closes the drawer on Escape", () => {
@@ -55,7 +63,9 @@ describe("MobileNavConnector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open menu" }),
+    ).toBeInTheDocument();
   });
 
   it("ignores other keys", () => {
@@ -63,7 +73,9 @@ describe("MobileNavConnector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
 
     fireEvent.keyDown(document, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "Close menu" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close menu" }),
+    ).toBeInTheDocument();
   });
 
   it("propagates email to the inner sidebar", () => {

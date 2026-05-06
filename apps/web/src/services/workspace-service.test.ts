@@ -40,12 +40,16 @@ describe("slugify", () => {
 
 describe("generateUniqueTeamSlug", () => {
   beforeEach(() => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
   });
 
   it("returns base slug when unused", async () => {
     const client = mockMaybeSingleOnce(null);
-    await expect(generateUniqueTeamSlug("My Team", client)).resolves.toBe("my-team");
+    await expect(generateUniqueTeamSlug("My Team", client)).resolves.toBe(
+      "my-team",
+    );
   });
 
   it("suffixes when slug exists", async () => {
@@ -66,7 +70,9 @@ describe("generateUniqueTeamSlug", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(generateUniqueTeamSlug("My Team", client)).resolves.toMatch(/^my-team-aaaaaaaa$/);
+    await expect(generateUniqueTeamSlug("My Team", client)).resolves.toMatch(
+      /^my-team-aaaaaaaa$/,
+    );
   });
 
   it("returns final fallback when all 8 attempts are exhausted", async () => {
@@ -78,7 +84,9 @@ describe("generateUniqueTeamSlug", () => {
 
 describe("generateUniqueProjectSlug", () => {
   beforeEach(() => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
   });
 
   it("returns base slug when unused inside team", async () => {
@@ -87,14 +95,18 @@ describe("generateUniqueProjectSlug", () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockImplementation(() => ({
             eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: null, error: null }),
             }),
           })),
         }),
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(generateUniqueProjectSlug("tid", "Alpha", client)).resolves.toBe("alpha");
+    await expect(
+      generateUniqueProjectSlug("tid", "Alpha", client),
+    ).resolves.toBe("alpha");
   });
 
   it("suffixes when slug collides inside team", async () => {
@@ -117,7 +129,9 @@ describe("generateUniqueProjectSlug", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(generateUniqueProjectSlug("tid", "Alpha", client)).resolves.toMatch(/^alpha-aaaaaaaa$/);
+    await expect(
+      generateUniqueProjectSlug("tid", "Alpha", client),
+    ).resolves.toMatch(/^alpha-aaaaaaaa$/);
   });
 
   it("returns final fallback when all 8 attempts are exhausted", async () => {
@@ -126,7 +140,9 @@ describe("generateUniqueProjectSlug", () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockImplementation(() => ({
             eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "x" }, error: null }),
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: { id: "x" }, error: null }),
             }),
           })),
         }),
@@ -140,7 +156,9 @@ describe("generateUniqueProjectSlug", () => {
 
 describe("generateUniqueBlogSlug", () => {
   beforeEach(() => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
   });
 
   it("returns base slug when unused inside project", async () => {
@@ -149,14 +167,18 @@ describe("generateUniqueBlogSlug", () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockImplementation(() => ({
             eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: null, error: null }),
             }),
           })),
         }),
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(generateUniqueBlogSlug("pid", "News blog", client)).resolves.toBe("news-blog");
+    await expect(
+      generateUniqueBlogSlug("pid", "News blog", client),
+    ).resolves.toBe("news-blog");
   });
 
   it("suffixes when slug collides inside project", async () => {
@@ -179,7 +201,9 @@ describe("generateUniqueBlogSlug", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(generateUniqueBlogSlug("pid", "News", client)).resolves.toMatch(/^news-aaaaaaaa$/);
+    await expect(
+      generateUniqueBlogSlug("pid", "News", client),
+    ).resolves.toMatch(/^news-aaaaaaaa$/);
   });
 
   it("returns final fallback when all 8 attempts are exhausted", async () => {
@@ -188,7 +212,9 @@ describe("generateUniqueBlogSlug", () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockImplementation(() => ({
             eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "x" }, error: null }),
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: { id: "x" }, error: null }),
             }),
           })),
         }),
@@ -216,7 +242,15 @@ describe("listTeamsForUser", () => {
 
   it("returns team rows matching membership team_ids", async () => {
     const teamRows = [
-      { id: "t1", name: "Team A", slug: "team-a", created_by: "u1", billing_user_id: "u1", created_at: "", updated_at: "" },
+      {
+        id: "t1",
+        name: "Team A",
+        slug: "team-a",
+        created_by: "u1",
+        billing_user_id: "u1",
+        created_at: "",
+        updated_at: "",
+      },
     ];
 
     const client = {
@@ -247,7 +281,9 @@ describe("listTeamsForUser", () => {
     const client = {
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ data: null, error: new Error("db error") }),
+          eq: vi
+            .fn()
+            .mockResolvedValue({ data: null, error: new Error("db error") }),
         }),
       }),
     } as unknown as SupabaseClient<Database>;
@@ -270,13 +306,18 @@ describe("listTeamsForUser", () => {
         }
         return {
           select: vi.fn().mockReturnValue({
-            in: vi.fn().mockResolvedValue({ data: null, error: new Error("teams query failed") }),
+            in: vi.fn().mockResolvedValue({
+              data: null,
+              error: new Error("teams query failed"),
+            }),
           }),
         };
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(listTeamsForUser("u1", client)).rejects.toThrow("teams query failed");
+    await expect(listTeamsForUser("u1", client)).rejects.toThrow(
+      "teams query failed",
+    );
   });
 
   it("returns empty array when teams data is null (no error)", async () => {
@@ -321,7 +362,15 @@ describe("listTeamsForUser", () => {
 describe("listProjectsForTeam", () => {
   it("returns projects ordered by name", async () => {
     const projects = [
-      { id: "p1", name: "Alpha", slug: "alpha", team_id: "t1", description: null, created_at: "", updated_at: "" },
+      {
+        id: "p1",
+        name: "Alpha",
+        slug: "alpha",
+        team_id: "t1",
+        description: null,
+        created_at: "",
+        updated_at: "",
+      },
     ];
 
     const client = {
@@ -343,7 +392,9 @@ describe("listProjectsForTeam", () => {
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: null, error: new Error("fail") }),
+            order: vi
+              .fn()
+              .mockResolvedValue({ data: null, error: new Error("fail") }),
           }),
         }),
       }),
@@ -371,9 +422,22 @@ describe("listProjectsForTeam", () => {
 describe("listBlogsForProject", () => {
   it("returns blog rows without wp_app_password", async () => {
     const blogs = [
-      { id: "b1", name: "Blog", slug: "blog", project_id: "p1", wp_url: "https://x.co", wp_username: "admin",
-        is_active: true, articles_per_day: 1, niche: "", keywords: [], ai_prompt_template: "",
-        schedule_cron: "0 9 * * *", created_at: "", updated_at: "" },
+      {
+        id: "b1",
+        name: "Blog",
+        slug: "blog",
+        project_id: "p1",
+        wp_url: "https://x.co",
+        wp_username: "admin",
+        is_active: true,
+        articles_per_day: 1,
+        niche: "",
+        keywords: [],
+        ai_prompt_template: "",
+        schedule_cron: "0 9 * * *",
+        created_at: "",
+        updated_at: "",
+      },
     ];
 
     const client = {
@@ -396,13 +460,18 @@ describe("listBlogsForProject", () => {
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: null, error: new Error("blog query failed") }),
+            order: vi.fn().mockResolvedValue({
+              data: null,
+              error: new Error("blog query failed"),
+            }),
           }),
         }),
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(listBlogsForProject("p1", client)).rejects.toThrow("blog query failed");
+    await expect(listBlogsForProject("p1", client)).rejects.toThrow(
+      "blog query failed",
+    );
   });
 
   it("returns empty array when data is null (no error)", async () => {
@@ -423,9 +492,13 @@ describe("listBlogsForProject", () => {
 
 describe("createTeamWithOwner", () => {
   it("throws when team insert fails", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
 
-    const teamSingle = vi.fn().mockResolvedValue({ data: null, error: new Error("insert failed") });
+    const teamSingle = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: new Error("insert failed") });
     const teamSelect = vi.fn().mockReturnValue({ single: teamSingle });
     const teamInsert = vi.fn().mockReturnValue({ select: teamSelect });
 
@@ -435,7 +508,9 @@ describe("createTeamWithOwner", () => {
           return {
             select: vi.fn().mockReturnValue({
               eq: vi.fn().mockReturnValue({
-                maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+                maybeSingle: vi
+                  .fn()
+                  .mockResolvedValue({ data: null, error: null }),
               }),
             }),
             insert: teamInsert,
@@ -445,15 +520,31 @@ describe("createTeamWithOwner", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(createTeamWithOwner({ name: "Acme", userId: "u1", client })).rejects.toThrow("insert failed");
+    await expect(
+      createTeamWithOwner({ name: "Acme", userId: "u1", client }),
+    ).rejects.toThrow("insert failed");
   });
 
   it("throws when team_members insert fails", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
 
-    const teamRow = { id: "t-new", name: "Acme", slug: "acme", created_by: "u1", billing_user_id: "u1", created_at: "", updated_at: "" };
-    const memberInsert = vi.fn().mockResolvedValue({ error: new Error("member insert failed") });
-    const teamSingle = vi.fn().mockResolvedValue({ data: teamRow, error: null });
+    const teamRow = {
+      id: "t-new",
+      name: "Acme",
+      slug: "acme",
+      created_by: "u1",
+      billing_user_id: "u1",
+      created_at: "",
+      updated_at: "",
+    };
+    const memberInsert = vi
+      .fn()
+      .mockResolvedValue({ error: new Error("member insert failed") });
+    const teamSingle = vi
+      .fn()
+      .mockResolvedValue({ data: teamRow, error: null });
     const teamSelect = vi.fn().mockReturnValue({ single: teamSingle });
     const teamInsert = vi.fn().mockReturnValue({ select: teamSelect });
 
@@ -465,7 +556,9 @@ describe("createTeamWithOwner", () => {
             return {
               select: vi.fn().mockReturnValue({
                 eq: vi.fn().mockReturnValue({
-                  maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+                  maybeSingle: vi
+                    .fn()
+                    .mockResolvedValue({ data: null, error: null }),
                 }),
               }),
               insert: teamInsert,
@@ -481,19 +574,30 @@ describe("createTeamWithOwner", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    await expect(createTeamWithOwner({ name: "Acme", userId: "u1", client })).rejects.toThrow("member insert failed");
+    await expect(
+      createTeamWithOwner({ name: "Acme", userId: "u1", client }),
+    ).rejects.toThrow("member insert failed");
   });
 
   it("creates a team row and inserts the owner as a member", async () => {
     const teamRow = {
-      id: "t-new", name: "Acme", slug: "acme", created_by: "u1",
-      billing_user_id: "u1", created_at: "", updated_at: "",
+      id: "t-new",
+      name: "Acme",
+      slug: "acme",
+      created_by: "u1",
+      billing_user_id: "u1",
+      created_at: "",
+      updated_at: "",
     };
 
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
 
     const memberInsert = vi.fn().mockResolvedValue({ error: null });
-    const teamSingle = vi.fn().mockResolvedValue({ data: teamRow, error: null });
+    const teamSingle = vi
+      .fn()
+      .mockResolvedValue({ data: teamRow, error: null });
     const teamSelect = vi.fn().mockReturnValue({ single: teamSingle });
     const teamInsert = vi.fn().mockReturnValue({ select: teamSelect });
 
@@ -505,7 +609,9 @@ describe("createTeamWithOwner", () => {
             return {
               select: vi.fn().mockReturnValue({
                 eq: vi.fn().mockReturnValue({
-                  maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+                  maybeSingle: vi
+                    .fn()
+                    .mockResolvedValue({ data: null, error: null }),
                 }),
               }),
               insert: teamInsert,
@@ -521,7 +627,11 @@ describe("createTeamWithOwner", () => {
       }),
     } as unknown as SupabaseClient<Database>;
 
-    const result = await createTeamWithOwner({ name: "Acme", userId: "u1", client });
+    const result = await createTeamWithOwner({
+      name: "Acme",
+      userId: "u1",
+      client,
+    });
 
     expect(result).toEqual(teamRow);
     expect(teamInsert).toHaveBeenCalled();

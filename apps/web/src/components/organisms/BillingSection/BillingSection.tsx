@@ -105,13 +105,18 @@ export function BillingSection({
           actions={subscriptionActions}
         />
 
-        <TokenBalanceCard balance={balance} monthlyAllowance={plan?.monthlyTokens} />
+        <TokenBalanceCard
+          balance={balance}
+          monthlyAllowance={plan?.monthlyTokens}
+        />
       </div>
 
       {topUpPacks.length > 0 && (
         <section className="space-y-4">
           <div>
-            <h2 className="text-xl font-semibold text-foreground">One-time top-ups</h2>
+            <h2 className="text-xl font-semibold text-foreground">
+              One-time top-ups
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Buy synth tokens without changing your plan. Tokens never expire.
             </p>
@@ -140,7 +145,9 @@ export function BillingSection({
       )}
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground">Recent activity</h2>
+        <h2 className="text-xl font-semibold text-foreground">
+          Recent activity
+        </h2>
 
         {transactions.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-[var(--sp-radius-xl)] border border-dashed border-border bg-surface/50 p-10 text-center">
@@ -160,7 +167,9 @@ export function BillingSection({
               </svg>
             </div>
             <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">No token activity yet</p>
+              <p className="text-sm font-medium text-foreground">
+                No token activity yet
+              </p>
               <p className="text-xs text-muted">
                 Subscription grants, top-ups, and AI usage will appear here.
               </p>
@@ -173,18 +182,24 @@ export function BillingSection({
                 <tr>
                   <th className="px-4 py-3 text-left font-medium">Date</th>
                   <th className="px-4 py-3 text-left font-medium">Type</th>
-                  <th className="px-4 py-3 text-left font-medium">Description</th>
+                  <th className="px-4 py-3 text-left font-medium">
+                    Description
+                  </th>
                   <th className="px-4 py-3 text-right font-medium">Tokens</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {transactions.map((tx) => (
                   <tr key={tx.id}>
-                    <td className="px-4 py-3 text-muted">{formatDate(tx.created_at)}</td>
+                    <td className="px-4 py-3 text-muted">
+                      {formatDate(tx.created_at)}
+                    </td>
                     <td className="px-4 py-3 text-foreground">
                       {typeLabels[tx.type] ?? tx.type}
                     </td>
-                    <td className="px-4 py-3 text-muted">{tx.description ?? "—"}</td>
+                    <td className="px-4 py-3 text-muted">
+                      {tx.description ?? "—"}
+                    </td>
                     <td
                       className={cn(
                         "px-4 py-3 text-right font-medium",

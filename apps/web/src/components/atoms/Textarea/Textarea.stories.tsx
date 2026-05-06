@@ -11,7 +11,18 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = { args: { placeholder: "Enter your AI prompt template..." } };
-export const WithValue: Story = { args: { defaultValue: "Write a 1000-word article about {{topic}} in the {{niche}} space." } };
-export const Error: Story = { args: { placeholder: "Required field", error: true } };
-export const Disabled: Story = { args: { placeholder: "Disabled", disabled: true } };
+export const Default: Story = {
+  args: { placeholder: "Enter your AI prompt template..." },
+};
+export const WithValue: Story = {
+  args: {
+    defaultValue:
+      "Write a 1000-word article about {{topic}} in the {{niche}} space.",
+  },
+};
+export const Error: Story = {
+  args: { placeholder: "Required field", error: true },
+};
+export const Disabled: Story = {
+  args: { placeholder: "Disabled", disabled: true },
+};

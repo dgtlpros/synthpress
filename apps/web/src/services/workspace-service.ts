@@ -1,7 +1,11 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import type {
+  Database,
+  Tables,
+  TablesInsert,
+} from "@/lib/supabase/database.types";
 
 type Client = SupabaseClient<Database>;
 
@@ -23,10 +27,17 @@ export function slugify(input: string, fallback: string): string {
   return s || fallback;
 }
 
-export async function generateUniqueTeamSlug(baseName: string, client: Client): Promise<string> {
+export async function generateUniqueTeamSlug(
+  baseName: string,
+  client: Client,
+): Promise<string> {
   let slug = slugify(baseName, "team");
   for (let i = 0; i < 8; i++) {
-    const { data } = await client.from("teams").select("id").eq("slug", slug).maybeSingle();
+    const { data } = await client
+      .from("teams")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
     if (!data) return slug;
     slug = `${slugify(baseName, "team")}-${crypto.randomUUID().slice(0, 8)}`;
   }
@@ -71,7 +82,10 @@ export async function generateUniqueBlogSlug(
   return `${slugify(baseName, "blog")}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export async function listTeamsForUser(userId: string, client: Client): Promise<TeamRow[]> {
+export async function listTeamsForUser(
+  userId: string,
+  client: Client,
+): Promise<TeamRow[]> {
   const { data: memberships, error: mErr } = await client
     .from("team_members")
     .select("team_id")
@@ -81,13 +95,19 @@ export async function listTeamsForUser(userId: string, client: Client): Promise<
   const teamIds = [...new Set((memberships ?? []).map((m) => m.team_id))];
   if (teamIds.length === 0) return [];
 
-  const { data: teams, error: tErr } = await client.from("teams").select("*").in("id", teamIds);
+  const { data: teams, error: tErr } = await client
+    .from("teams")
+    .select("*")
+    .in("id", teamIds);
 
   if (tErr) throw tErr;
   return teams ?? [];
 }
 
-export async function listProjectsForTeam(teamId: string, client: Client): Promise<ProjectRow[]> {
+export async function listProjectsForTeam(
+  teamId: string,
+  client: Client,
+): Promise<ProjectRow[]> {
   const { data, error } = await client
     .from("projects")
     .select("*")
@@ -101,7 +121,10 @@ export async function listProjectsForTeam(teamId: string, client: Client): Promi
 const BLOG_LIST_COLUMNS =
   "id, name, slug, project_id, wp_url, wp_username, is_active, articles_per_day, niche, keywords, ai_prompt_template, schedule_cron, created_at, updated_at" as const;
 
-export async function listBlogsForProject(projectId: string, client: Client): Promise<BlogListRow[]> {
+export async function listBlogsForProject(
+  projectId: string,
+  client: Client,
+): Promise<BlogListRow[]> {
   const { data, error } = await client
     .from("blogs")
     .select(BLOG_LIST_COLUMNS)

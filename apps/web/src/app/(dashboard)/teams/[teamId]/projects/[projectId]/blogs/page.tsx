@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { listBlogsForProject } from "@/services/workspace-service";
 import {
   Card,
@@ -29,7 +32,11 @@ export default async function ProjectBlogsPage({
 
   const supabase = await createClient();
 
-  const { data: team } = await supabase.from("teams").select("id,name").eq("id", teamId).maybeSingle();
+  const { data: team } = await supabase
+    .from("teams")
+    .select("id,name")
+    .eq("id", teamId)
+    .maybeSingle();
   const { data: project } = await supabase
     .from("projects")
     .select("id,name,team_id")
@@ -51,13 +58,19 @@ export default async function ProjectBlogsPage({
         <span className="mx-2" aria-hidden="true">
           /
         </span>
-        <Link href={`/teams/${teamId}/projects`} className="hover:text-foreground">
+        <Link
+          href={`/teams/${teamId}/projects`}
+          className="hover:text-foreground"
+        >
           {team.name}
         </Link>
         <span className="mx-2" aria-hidden="true">
           /
         </span>
-        <Link href={`/teams/${teamId}/projects/${projectId}`} className="hover:text-foreground">
+        <Link
+          href={`/teams/${teamId}/projects/${projectId}`}
+          className="hover:text-foreground"
+        >
           {project.name}
         </Link>
         <span className="mx-2" aria-hidden="true">
@@ -69,15 +82,17 @@ export default async function ProjectBlogsPage({
       <div>
         <h1 className="text-2xl font-bold text-foreground">Blogs</h1>
         <p className="mt-2 max-w-2xl text-muted">
-          Each blog is a WordPress connection inside this project. You can add multiple blogs per
-          project for different sites or brands.
+          Each blog is a WordPress connection inside this project. You can add
+          multiple blogs per project for different sites or brands.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Add blog</CardTitle>
-          <CardDescription>Use a WordPress application password (not your login password).</CardDescription>
+          <CardDescription>
+            Use a WordPress application password (not your login password).
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <CreateBlogForm teamId={teamId} projectId={projectId} />
@@ -85,7 +100,10 @@ export default async function ProjectBlogsPage({
       </Card>
 
       <section aria-labelledby="blogs-list-heading">
-        <h2 id="blogs-list-heading" className="mb-4 text-lg font-semibold text-foreground">
+        <h2
+          id="blogs-list-heading"
+          className="mb-4 text-lg font-semibold text-foreground"
+        >
           Blogs in {project.name}
         </h2>
         {blogs.length === 0 ? (
@@ -99,10 +117,15 @@ export default async function ProjectBlogsPage({
                   className="block rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm shadow-sm transition-colors hover:border-border-hover hover:bg-surface-hover"
                 >
                   <p className="font-medium text-foreground">{blog.name}</p>
-                  <p className="mt-1 truncate text-xs text-muted" title={blog.wp_url}>
+                  <p
+                    className="mt-1 truncate text-xs text-muted"
+                    title={blog.wp_url}
+                  >
                     {blog.wp_url}
                   </p>
-                  <p className="mt-2 text-xs font-medium text-brand-blue">Open settings →</p>
+                  <p className="mt-2 text-xs font-medium text-brand-blue">
+                    Open settings →
+                  </p>
                 </Link>
               </li>
             ))}

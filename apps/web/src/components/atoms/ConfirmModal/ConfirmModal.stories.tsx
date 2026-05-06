@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { ConfirmModal } from "./ConfirmModal";
 
@@ -47,12 +47,39 @@ export const Loading: Story = {
   args: {
     open: true,
     title: "Deleting Project",
-    message: "Are you sure you want to delete this project? This cannot be undone.",
+    message:
+      "Are you sure you want to delete this project? This cannot be undone.",
     confirmLabel: "Delete",
     variant: "danger",
     loading: true,
   },
 };
+
+function ConfirmModalInteractiveHost(
+  args: Omit<
+    ComponentProps<typeof ConfirmModal>,
+    "open" | "onConfirm" | "onCancel"
+  >,
+) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 py-2 text-sm font-medium text-white"
+      >
+        Open Modal
+      </button>
+      <ConfirmModal
+        {...args}
+        open={open}
+        onConfirm={() => setOpen(false)}
+        onCancel={() => setOpen(false)}
+      />
+    </>
+  );
+}
 
 export const Interactive: Story = {
   args: {
@@ -60,23 +87,5 @@ export const Interactive: Story = {
     title: "Confirm Action",
     message: "This is an interactive demo of the confirm modal.",
   },
-  render: (args) => {
-    const [open, setOpen] = useState(false);
-    return (
-      <>
-        <button
-          onClick={() => setOpen(true)}
-          className="rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 py-2 text-sm font-medium text-white"
-        >
-          Open Modal
-        </button>
-        <ConfirmModal
-          {...args}
-          open={open}
-          onConfirm={() => setOpen(false)}
-          onCancel={() => setOpen(false)}
-        />
-      </>
-    );
-  },
+  render: (args) => <ConfirmModalInteractiveHost {...args} />,
 };

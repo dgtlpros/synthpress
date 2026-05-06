@@ -60,7 +60,8 @@ export function Pricing({ className }: PricingProps) {
             Simple, Transparent Pricing
           </h2>
           <p className="mt-4 text-lg text-muted">
-            Start with 100 free synth tokens. Subscribe for monthly tokens, top up at any time, and never lose what you don&apos;t use.
+            Start with 100 free synth tokens. Subscribe for monthly tokens, top
+            up at any time, and never lose what you don&apos;t use.
           </p>
         </div>
 

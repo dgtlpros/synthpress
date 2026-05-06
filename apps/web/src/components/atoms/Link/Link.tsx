@@ -15,7 +15,13 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
 }
 
-export function Link({ variant = "default", className, href, children, ...props }: LinkProps) {
+export function Link({
+  variant = "default",
+  className,
+  href,
+  children,
+  ...props
+}: LinkProps) {
   const isExternal = href.startsWith("http") || href.startsWith("//");
   const isAnchor = href.startsWith("#");
 
@@ -23,8 +29,14 @@ export function Link({ variant = "default", className, href, children, ...props 
     return (
       <a
         href={href}
-        className={cn("cursor-pointer text-sm", variantStyles[variant], className)}
-        {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        className={cn(
+          "cursor-pointer text-sm",
+          variantStyles[variant],
+          className,
+        )}
+        {...(isExternal
+          ? { target: "_blank", rel: "noopener noreferrer" }
+          : {})}
         {...props}
       >
         {children}
@@ -35,7 +47,11 @@ export function Link({ variant = "default", className, href, children, ...props 
   return (
     <NextLink
       href={href}
-      className={cn("cursor-pointer text-sm", variantStyles[variant], className)}
+      className={cn(
+        "cursor-pointer text-sm",
+        variantStyles[variant],
+        className,
+      )}
       {...props}
     >
       {children}

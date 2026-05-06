@@ -1,12 +1,21 @@
 import { type ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
 
-export interface ToggleProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
+export interface ToggleProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "onChange"
+> {
   checked?: boolean;
   onChange?: (checked: boolean) => void;
 }
 
-export function Toggle({ checked = false, onChange, disabled, className, ...props }: ToggleProps) {
+export function Toggle({
+  checked = false,
+  onChange,
+  disabled,
+  className,
+  ...props
+}: ToggleProps) {
   return (
     <button
       type="button"

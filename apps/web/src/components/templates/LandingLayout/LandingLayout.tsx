@@ -8,7 +8,11 @@ export interface LandingLayoutProps {
   user?: { email: string } | null;
 }
 
-export function LandingLayout({ children, className, user }: LandingLayoutProps) {
+export function LandingLayout({
+  children,
+  className,
+  user,
+}: LandingLayoutProps) {
   return (
     <div className={cn("flex min-h-screen flex-col bg-background", className)}>
       <Navbar user={user} />

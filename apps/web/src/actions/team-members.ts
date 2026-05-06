@@ -9,7 +9,9 @@ import {
   type TeamRole,
 } from "@/services/team-policy-service";
 
-export type ActionResult = { ok: true; error: null } | { ok: false; error: string };
+export type ActionResult =
+  | { ok: true; error: null }
+  | { ok: false; error: string };
 
 /**
  * Removes a member (or invite-accepted user) from a team.
@@ -21,7 +23,10 @@ export type ActionResult = { ok: true; error: null } | { ok: false; error: strin
  *     "cannot_remove_owner" without touching the row.
  *   - Self-leave is allowed (you can remove yourself if you're admin/member).
  */
-export async function removeMember(teamId: string, targetUserId: string): Promise<ActionResult> {
+export async function removeMember(
+  teamId: string,
+  targetUserId: string,
+): Promise<ActionResult> {
   if (!teamId || !targetUserId) {
     return { ok: false, error: "teamId and targetUserId are required" };
   }
@@ -68,7 +73,10 @@ export async function removeMember(teamId: string, targetUserId: string): Promis
     if (err instanceof TeamPermissionError) {
       return { ok: false, error: err.code };
     }
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to remove member" };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to remove member",
+    };
   }
 }
 
@@ -136,6 +144,9 @@ export async function changeMemberRole(
     if (err instanceof TeamPermissionError) {
       return { ok: false, error: err.code };
     }
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to change role" };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to change role",
+    };
   }
 }

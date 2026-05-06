@@ -26,7 +26,11 @@ vi.mock("next/server", () => ({
 
 import { createServerClient } from "@supabase/ssr";
 import { after } from "next/server";
-import { createClient, getAuthUserOncePerResponse, resetAuthUserDedupeForTests } from "./server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+  resetAuthUserDedupeForTests,
+} from "./server";
 
 const mockedCreateServerClient = vi.mocked(createServerClient);
 
@@ -80,7 +84,15 @@ describe("createClient (server)", () => {
     await createClient();
 
     const config = mockedCreateServerClient.mock.calls[0][2] as unknown as {
-      cookies: { setAll: (cookies: { name: string; value: string; options: Record<string, unknown> }[]) => void };
+      cookies: {
+        setAll: (
+          cookies: {
+            name: string;
+            value: string;
+            options: Record<string, unknown>;
+          }[],
+        ) => void;
+      };
     };
     config.cookies.setAll([
       { name: "sb-token", value: "abc", options: { path: "/" } },
@@ -97,17 +109,26 @@ describe("createClient (server)", () => {
     await createClient();
 
     const config = mockedCreateServerClient.mock.calls[0][2] as unknown as {
-      cookies: { setAll: (cookies: { name: string; value: string; options: Record<string, unknown> }[]) => void };
+      cookies: {
+        setAll: (
+          cookies: {
+            name: string;
+            value: string;
+            options: Record<string, unknown>;
+          }[],
+        ) => void;
+      };
     };
     expect(() =>
-      config.cookies.setAll([
-        { name: "sb-token", value: "abc", options: {} },
-      ]),
+      config.cookies.setAll([{ name: "sb-token", value: "abc", options: {} }]),
     ).not.toThrow();
   });
 
   it("getAuthUserOncePerResponse dedupes concurrent calls", async () => {
-    await Promise.all([getAuthUserOncePerResponse(), getAuthUserOncePerResponse()]);
+    await Promise.all([
+      getAuthUserOncePerResponse(),
+      getAuthUserOncePerResponse(),
+    ]);
 
     expect(mockGetUser).toHaveBeenCalledTimes(1);
     expect(vi.mocked(after)).toHaveBeenCalledOnce();

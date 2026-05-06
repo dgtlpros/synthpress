@@ -113,7 +113,10 @@ describe("findOrCreateCustomer", () => {
 
   it("creates a new customer when none exists", async () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_new" });
-    const id = await findOrCreateCustomer({ email: "u@test.com", userId: "user-1" });
+    const id = await findOrCreateCustomer({
+      email: "u@test.com",
+      userId: "user-1",
+    });
     expect(id).toBe("cus_new");
     expect(mockCustomersCreate).toHaveBeenCalledWith({
       email: "u@test.com",
@@ -124,7 +127,10 @@ describe("findOrCreateCustomer", () => {
 
 describe("createSubscriptionCheckoutSession", () => {
   it("creates an embedded subscription checkout session", async () => {
-    mockSessionsCreate.mockResolvedValue({ id: "cs_1", client_secret: "secret_1" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_1",
+      client_secret: "secret_1",
+    });
 
     const result = await createSubscriptionCheckoutSession({
       customerId: "cus_1",
@@ -134,22 +140,25 @@ describe("createSubscriptionCheckoutSession", () => {
     });
 
     expect(result).toEqual({ id: "cs_1", clientSecret: "secret_1" });
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      mode: "subscription",
-      ui_mode: "embedded_page",
-      customer: "cus_1",
-      line_items: [{ price: "price_1", quantity: 1 }],
-      return_url: "https://app.test/checkout/return?session_id={CHECKOUT_SESSION_ID}",
-      metadata: expect.objectContaining({
-        supabase_user_id: "user-1",
-        plan_key: "pro",
-        interval: "month",
-        checkout_kind: "subscription",
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "subscription",
+        ui_mode: "embedded_page",
+        customer: "cus_1",
+        line_items: [{ price: "price_1", quantity: 1 }],
+        return_url:
+          "https://app.test/checkout/return?session_id={CHECKOUT_SESSION_ID}",
+        metadata: expect.objectContaining({
+          supabase_user_id: "user-1",
+          plan_key: "pro",
+          interval: "month",
+          checkout_kind: "subscription",
+        }),
+        subscription_data: expect.objectContaining({
+          metadata: expect.objectContaining({ interval: "month" }),
+        }),
       }),
-      subscription_data: expect.objectContaining({
-        metadata: expect.objectContaining({ interval: "month" }),
-      }),
-    }));
+    );
     // Tax + customer_update intentionally not enabled until jurisdictions
     // are registered in Stripe Tax.
     const args = mockSessionsCreate.mock.calls[0][0];
@@ -158,7 +167,10 @@ describe("createSubscriptionCheckoutSession", () => {
   });
 
   it("propagates the interval into metadata when set to year", async () => {
-    mockSessionsCreate.mockResolvedValue({ id: "cs_y", client_secret: "secret_y" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_y",
+      client_secret: "secret_y",
+    });
 
     await createSubscriptionCheckoutSession({
       customerId: "cus_1",
@@ -168,12 +180,14 @@ describe("createSubscriptionCheckoutSession", () => {
       interval: "year",
     });
 
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      metadata: expect.objectContaining({ interval: "year" }),
-      subscription_data: expect.objectContaining({
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
         metadata: expect.objectContaining({ interval: "year" }),
+        subscription_data: expect.objectContaining({
+          metadata: expect.objectContaining({ interval: "year" }),
+        }),
       }),
-    }));
+    );
   });
 
   it("throws when Stripe omits client_secret", async () => {
@@ -190,7 +204,10 @@ describe("createSubscriptionCheckoutSession", () => {
 
   it("uses the default app url when NEXT_PUBLIC_APP_URL is not set", async () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
-    mockSessionsCreate.mockResolvedValue({ id: "cs_2", client_secret: "secret_2" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_2",
+      client_secret: "secret_2",
+    });
 
     await createSubscriptionCheckoutSession({
       customerId: "cus_1",
@@ -199,13 +216,19 @@ describe("createSubscriptionCheckoutSession", () => {
       planKey: "pro",
     });
 
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "http://localhost:3000/checkout/return?session_id={CHECKOUT_SESSION_ID}",
-    }));
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        return_url:
+          "http://localhost:3000/checkout/return?session_id={CHECKOUT_SESSION_ID}",
+      }),
+    );
   });
 
   it("respects a custom returnPath", async () => {
-    mockSessionsCreate.mockResolvedValue({ id: "cs_3", client_secret: "secret_3" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_3",
+      client_secret: "secret_3",
+    });
     await createSubscriptionCheckoutSession({
       customerId: "cus_1",
       priceId: "price_1",
@@ -213,15 +236,20 @@ describe("createSubscriptionCheckoutSession", () => {
       planKey: "pro",
       returnPath: "/custom?session_id={CHECKOUT_SESSION_ID}",
     });
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "https://app.test/custom?session_id={CHECKOUT_SESSION_ID}",
-    }));
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        return_url: "https://app.test/custom?session_id={CHECKOUT_SESSION_ID}",
+      }),
+    );
   });
 });
 
 describe("createTopUpCheckoutSession", () => {
   it("creates an embedded one-time payment checkout session", async () => {
-    mockSessionsCreate.mockResolvedValue({ id: "cs_top", client_secret: "secret_top" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_top",
+      client_secret: "secret_top",
+    });
 
     const result = await createTopUpCheckoutSession({
       customerId: "cus_1",
@@ -232,21 +260,23 @@ describe("createTopUpCheckoutSession", () => {
     });
 
     expect(result).toEqual({ id: "cs_top", clientSecret: "secret_top" });
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      mode: "payment",
-      ui_mode: "embedded_page",
-      metadata: expect.objectContaining({
-        pack_key: "pack_2000",
-        tokens: "2000",
-        checkout_kind: "top_up",
-      }),
-      payment_intent_data: expect.objectContaining({
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "payment",
+        ui_mode: "embedded_page",
         metadata: expect.objectContaining({
           pack_key: "pack_2000",
           tokens: "2000",
+          checkout_kind: "top_up",
+        }),
+        payment_intent_data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            pack_key: "pack_2000",
+            tokens: "2000",
+          }),
         }),
       }),
-    }));
+    );
     const args = mockSessionsCreate.mock.calls[0][0];
     expect(args).not.toHaveProperty("automatic_tax");
     expect(args).not.toHaveProperty("customer_update");
@@ -266,7 +296,10 @@ describe("createTopUpCheckoutSession", () => {
   });
 
   it("uses a custom returnPath when provided", async () => {
-    mockSessionsCreate.mockResolvedValue({ id: "cs_top2", client_secret: "secret_top2" });
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_top2",
+      client_secret: "secret_top2",
+    });
     await createTopUpCheckoutSession({
       customerId: "cus_1",
       priceId: "price_pack",
@@ -275,9 +308,11 @@ describe("createTopUpCheckoutSession", () => {
       tokens: 500,
       returnPath: "/done?session_id={CHECKOUT_SESSION_ID}",
     });
-    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "https://app.test/done?session_id={CHECKOUT_SESSION_ID}",
-    }));
+    expect(mockSessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        return_url: "https://app.test/done?session_id={CHECKOUT_SESSION_ID}",
+      }),
+    );
   });
 });
 
@@ -304,7 +339,10 @@ describe("createPortalSession", () => {
 
 describe("retrieveCheckoutSession", () => {
   it("delegates to stripe.checkout.sessions.retrieve", async () => {
-    mockSessionsRetrieve.mockResolvedValue({ id: "cs_1", payment_status: "paid" });
+    mockSessionsRetrieve.mockResolvedValue({
+      id: "cs_1",
+      payment_status: "paid",
+    });
     const result = await retrieveCheckoutSession("cs_1");
     expect(result).toEqual({ id: "cs_1", payment_status: "paid" });
     expect(mockSessionsRetrieve).toHaveBeenCalledWith("cs_1");
@@ -351,7 +389,10 @@ describe("getCustomerInvoices", () => {
 
     const invoices = await getCustomerInvoices("cus_1");
 
-    expect(mockInvoicesList).toHaveBeenCalledWith({ customer: "cus_1", limit: 12 });
+    expect(mockInvoicesList).toHaveBeenCalledWith({
+      customer: "cus_1",
+      limit: 12,
+    });
     expect(invoices).toEqual([
       {
         id: "in_paid",
@@ -373,7 +414,10 @@ describe("getCustomerInvoices", () => {
   it("respects a custom limit", async () => {
     mockInvoicesList.mockResolvedValue({ data: [] });
     await getCustomerInvoices("cus_2", 50);
-    expect(mockInvoicesList).toHaveBeenCalledWith({ customer: "cus_2", limit: 50 });
+    expect(mockInvoicesList).toHaveBeenCalledWith({
+      customer: "cus_2",
+      limit: 50,
+    });
   });
 
   it("normalizes unknown statuses to 'unknown' and tolerates missing fields", async () => {
@@ -447,13 +491,17 @@ describe("verifyWebhook", () => {
 
     const result = await verifyWebhook({ rawBody: "raw", signature: "sig" });
     expect(result).toBe(event);
-    expect(mockConstructEventAsync).toHaveBeenCalledWith("raw", "sig", "whsec_x");
+    expect(mockConstructEventAsync).toHaveBeenCalledWith(
+      "raw",
+      "sig",
+      "whsec_x",
+    );
   });
 
   it("throws when STRIPE_WEBHOOK_SECRET is missing", async () => {
     delete process.env.STRIPE_WEBHOOK_SECRET;
-    await expect(verifyWebhook({ rawBody: "raw", signature: "sig" })).rejects.toThrow(
-      /Missing STRIPE_WEBHOOK_SECRET/,
-    );
+    await expect(
+      verifyWebhook({ rawBody: "raw", signature: "sig" }),
+    ).rejects.toThrow(/Missing STRIPE_WEBHOOK_SECRET/);
   });
 });

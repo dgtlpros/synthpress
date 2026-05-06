@@ -1,7 +1,7 @@
 import NextLink from "next/link";
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { retrieveCheckoutSession } from "@/services/stripe-service";
 import { getBalance } from "@/services/token-service";
@@ -43,15 +43,15 @@ interface TopUpDetails {
 
 type CompletedDetails = SubscriptionDetails | TopUpDetails | null;
 
-export default async function CheckoutReturnPage({ searchParams }: ReturnPageProps) {
+export default async function CheckoutReturnPage({
+  searchParams,
+}: ReturnPageProps) {
   const {
     data: { user },
   } = await getAuthUserOncePerResponse();
   if (!user) {
     redirect("/login");
   }
-
-  const supabase = await createClient();
 
   const { session_id: sessionId } = await searchParams;
   if (!sessionId) {
@@ -73,7 +73,8 @@ export default async function CheckoutReturnPage({ searchParams }: ReturnPagePro
   const details: CompletedDetails =
     status === "complete" && session ? await loadDetails(session, admin) : null;
 
-  const balance = status === "complete" ? await getBalance(user.id, admin) : null;
+  const balance =
+    status === "complete" ? await getBalance(user.id, admin) : null;
   const receiptEmail = session?.customer_details?.email ?? user.email ?? null;
 
   return (
@@ -93,7 +94,8 @@ export default async function CheckoutReturnPage({ searchParams }: ReturnPagePro
       {status === "complete" && receiptEmail && (
         <p className="text-center text-xs text-muted">
           A receipt was sent to{" "}
-          <span className="font-medium text-foreground">{receiptEmail}</span> by Stripe.
+          <span className="font-medium text-foreground">{receiptEmail}</span> by
+          Stripe.
         </p>
       )}
     </div>
@@ -134,7 +136,8 @@ function CheckoutHeroForStatus({
         title={
           tokens > 0 ? (
             <>
-              <span className="text-gradient-accent">{formatted}</span> synth tokens added
+              <span className="text-gradient-accent">{formatted}</span> synth
+              tokens added
             </>
           ) : (
             "Top-up complete"
@@ -231,8 +234,13 @@ function ReceiptCard({
   );
 }
 
-function SubscriptionReceiptRows({ details }: { details: SubscriptionDetails }) {
-  const cadenceLabel = details.interval === "year" ? "Billed annually" : "Billed monthly";
+function SubscriptionReceiptRows({
+  details,
+}: {
+  details: SubscriptionDetails;
+}) {
+  const cadenceLabel =
+    details.interval === "year" ? "Billed annually" : "Billed monthly";
   const periodSuffix = details.interval === "year" ? "/yr" : "/mo";
   return (
     <>
@@ -242,7 +250,11 @@ function SubscriptionReceiptRows({ details }: { details: SubscriptionDetails }) 
         subtitle={details.planDescription ?? cadenceLabel}
         right={
           details.amountTotal !== null ? (
-            <PriceTag cents={details.amountTotal} period={periodSuffix} size="md" />
+            <PriceTag
+              cents={details.amountTotal}
+              period={periodSuffix}
+              size="md"
+            />
           ) : null
         }
       />
@@ -320,10 +332,14 @@ function FallbackCompleteCard({ balance }: { balance: number | null }) {
     <Card>
       <CardHeader>
         <CardTitle>Current balance</CardTitle>
-        <CardDescription>Updated as soon as Stripe confirms your purchase.</CardDescription>
+        <CardDescription>
+          Updated as soon as Stripe confirms your purchase.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex items-center justify-between">
-        <div className="text-3xl font-bold text-foreground">{formatNumber(balance)}</div>
+        <div className="text-3xl font-bold text-foreground">
+          {formatNumber(balance)}
+        </div>
         <TokenBadge balance={balance} variant="brand" size="lg" />
       </CardContent>
     </Card>
@@ -392,7 +408,10 @@ async function loadDetails(
   const checkoutKind = metadata.checkout_kind;
   const amountTotal = session.amount_total ?? null;
 
-  if (checkoutKind === "subscription" && typeof metadata.plan_key === "string") {
+  if (
+    checkoutKind === "subscription" &&
+    typeof metadata.plan_key === "string"
+  ) {
     const interval = metadata.interval === "year" ? "year" : "month";
     const { data: plan } = await admin
       .from("plans")

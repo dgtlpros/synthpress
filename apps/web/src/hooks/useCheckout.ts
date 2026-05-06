@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createSubscriptionCheckout, createTopUpCheckout } from "@/actions/billing";
+import {
+  createSubscriptionCheckout,
+  createTopUpCheckout,
+} from "@/actions/billing";
 
 export type CheckoutInterval = "month" | "year";
 
@@ -31,15 +34,22 @@ export function useCheckout(target: CheckoutTarget): UseCheckoutResult {
 
   useEffect(() => {
     let cancelled = false;
-    setClientSecret(null);
-    setError(null);
-    setIsLoading(true);
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setClientSecret(null);
+      setError(null);
+      setIsLoading(true);
+    });
 
     async function start() {
       try {
         const result =
           target.kind === "subscription"
-            ? await createSubscriptionCheckout(target.planKey, target.interval ?? "month")
+            ? await createSubscriptionCheckout(
+                target.planKey,
+                target.interval ?? "month",
+              )
             : await createTopUpCheckout(target.packKey);
         // Defensive: drop the result if the consumer unmounted (or the target
         // changed) while we were awaiting. React 18+ no-ops state setters on
@@ -57,7 +67,9 @@ export function useCheckout(target: CheckoutTarget): UseCheckoutResult {
         }
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Could not start checkout.");
+        setError(
+          err instanceof Error ? err.message : "Could not start checkout.",
+        );
       } finally {
         if (!cancelled) setIsLoading(false);
       }

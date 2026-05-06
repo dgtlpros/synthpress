@@ -2,10 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import { getTeamPlan } from "@/services/team-billing-service";
 import { getTeamUsage } from "@/services/team-usage-service";
 import {
@@ -78,19 +75,27 @@ export default async function TeamUsagePage({
         <Link href="/teams" className="hover:text-foreground">
           Teams
         </Link>
-        <span className="mx-2" aria-hidden="true">/</span>
-        <Link href={`/teams/${teamId}/projects`} className="hover:text-foreground">
+        <span className="mx-2" aria-hidden="true">
+          /
+        </span>
+        <Link
+          href={`/teams/${teamId}/projects`}
+          className="hover:text-foreground"
+        >
           {team.name}
         </Link>
-        <span className="mx-2" aria-hidden="true">/</span>
+        <span className="mx-2" aria-hidden="true">
+          /
+        </span>
         <span className="text-foreground">Usage</span>
       </nav>
 
       <div>
         <h1 className="text-2xl font-bold text-foreground">Token usage</h1>
         <p className="mt-2 max-w-2xl text-muted">
-          Tokens spent by automations and member-triggered jobs in {team.name}. All spend draws
-          from {ownerLabel}&apos;s balance ({formatNumber(plan?.balance ?? 0)} tokens remaining
+          Tokens spent by automations and member-triggered jobs in {team.name}.
+          All spend draws from {ownerLabel}&apos;s balance (
+          {formatNumber(plan?.balance ?? 0)} tokens remaining
           {plan?.planKey ? ` on the ${plan.planKey} plan` : ""}).
         </p>
       </div>
@@ -142,7 +147,8 @@ export default async function TeamUsagePage({
             {usage.summary.byProject[0] ? (
               <>
                 <p className="text-lg font-semibold text-foreground">
-                  {usage.summary.byProject[0].projectName ?? "Unknown / no project"}
+                  {usage.summary.byProject[0].projectName ??
+                    "Unknown / no project"}
                 </p>
                 <p className="mt-1 text-xs text-muted">
                   {formatNumber(usage.summary.byProject[0].spent)} tokens ·{" "}
@@ -159,7 +165,9 @@ export default async function TeamUsagePage({
       <Card>
         <CardHeader>
           <CardTitle>By member</CardTitle>
-          <CardDescription>Tokens spent grouped by the member who triggered the job.</CardDescription>
+          <CardDescription>
+            Tokens spent grouped by the member who triggered the job.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {usage.summary.byMember.length === 0 ? (
@@ -167,12 +175,16 @@ export default async function TeamUsagePage({
           ) : (
             <ul className="divide-y divide-border">
               {usage.summary.byMember.map((m) => (
-                <li key={m.actingUserId} className="flex items-center justify-between py-3">
+                <li
+                  key={m.actingUserId}
+                  className="flex items-center justify-between py-3"
+                >
                   <span className="text-sm text-foreground">
                     {m.actingUserName ?? "Unknown member"}
                   </span>
                   <span className="text-sm text-muted">
-                    {formatNumber(m.spent)} tokens · {formatNumber(m.count)} jobs
+                    {formatNumber(m.spent)} tokens · {formatNumber(m.count)}{" "}
+                    jobs
                   </span>
                 </li>
               ))}
@@ -184,7 +196,9 @@ export default async function TeamUsagePage({
       <Card>
         <CardHeader>
           <CardTitle>By project</CardTitle>
-          <CardDescription>Tokens spent grouped by the project the job ran in.</CardDescription>
+          <CardDescription>
+            Tokens spent grouped by the project the job ran in.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {usage.summary.byProject.length === 0 ? (
@@ -192,12 +206,16 @@ export default async function TeamUsagePage({
           ) : (
             <ul className="divide-y divide-border">
               {usage.summary.byProject.map((p) => (
-                <li key={p.projectId} className="flex items-center justify-between py-3">
+                <li
+                  key={p.projectId}
+                  className="flex items-center justify-between py-3"
+                >
                   <span className="text-sm text-foreground">
                     {p.projectName ?? "Unattributed"}
                   </span>
                   <span className="text-sm text-muted">
-                    {formatNumber(p.spent)} tokens · {formatNumber(p.count)} jobs
+                    {formatNumber(p.spent)} tokens · {formatNumber(p.count)}{" "}
+                    jobs
                   </span>
                 </li>
               ))}
@@ -227,7 +245,9 @@ export default async function TeamUsagePage({
                       <th className="px-2 py-2 font-medium">Project</th>
                       <th className="px-2 py-2 font-medium">Blog</th>
                       <th className="px-2 py-2 font-medium">Description</th>
-                      <th className="px-2 py-2 text-right font-medium">Tokens</th>
+                      <th className="px-2 py-2 text-right font-medium">
+                        Tokens
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -236,10 +256,14 @@ export default async function TeamUsagePage({
                         <td className="px-2 py-2 text-xs text-muted">
                           {formatDateTime(r.created_at)}
                         </td>
-                        <td className="px-2 py-2">{r.acting_user_name ?? "Unknown"}</td>
+                        <td className="px-2 py-2">
+                          {r.acting_user_name ?? "Unknown"}
+                        </td>
                         <td className="px-2 py-2">{r.project_name ?? "—"}</td>
                         <td className="px-2 py-2">{r.blog_name ?? "—"}</td>
-                        <td className="px-2 py-2 text-muted">{r.description ?? ""}</td>
+                        <td className="px-2 py-2 text-muted">
+                          {r.description ?? ""}
+                        </td>
                         <td className="px-2 py-2 text-right font-medium text-foreground">
                           -{formatNumber(Math.abs(r.amount))}
                         </td>

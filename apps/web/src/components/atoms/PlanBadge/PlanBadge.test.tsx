@@ -13,7 +13,15 @@ describe("PlanBadge", () => {
   it("annotates trialing/canceling/past_due/canceled with a suffix", () => {
     const cases: Array<
       [
-        "trialing" | "canceling" | "past_due" | "canceled" | "incomplete" | "unpaid" | "paused",
+        (
+          | "trialing"
+          | "canceling"
+          | "past_due"
+          | "canceled"
+          | "incomplete"
+          | "unpaid"
+          | "paused"
+        ),
         string,
       ]
     > = [

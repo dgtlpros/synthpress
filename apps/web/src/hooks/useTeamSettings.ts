@@ -2,12 +2,12 @@
 
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  createInviteAction,
-  revokeInviteAction,
-} from "@/actions/team-invites";
+import { createInviteAction, revokeInviteAction } from "@/actions/team-invites";
 import { changeMemberRole, removeMember } from "@/actions/team-members";
-import { updateTeam, deleteTeam as deleteTeamAction } from "@/actions/workspace";
+import {
+  updateTeam,
+  deleteTeam as deleteTeamAction,
+} from "@/actions/workspace";
 import type { TeamRole } from "@/lib/team-roles";
 
 export interface NewInvite {
@@ -51,7 +51,9 @@ export interface UseTeamSettingsResult {
   deleteTeamError: string | null;
 }
 
-export function useTeamSettings({ teamId }: UseTeamSettingsOptions): UseTeamSettingsResult {
+export function useTeamSettings({
+  teamId,
+}: UseTeamSettingsOptions): UseTeamSettingsResult {
   const router = useRouter();
   const [newInvite, setNewInvite] = useState<NewInvite | null>(null);
 

@@ -4,9 +4,9 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/services/team-policy-service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/team-policy-service")>(
-    "@/services/team-policy-service",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/services/team-policy-service")
+  >("@/services/team-policy-service");
   return { ...actual, assertCan: vi.fn() };
 });
 
@@ -30,18 +30,23 @@ function makeAdminFor(opts: {
   deleteError?: { message: string } | null;
   updateError?: { message: string } | null;
 }) {
-  const maybeSingle = vi
-    .fn()
-    .mockResolvedValue({ data: opts.selectRole ? { role: opts.selectRole } : null, error: null });
+  const maybeSingle = vi.fn().mockResolvedValue({
+    data: opts.selectRole ? { role: opts.selectRole } : null,
+    error: null,
+  });
   const eqInner = vi.fn().mockReturnValue({ maybeSingle });
   const eqOuter = vi.fn().mockReturnValue({ eq: eqInner });
   const select = vi.fn().mockReturnValue({ eq: eqOuter });
 
-  const eqDelInner = vi.fn().mockResolvedValue({ error: opts.deleteError ?? null });
+  const eqDelInner = vi
+    .fn()
+    .mockResolvedValue({ error: opts.deleteError ?? null });
   const eqDelOuter = vi.fn().mockReturnValue({ eq: eqDelInner });
   const del = vi.fn().mockReturnValue({ eq: eqDelOuter });
 
-  const eqUpdInner = vi.fn().mockResolvedValue({ error: opts.updateError ?? null });
+  const eqUpdInner = vi
+    .fn()
+    .mockResolvedValue({ error: opts.updateError ?? null });
   const eqUpdOuter = vi.fn().mockReturnValue({ eq: eqUpdInner });
   const update = vi.fn().mockReturnValue({ eq: eqUpdOuter });
 
@@ -104,7 +109,9 @@ describe("removeMember", () => {
     mockUser({ id: "u1" });
     const { admin } = makeAdminFor({ selectRole: "member" });
     mockedAdmin.mockReturnValue(admin as never);
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "remove_member", "member"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "remove_member", "member"),
+    );
 
     const result = await removeMember("t1", "u2");
     expect(result.error).toBe("forbidden");
@@ -112,7 +119,10 @@ describe("removeMember", () => {
 
   it("returns delete error message", async () => {
     mockUser({ id: "u1" });
-    const { admin } = makeAdminFor({ selectRole: "member", deleteError: { message: "boom" } });
+    const { admin } = makeAdminFor({
+      selectRole: "member",
+      deleteError: { message: "boom" },
+    });
     mockedAdmin.mockReturnValue(admin as never);
     mockedAssertCan.mockResolvedValue("owner");
 
@@ -204,7 +214,9 @@ describe("changeMemberRole", () => {
     mockUser({ id: "u1" });
     const { admin } = makeAdminFor({ selectRole: "member" });
     mockedAdmin.mockReturnValue(admin as never);
-    mockedAssertCan.mockRejectedValue(new TeamPermissionError("forbidden", "change_role", "admin"));
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "change_role", "admin"),
+    );
 
     const result = await changeMemberRole("t1", "u2", "admin");
     expect(result.error).toBe("forbidden");
@@ -212,7 +224,10 @@ describe("changeMemberRole", () => {
 
   it("returns update error message", async () => {
     mockUser({ id: "u1" });
-    const { admin } = makeAdminFor({ selectRole: "member", updateError: { message: "boom" } });
+    const { admin } = makeAdminFor({
+      selectRole: "member",
+      updateError: { message: "boom" },
+    });
     mockedAdmin.mockReturnValue(admin as never);
     mockedAssertCan.mockResolvedValue("owner");
 

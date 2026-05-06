@@ -26,7 +26,10 @@ describe("TeamListItem", () => {
     expect(screen.getByText("Owned by Pat")).toBeInTheDocument();
     expect(screen.getByText("3 members · 2 projects")).toBeInTheDocument();
     expect(screen.getByText("Free")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Acme/ })).toHaveAttribute("href", "/teams/t1/projects");
+    expect(screen.getByRole("link", { name: /Acme/ })).toHaveAttribute(
+      "href",
+      "/teams/t1/projects",
+    );
   });
 
   it("uses aria-label that summarizes the row", () => {

@@ -6,7 +6,10 @@ vi.mock("@/actions/billing", () => ({
   createTopUpCheckout: vi.fn(),
 }));
 
-import { createSubscriptionCheckout, createTopUpCheckout } from "@/actions/billing";
+import {
+  createSubscriptionCheckout,
+  createTopUpCheckout,
+} from "@/actions/billing";
 import { useCheckout, type CheckoutTarget } from "./useCheckout";
 
 const mockedSub = vi.mocked(createSubscriptionCheckout);
@@ -95,7 +98,10 @@ describe("useCheckout", () => {
 
   it("re-fetches when target identity changes", async () => {
     mockedSub.mockResolvedValueOnce({ clientSecret: "first" });
-    const initialTarget: CheckoutTarget = { kind: "subscription", planKey: "pro" };
+    const initialTarget: CheckoutTarget = {
+      kind: "subscription",
+      planKey: "pro",
+    };
     const { result, rerender } = renderHook(
       ({ target }: { target: CheckoutTarget }) => useCheckout(target),
       { initialProps: { target: initialTarget } },
@@ -103,7 +109,10 @@ describe("useCheckout", () => {
     await waitFor(() => expect(result.current.clientSecret).toBe("first"));
 
     mockedSub.mockResolvedValueOnce({ clientSecret: "second" });
-    const nextTarget: CheckoutTarget = { kind: "subscription", planKey: "starter" };
+    const nextTarget: CheckoutTarget = {
+      kind: "subscription",
+      planKey: "starter",
+    };
     rerender({ target: nextTarget });
 
     await waitFor(() => expect(result.current.clientSecret).toBe("second"));

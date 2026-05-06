@@ -12,10 +12,19 @@ export interface ProjectsListProps {
   className?: string;
 }
 
-export function ProjectsList({ teamId, projects, className }: ProjectsListProps) {
+export function ProjectsList({
+  teamId,
+  projects,
+  className,
+}: ProjectsListProps) {
   if (projects.length === 0) {
     return (
-      <p className={cn("rounded-[var(--sp-radius-lg)] border border-dashed border-border px-4 py-6 text-center text-sm text-muted", className)}>
+      <p
+        className={cn(
+          "rounded-[var(--sp-radius-lg)] border border-dashed border-border px-4 py-6 text-center text-sm text-muted",
+          className,
+        )}
+      >
         No projects match your filter.
       </p>
     );

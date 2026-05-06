@@ -35,7 +35,10 @@ type InviteStatus =
   | { kind: "wrong_email"; teamName: string }
   | { kind: "ready"; row: InviteRow };
 
-async function loadInvite(rawToken: string, callerEmail: string | null): Promise<InviteStatus> {
+async function loadInvite(
+  rawToken: string,
+  callerEmail: string | null,
+): Promise<InviteStatus> {
   const admin = createAdminClient();
   const tokenHash = hashInviteToken(rawToken);
 
@@ -57,7 +60,8 @@ async function loadInvite(rawToken: string, callerEmail: string | null): Promise
 
   if (row.revoked_at) return { kind: "revoked" };
   if (row.accepted_at) return { kind: "already_accepted" };
-  if (new Date(row.expires_at).getTime() < Date.now()) return { kind: "expired" };
+  if (new Date(row.expires_at).getTime() < Date.now())
+    return { kind: "expired" };
 
   if (row.email && callerEmail) {
     if (row.email.toLowerCase() !== callerEmail.toLowerCase()) {
@@ -91,7 +95,9 @@ export default async function AcceptInvitePage({
         {status.kind === "ready" ? (
           <>
             <CardHeader>
-              <CardTitle>You&apos;ve been invited to {status.row.team?.name ?? "a team"}</CardTitle>
+              <CardTitle>
+                You&apos;ve been invited to {status.row.team?.name ?? "a team"}
+              </CardTitle>
               <CardDescription>
                 {status.row.inviter?.full_name ? (
                   <>
@@ -99,20 +105,26 @@ export default async function AcceptInvitePage({
                       {status.row.inviter.full_name}
                     </span>{" "}
                     invited you to join as{" "}
-                    <span className="font-medium text-foreground">{status.row.role}</span>.
+                    <span className="font-medium text-foreground">
+                      {status.row.role}
+                    </span>
+                    .
                   </>
                 ) : (
                   <>
                     You&apos;re invited to join as{" "}
-                    <span className="font-medium text-foreground">{status.row.role}</span>.
+                    <span className="font-medium text-foreground">
+                      {status.row.role}
+                    </span>
+                    .
                   </>
                 )}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <p className="mb-4 text-sm text-muted">
-                Members can run jobs and edit content; the team owner&apos;s subscription and tokens
-                power the team.
+                Members can run jobs and edit content; the team owner&apos;s
+                subscription and tokens power the team.
               </p>
               <AcceptInviteConnector
                 rawToken={token}
@@ -128,8 +140,8 @@ export default async function AcceptInvitePage({
             <CardHeader>
               <CardTitle>Invalid invite link</CardTitle>
               <CardDescription>
-                This link doesn&apos;t match any active invite. The team may have revoked it, or
-                the URL may have been mistyped.
+                This link doesn&apos;t match any active invite. The team may
+                have revoked it, or the URL may have been mistyped.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -148,7 +160,8 @@ export default async function AcceptInvitePage({
             <CardHeader>
               <CardTitle>This invite was revoked</CardTitle>
               <CardDescription>
-                The team owner or an admin revoked this invite. Ask them for a new link.
+                The team owner or an admin revoked this invite. Ask them for a
+                new link.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -167,7 +180,8 @@ export default async function AcceptInvitePage({
             <CardHeader>
               <CardTitle>This invite has already been used</CardTitle>
               <CardDescription>
-                If you accepted it earlier, the team should already be in your sidebar.
+                If you accepted it earlier, the team should already be in your
+                sidebar.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -185,7 +199,9 @@ export default async function AcceptInvitePage({
           <>
             <CardHeader>
               <CardTitle>This invite has expired</CardTitle>
-              <CardDescription>Ask the team to send you a new link.</CardDescription>
+              <CardDescription>
+                Ask the team to send you a new link.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Link
@@ -204,10 +220,15 @@ export default async function AcceptInvitePage({
               <CardTitle>This invite is for a different email</CardTitle>
               <CardDescription>
                 You&apos;re signed in as{" "}
-                <span className="font-medium text-foreground">{user.email}</span>, but this invite
-                to <span className="font-medium text-foreground">{status.teamName}</span> was sent
-                to a different address. Sign out and sign in with the invited email, or ask for an
-                open link.
+                <span className="font-medium text-foreground">
+                  {user.email}
+                </span>
+                , but this invite to{" "}
+                <span className="font-medium text-foreground">
+                  {status.teamName}
+                </span>{" "}
+                was sent to a different address. Sign out and sign in with the
+                invited email, or ask for an open link.
               </CardDescription>
             </CardHeader>
             <CardContent>

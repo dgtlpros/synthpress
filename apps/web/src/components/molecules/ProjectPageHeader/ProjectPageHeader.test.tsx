@@ -7,7 +7,11 @@ afterEach(cleanup);
 describe("ProjectPageHeader", () => {
   it("renders title and team", () => {
     render(
-      <ProjectPageHeader projectName="Alpha" teamName="Crew" onOpenSettings={vi.fn()} />,
+      <ProjectPageHeader
+        projectName="Alpha"
+        teamName="Crew"
+        onOpenSettings={vi.fn()}
+      />,
     );
     expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
     expect(screen.getByText("Crew")).toBeInTheDocument();
@@ -27,7 +31,13 @@ describe("ProjectPageHeader", () => {
 
   it("calls onOpenSettings when button clicked", () => {
     const onOpenSettings = vi.fn();
-    render(<ProjectPageHeader projectName="P" teamName="T" onOpenSettings={onOpenSettings} />);
+    render(
+      <ProjectPageHeader
+        projectName="P"
+        teamName="T"
+        onOpenSettings={onOpenSettings}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Project settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });

@@ -16,7 +16,10 @@ import {
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 
-type ChainResult<T> = { data: T; error: { code?: string; message?: string } | null };
+type ChainResult<T> = {
+  data: T;
+  error: { code?: string; message?: string } | null;
+};
 
 function makeQueryChain<T>(result: ChainResult<T>) {
   const chain = {
@@ -114,7 +117,10 @@ describe("getRecentTransactions", () => {
 
     const result = await getRecentTransactions("user-1");
     expect(result).toEqual(rows);
-    expect(client.__chains.token_transactions.order).toHaveBeenCalledWith("created_at", { ascending: false });
+    expect(client.__chains.token_transactions.order).toHaveBeenCalledWith(
+      "created_at",
+      { ascending: false },
+    );
     expect(client.__chains.token_transactions.limit).toHaveBeenCalledWith(10);
   });
 
@@ -144,7 +150,9 @@ describe("getRecentTransactions", () => {
     });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    await expect(getRecentTransactions("user-1")).rejects.toEqual({ message: "boom" });
+    await expect(getRecentTransactions("user-1")).rejects.toEqual({
+      message: "boom",
+    });
   });
 });
 
@@ -252,9 +260,9 @@ describe("grantTokens", () => {
 
 describe("recordTokenRefund", () => {
   it("rejects non-positive amounts", async () => {
-    await expect(
-      recordTokenRefund({ userId: "u", amount: 0 }),
-    ).rejects.toThrow(/positive/);
+    await expect(recordTokenRefund({ userId: "u", amount: 0 })).rejects.toThrow(
+      /positive/,
+    );
   });
 
   it("calls the record_token_refund RPC and unwraps the JSON result", async () => {
@@ -415,9 +423,10 @@ describe("recordSubscriptionEvent", () => {
     const client = makeClient({
       token_transactions: { data: null, error: null },
     });
-    client.__chains.token_transactions.insert = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: { code: "42601", message: "boom" } });
+    client.__chains.token_transactions.insert = vi.fn().mockResolvedValue({
+      data: null,
+      error: { code: "42601", message: "boom" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(

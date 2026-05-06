@@ -1,7 +1,9 @@
 <!-- BEGIN:nextjs-agent-rules -->
+
 # This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+
 <!-- END:nextjs-agent-rules -->
 
 ## Billing (Stripe + synth tokens)
@@ -29,7 +31,7 @@ before changing anything in:
   in the Stripe live-mode dashboard.
 - Test card: `4242 4242 4242 4242`, any future expiry, any CVC.
 - All client → backend mutations go `connector → hook → server action → service →
-  Supabase/Stripe`. The client never imports Stripe secrets or writes to billing
+Supabase/Stripe`. The client never imports Stripe secrets or writes to billing
   tables directly (RLS forbids it).
 
 ## Cursor rules to know

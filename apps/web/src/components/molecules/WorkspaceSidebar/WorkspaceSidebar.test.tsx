@@ -29,19 +29,31 @@ beforeEach(() => {
 describe("WorkspaceSidebar", () => {
   it("renders Dashboard and Account links", () => {
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "href",
+      "/dashboard",
+    );
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
   });
 
   it("renders All teams link to /teams root", () => {
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute("href", "/teams");
+    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute(
+      "href",
+      "/teams",
+    );
   });
 
   it("marks All teams link current on /teams", () => {
     mockPathname.mockReturnValue("/teams");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "All teams" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("shows project links only for the active team in the URL", () => {
@@ -56,33 +68,48 @@ describe("WorkspaceSidebar", () => {
       "href",
       "/teams/t-alpha/projects/p-2",
     );
-    expect(screen.queryByRole("link", { name: /Beta/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Beta/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("marks Dashboard as current on /dashboard", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("marks Account as current under /account", () => {
     mockPathname.mockReturnValue("/account/billing");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("opens team picker and lists teams", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose or switch team" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose or switch team" }),
+    );
 
-    expect(screen.getByRole("listbox", { name: "Switch team" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("listbox", { name: "Switch team" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Alpha Team/i })).toHaveAttribute(
       "href",
       "/teams/t-alpha/projects",
     );
-    expect(screen.getByRole("option", { name: /Beta/i })).toHaveAttribute("href", "/teams/t-beta/projects");
+    expect(screen.getByRole("option", { name: /Beta/i })).toHaveAttribute(
+      "href",
+      "/teams/t-beta/projects",
+    );
   });
 
   it("invokes onItemClick when a project link is clicked", () => {
@@ -102,13 +129,17 @@ describe("WorkspaceSidebar", () => {
   it("shows gear icon button when a team is active in the route", () => {
     mockPathname.mockReturnValue("/teams/t-alpha/projects");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("button", { name: /team settings/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /team settings/i }),
+    ).toBeInTheDocument();
   });
 
   it("does not show gear icon when no team is active", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.queryByRole("button", { name: /team settings/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /team settings/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens settings popover with Settings and Usage links on gear click", () => {
@@ -136,7 +167,9 @@ describe("WorkspaceSidebar", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
 
     fireEvent.click(gearBtn);
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Settings" }),
+    ).not.toBeInTheDocument();
   });
 
   it("closes settings popover and opens team picker when team button is clicked", () => {
@@ -146,8 +179,12 @@ describe("WorkspaceSidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /team settings/i }));
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
+    expect(
+      screen.queryByRole("link", { name: "Settings" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("listbox")).toBeInTheDocument();
   });
 
@@ -155,7 +192,9 @@ describe("WorkspaceSidebar", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
     expect(screen.getByRole("listbox")).toBeInTheDocument();
 
     fireEvent.mouseDown(document.body);
@@ -170,7 +209,9 @@ describe("WorkspaceSidebar", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Settings" }),
+    ).not.toBeInTheDocument();
   });
 
   it("calls onItemClick and closes picker when a team option is clicked", () => {
@@ -178,7 +219,9 @@ describe("WorkspaceSidebar", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} onItemClick={onItemClick} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
     fireEvent.click(screen.getByRole("option", { name: /Alpha Team/i }));
     expect(onItemClick).toHaveBeenCalled();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
@@ -192,7 +235,9 @@ describe("WorkspaceSidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /team settings/i }));
     fireEvent.click(screen.getByRole("link", { name: "Settings" }));
     expect(onItemClick).toHaveBeenCalled();
-    expect(screen.queryByRole("link", { name: "Usage" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Usage" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders sorted teams alphabetically in the picker", () => {
@@ -202,7 +247,9 @@ describe("WorkspaceSidebar", () => {
       { id: "t-alpha", name: "Alpha Team", projects: [] },
     ];
     render(<WorkspaceSidebar teams={unsorted} />);
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
     const options = screen.getAllByRole("option");
     expect(options[0]).toHaveTextContent("Alpha Team");
     expect(options[1]).toHaveTextContent("Zebra");
@@ -233,13 +280,18 @@ describe("WorkspaceSidebar", () => {
   it("marks Dashboard as current on root path '/'", () => {
     mockPathname.mockReturnValue("/");
     render(<WorkspaceSidebar teams={teams} />);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("does not close popover on mousedown inside the team picker element", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<WorkspaceSidebar teams={teams} />);
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
     const listbox = screen.getByRole("listbox", { name: "Switch team" });
     fireEvent.mouseDown(listbox);
     expect(screen.getByRole("listbox")).toBeInTheDocument();
@@ -254,7 +306,9 @@ describe("WorkspaceSidebar", () => {
     mockPathname.mockReturnValue("/dashboard");
     const emptyNameTeams = [{ id: "t-empty", name: "  ", projects: [] }];
     render(<WorkspaceSidebar teams={emptyNameTeams} />);
-    fireEvent.click(screen.getByRole("button", { name: /choose or switch team/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /choose or switch team/i }),
+    );
     expect(screen.getByText("?")).toBeInTheDocument();
   });
 

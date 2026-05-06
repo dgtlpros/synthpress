@@ -2,10 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   consumeTeamTokens as consumeTeamTokensService,
   getTeamPlan as getTeamPlanService,
@@ -92,7 +89,9 @@ export type GetTeamBillingResult =
  * Server action: returns the team's billing context (owner id, plan, status,
  * balance). Only members may call this.
  */
-export async function getTeamBilling(teamId: string): Promise<GetTeamBillingResult> {
+export async function getTeamBilling(
+  teamId: string,
+): Promise<GetTeamBillingResult> {
   if (!teamId) {
     return { plan: null, error: "teamId is required" };
   }

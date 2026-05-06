@@ -24,26 +24,53 @@ afterEach(cleanup);
 
 describe("CheckoutConnector", () => {
   it("renders a spinner while loading", () => {
-    mockedUse.mockReturnValue({ clientSecret: null, isLoading: true, error: null });
-    render(<CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />);
+    mockedUse.mockReturnValue({
+      clientSecret: null,
+      isLoading: true,
+      error: null,
+    });
+    render(
+      <CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />,
+    );
     expect(screen.getByTestId("checkout-loading")).toBeInTheDocument();
   });
 
   it("renders the error message when there is an error", () => {
-    mockedUse.mockReturnValue({ clientSecret: null, isLoading: false, error: "boom" });
-    render(<CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />);
+    mockedUse.mockReturnValue({
+      clientSecret: null,
+      isLoading: false,
+      error: "boom",
+    });
+    render(
+      <CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />,
+    );
     expect(screen.getByText("boom")).toBeInTheDocument();
   });
 
   it("renders a fallback when clientSecret is missing without an error", () => {
-    mockedUse.mockReturnValue({ clientSecret: null, isLoading: false, error: null });
-    render(<CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />);
+    mockedUse.mockReturnValue({
+      clientSecret: null,
+      isLoading: false,
+      error: null,
+    });
+    render(
+      <CheckoutConnector target={{ kind: "subscription", planKey: "pro" }} />,
+    );
     expect(screen.getByText(/Could not initialize/)).toBeInTheDocument();
   });
 
   it("renders the embed when ready", () => {
-    mockedUse.mockReturnValue({ clientSecret: "secret_x", isLoading: false, error: null });
-    render(<CheckoutConnector target={{ kind: "top_up", packKey: "pack_500" }} />);
-    expect(screen.getByTestId("embed")).toHaveAttribute("data-secret", "secret_x");
+    mockedUse.mockReturnValue({
+      clientSecret: "secret_x",
+      isLoading: false,
+      error: null,
+    });
+    render(
+      <CheckoutConnector target={{ kind: "top_up", packKey: "pack_500" }} />,
+    );
+    expect(screen.getByTestId("embed")).toHaveAttribute(
+      "data-secret",
+      "secret_x",
+    );
   });
 });

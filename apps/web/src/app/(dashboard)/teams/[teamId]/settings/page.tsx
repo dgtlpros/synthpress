@@ -2,8 +2,15 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUserOncePerResponse } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getUserTeamRole, roleCan, type TeamRole } from "@/services/team-policy-service";
-import { listInvites, type TeamInviteListRow } from "@/services/team-invite-service";
+import {
+  getUserTeamRole,
+  roleCan,
+  type TeamRole,
+} from "@/services/team-policy-service";
+import {
+  listInvites,
+  type TeamInviteListRow,
+} from "@/services/team-invite-service";
 import { TeamSettingsConnector } from "@/connectors/TeamSettingsConnector";
 
 export const dynamic = "force-dynamic";
@@ -16,14 +23,21 @@ interface MemberRow {
   full_name: string | null;
 }
 
-async function loadMembers(teamId: string, admin: ReturnType<typeof createAdminClient>) {
+async function loadMembers(
+  teamId: string,
+  admin: ReturnType<typeof createAdminClient>,
+) {
   const { data: rows } = await admin
     .from("team_members")
     .select("user_id, role, created_at")
     .eq("team_id", teamId)
     .order("created_at", { ascending: true });
 
-  const members = (rows ?? []) as { user_id: string; role: TeamRole; created_at: string }[];
+  const members = (rows ?? []) as {
+    user_id: string;
+    role: TeamRole;
+    created_at: string;
+  }[];
   if (members.length === 0) return [] as MemberRow[];
 
   const ids = members.map((m) => m.user_id);
@@ -79,7 +93,11 @@ export default async function TeamSettingsPage({
   let invites: TeamInviteListRow[] = [];
   if (roleCan(role, "list_invites")) {
     try {
-      invites = await listInvites({ teamId, actorUserId: user.id, client: admin });
+      invites = await listInvites({
+        teamId,
+        actorUserId: user.id,
+        client: admin,
+      });
     } catch {
       invites = [];
     }
@@ -91,20 +109,27 @@ export default async function TeamSettingsPage({
         <Link href="/teams" className="hover:text-foreground">
           Teams
         </Link>
-        <span className="mx-2" aria-hidden="true">/</span>
-        <Link href={`/teams/${teamId}/projects`} className="hover:text-foreground">
+        <span className="mx-2" aria-hidden="true">
+          /
+        </span>
+        <Link
+          href={`/teams/${teamId}/projects`}
+          className="hover:text-foreground"
+        >
           {team.name}
         </Link>
-        <span className="mx-2" aria-hidden="true">/</span>
+        <span className="mx-2" aria-hidden="true">
+          /
+        </span>
         <span className="text-foreground">Settings</span>
       </nav>
 
       <div>
         <h1 className="text-2xl font-bold text-foreground">Team settings</h1>
         <p className="mt-2 max-w-2xl text-muted">
-          Manage members and invites for {team.name}. The team owner&apos;s subscription powers
-          everyone&apos;s features and tokens; member-triggered jobs spend the owner&apos;s
-          balance.
+          Manage members and invites for {team.name}. The team owner&apos;s
+          subscription powers everyone&apos;s features and tokens;
+          member-triggered jobs spend the owner&apos;s balance.
         </p>
       </div>
 

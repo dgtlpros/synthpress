@@ -15,7 +15,10 @@ describe("ProjectsList", () => {
         ]}
       />,
     );
-    expect(screen.getByRole("link", { name: /Alpha/i })).toHaveAttribute("href", "/teams/t1/projects/p1");
+    expect(screen.getByRole("link", { name: /Alpha/i })).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/p1",
+    );
   });
 
   it("shows empty filter message", () => {

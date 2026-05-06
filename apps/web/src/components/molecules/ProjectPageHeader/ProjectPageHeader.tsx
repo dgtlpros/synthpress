@@ -26,7 +26,9 @@ export function ProjectPageHeader({
       )}
     >
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground sm:text-xl">{projectName}</h1>
+        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+          {projectName}
+        </h1>
         <p className="mt-0.5 text-xs text-muted">
           Team <span className="text-foreground/90">{teamName}</span>
         </p>

@@ -87,7 +87,10 @@ describe("consumeTeamTokens", () => {
 
   it("translates insufficient_tokens to a typed error", async () => {
     const client = makeClient();
-    client.rpc.mockResolvedValue({ data: null, error: { message: "insufficient_tokens" } });
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "insufficient_tokens" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
@@ -97,7 +100,10 @@ describe("consumeTeamTokens", () => {
 
   it("translates team_has_no_billing_user to a typed error", async () => {
     const client = makeClient();
-    client.rpc.mockResolvedValue({ data: null, error: { message: "team_has_no_billing_user" } });
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "team_has_no_billing_user" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
@@ -107,7 +113,10 @@ describe("consumeTeamTokens", () => {
 
   it("translates amount_must_be_positive errors raised by the RPC", async () => {
     const client = makeClient();
-    client.rpc.mockResolvedValue({ data: null, error: { message: "amount_must_be_positive" } });
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "amount_must_be_positive" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
@@ -117,7 +126,10 @@ describe("consumeTeamTokens", () => {
 
   it("rethrows unknown supabase errors", async () => {
     const client = makeClient();
-    client.rpc.mockResolvedValue({ data: null, error: { message: "boom", code: "P0500" } });
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "boom", code: "P0500" },
+    });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await expect(
@@ -147,7 +159,11 @@ describe("consumeTeamTokens", () => {
 
     expect(client.rpc).toHaveBeenCalledWith(
       "consume_team_tokens",
-      expect.objectContaining({ p_metadata: {}, p_idempotency_key: undefined, p_description: undefined }),
+      expect.objectContaining({
+        p_metadata: {},
+        p_idempotency_key: undefined,
+        p_description: undefined,
+      }),
     );
   });
 });
@@ -211,7 +227,9 @@ describe("getTeamPlan", () => {
   });
 
   it("propagates supabase errors when reading the team", async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: { message: "db down" } });
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: "db down" } });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
     const select = vi.fn().mockReturnValue({ eq });
     const client = { from: vi.fn().mockReturnValue({ select }) };

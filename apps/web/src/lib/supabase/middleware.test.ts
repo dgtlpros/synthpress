@@ -107,10 +107,22 @@ describe("updateSession", () => {
     await updateSession(request);
 
     const config = mockedCreateServerClient.mock.calls[0][2] as unknown as {
-      cookies: { setAll: (cookies: { name: string; value: string; options: Record<string, unknown> }[]) => void };
+      cookies: {
+        setAll: (
+          cookies: {
+            name: string;
+            value: string;
+            options: Record<string, unknown>;
+          }[],
+        ) => void;
+      };
     };
     config.cookies.setAll([
-      { name: "sb-token", value: "abc123", options: { path: "/", httpOnly: true } },
+      {
+        name: "sb-token",
+        value: "abc123",
+        options: { path: "/", httpOnly: true },
+      },
     ]);
 
     expect(request.cookies.get("sb-token")?.value).toBe("abc123");

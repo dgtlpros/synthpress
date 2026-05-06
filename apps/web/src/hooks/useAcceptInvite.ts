@@ -22,7 +22,9 @@ export interface UseAcceptInviteOptions {
  * Hook for the invite-accept button. Calls the `acceptInviteAction` server
  * action; on success, navigates to the team's projects page.
  */
-export function useAcceptInvite(options: UseAcceptInviteOptions): UseAcceptInviteResult {
+export function useAcceptInvite(
+  options: UseAcceptInviteOptions,
+): UseAcceptInviteResult {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState(false);

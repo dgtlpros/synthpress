@@ -84,7 +84,9 @@ export const ActivePro: Story = {
     balance: 5100,
     transactions: sampleTransactions,
     topUpPacks: samplePacks,
-    subscriptionActions: <Button variant="secondary">Manage subscription</Button>,
+    subscriptionActions: (
+      <Button variant="secondary">Manage subscription</Button>
+    ),
   },
 };
 
@@ -105,7 +107,9 @@ export const ActiveAnnualPro: Story = {
     balance: 60000,
     transactions: sampleTransactions,
     topUpPacks: samplePacks,
-    subscriptionActions: <Button variant="secondary">Manage subscription</Button>,
+    subscriptionActions: (
+      <Button variant="secondary">Manage subscription</Button>
+    ),
   },
 };
 

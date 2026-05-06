@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient, getAuthUserOncePerResponse } from "@/lib/supabase/server";
+import {
+  createClient,
+  getAuthUserOncePerResponse,
+} from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { listBlogsForProject } from "@/services/workspace-service";
 import { getUserTeamRole } from "@/services/team-policy-service";
@@ -24,7 +27,11 @@ export default async function ProjectOverviewPage({
 
   const supabase = await createClient();
 
-  const { data: team } = await supabase.from("teams").select("id,name").eq("id", teamId).maybeSingle();
+  const { data: team } = await supabase
+    .from("teams")
+    .select("id,name")
+    .eq("id", teamId)
+    .maybeSingle();
   const { data: project } = await supabase
     .from("projects")
     .select("id,name,slug,team_id,description")
@@ -50,7 +57,10 @@ export default async function ProjectOverviewPage({
         <span className="mx-2" aria-hidden="true">
           /
         </span>
-        <Link href={`/teams/${teamId}/projects`} className="hover:text-foreground">
+        <Link
+          href={`/teams/${teamId}/projects`}
+          className="hover:text-foreground"
+        >
           {team.name}
         </Link>
         <span className="mx-2" aria-hidden="true">
@@ -71,7 +81,10 @@ export default async function ProjectOverviewPage({
 
       <p className="text-xs text-muted">
         Manage members and invites in{" "}
-        <Link href={`/teams/${teamId}/settings`} className="underline hover:text-foreground">
+        <Link
+          href={`/teams/${teamId}/settings`}
+          className="underline hover:text-foreground"
+        >
           team settings
         </Link>
         .

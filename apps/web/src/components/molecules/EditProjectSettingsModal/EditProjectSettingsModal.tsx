@@ -60,7 +60,9 @@ export function EditProjectSettingsModal({
             className="mt-1.5 min-h-[88px] resize-y"
           />
         </div>
-        {errorMessage ? <p className="text-sm text-error">{errorMessage}</p> : null}
+        {errorMessage ? (
+          <p className="text-sm text-error">{errorMessage}</p>
+        ) : null}
       </div>
     </Modal>
   );

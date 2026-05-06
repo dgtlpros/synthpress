@@ -20,10 +20,16 @@ export const Open: Story = {
     children: <p className="text-sm text-muted">Form fields go here.</p>,
     footer: (
       <div className="flex gap-2">
-        <button type="button" className="rounded-[var(--sp-radius-lg)] border border-border px-3 py-1.5 text-sm">
+        <button
+          type="button"
+          className="rounded-[var(--sp-radius-lg)] border border-border px-3 py-1.5 text-sm"
+        >
           Cancel
         </button>
-        <button type="button" className="rounded-[var(--sp-radius-lg)] bg-gradient-accent px-3 py-1.5 text-sm text-white">
+        <button
+          type="button"
+          className="rounded-[var(--sp-radius-lg)] bg-gradient-accent px-3 py-1.5 text-sm text-white"
+        >
           Save
         </button>
       </div>

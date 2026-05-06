@@ -28,13 +28,22 @@ const spacingScale = [
 export const SpacingScale: Story = {
   render: () => (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold text-foreground">Spacing Scale (Tailwind default)</h2>
+      <h2 className="text-xl font-semibold text-foreground">
+        Spacing Scale (Tailwind default)
+      </h2>
       <div className="space-y-2">
         {spacingScale.map((s) => (
           <div key={s.name} className="flex items-center gap-4">
-            <span className="w-12 text-right text-xs font-mono text-muted">{s.name}</span>
-            <div className="bg-gradient-accent rounded" style={{ height: "20px", width: s.px }} />
-            <span className="text-xs text-muted font-mono">{s.rem} / {s.px}</span>
+            <span className="w-12 text-right text-xs font-mono text-muted">
+              {s.name}
+            </span>
+            <div
+              className="bg-gradient-accent rounded"
+              style={{ height: "20px", width: s.px }}
+            />
+            <span className="text-xs text-muted font-mono">
+              {s.rem} / {s.px}
+            </span>
           </div>
         ))}
       </div>

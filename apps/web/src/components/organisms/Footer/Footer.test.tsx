@@ -34,7 +34,10 @@ describe("Footer", () => {
       ["Terms of Service", "/terms"],
     ])("links %s to %s", (label, href) => {
       render(<Footer />);
-      expect(screen.getByText(label).closest("a")).toHaveAttribute("href", href);
+      expect(screen.getByText(label).closest("a")).toHaveAttribute(
+        "href",
+        href,
+      );
     });
   });
 });

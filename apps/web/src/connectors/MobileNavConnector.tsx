@@ -14,7 +14,11 @@ export interface MobileNavConnectorProps {
   className?: string;
 }
 
-export function MobileNavConnector({ teams, email, className }: MobileNavConnectorProps) {
+export function MobileNavConnector({
+  teams,
+  email,
+  className,
+}: MobileNavConnectorProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {

@@ -18,12 +18,20 @@ describe("AppCard", () => {
   });
 
   it("shows badge content", () => {
-    render(<AppCard title="Blog" href="/b" badge={<span data-testid="badge">3</span>} />);
+    render(
+      <AppCard
+        title="Blog"
+        href="/b"
+        badge={<span data-testid="badge">3</span>}
+      />,
+    );
     expect(screen.getByTestId("badge")).toHaveTextContent("3");
   });
 
   it("renders icon slot", () => {
-    render(<AppCard title="X" href="/x" icon={<span data-testid="ic">I</span>} />);
+    render(
+      <AppCard title="X" href="/x" icon={<span data-testid="ic">I</span>} />,
+    );
     expect(screen.getByTestId("ic")).toBeInTheDocument();
   });
 

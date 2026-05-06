@@ -39,7 +39,8 @@ export function CreateAppChoiceModal({
           >
             <span className="text-sm font-semibold text-foreground">Blog</span>
             <span className="mt-1 text-xs text-muted">
-              WordPress connection, multiple sites per project, and AI-assisted publishing.
+              WordPress connection, multiple sites per project, and AI-assisted
+              publishing.
             </span>
           </NextLink>
         </li>

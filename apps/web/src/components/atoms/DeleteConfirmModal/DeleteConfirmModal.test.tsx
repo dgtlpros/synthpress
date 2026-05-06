@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 
 beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (
+    this: HTMLDialogElement,
+  ) {
     this.setAttribute("open", "");
   });
   HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
@@ -25,7 +27,9 @@ describe("DeleteConfirmModal", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: /delete team/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /delete team/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/My Team/)).toBeInTheDocument();
   });
 
@@ -63,7 +67,9 @@ describe("DeleteConfirmModal", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Acme" } });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Acme" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /delete team/i }));
     expect(onConfirm).toHaveBeenCalledOnce();
   });

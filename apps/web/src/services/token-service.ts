@@ -19,7 +19,10 @@ export type GrantTokensType = Exclude<TokenGrantType, "refund">;
 
 type Client = SupabaseClient<Database>;
 
-export async function getBalance(userId: string, client?: Client): Promise<number> {
+export async function getBalance(
+  userId: string,
+  client?: Client,
+): Promise<number> {
   const supabase = client ?? createAdminClient();
   const { data, error } = await supabase
     .from("token_balances")
@@ -174,7 +177,8 @@ export async function recordSubscriptionEvent(params: {
     type: params.type,
     description: params.description,
     stripe_event_id: params.stripeEventId,
-    metadata: (params.metadata ?? {}) as Tables<"token_transactions">["metadata"],
+    metadata: (params.metadata ??
+      {}) as Tables<"token_transactions">["metadata"],
   });
 
   if (error) {

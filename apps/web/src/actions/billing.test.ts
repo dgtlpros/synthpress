@@ -86,7 +86,9 @@ describe("createSubscriptionCheckout", () => {
 
   it("returns error when user has no email", async () => {
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createSubscriptionCheckout("pro");
     expect(result.error).toMatch(/signed in/);
@@ -120,7 +122,10 @@ describe("createSubscriptionCheckout", () => {
       stripe_annual_price_id: "price_pro_year",
     } as never);
     mockedGetOrCreate.mockResolvedValue("cus_1");
-    mockedSubCheckout.mockResolvedValue({ id: "cs_1", clientSecret: "secret_1" });
+    mockedSubCheckout.mockResolvedValue({
+      id: "cs_1",
+      clientSecret: "secret_1",
+    });
 
     const result = await createSubscriptionCheckout("pro");
     expect(result).toEqual({ clientSecret: "secret_1" });
@@ -142,7 +147,10 @@ describe("createSubscriptionCheckout", () => {
       stripe_annual_price_id: "price_pro_year",
     } as never);
     mockedGetOrCreate.mockResolvedValue("cus_1");
-    mockedSubCheckout.mockResolvedValue({ id: "cs_y", clientSecret: "secret_y" });
+    mockedSubCheckout.mockResolvedValue({
+      id: "cs_y",
+      clientSecret: "secret_y",
+    });
 
     const result = await createSubscriptionCheckout("pro", "year");
     expect(result).toEqual({ clientSecret: "secret_y" });
@@ -197,7 +205,10 @@ describe("createSubscriptionCheckout", () => {
 });
 
 describe("createTopUpCheckout", () => {
-  function mockTokenPack(pack: unknown, error: { message?: string } | null = null) {
+  function mockTokenPack(
+    pack: unknown,
+    error: { message?: string } | null = null,
+  ) {
     const chain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -216,7 +227,9 @@ describe("createTopUpCheckout", () => {
 
   it("returns error when user has no email", async () => {
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createTopUpCheckout("pack_500");
     expect(result.error).toMatch(/signed in/);
@@ -244,7 +257,10 @@ describe("createTopUpCheckout", () => {
       tokens: 500,
     });
     mockedGetOrCreate.mockResolvedValue("cus_1");
-    mockedTopUpCheckout.mockResolvedValue({ id: "cs_t", clientSecret: "secret_t" });
+    mockedTopUpCheckout.mockResolvedValue({
+      id: "cs_t",
+      clientSecret: "secret_t",
+    });
 
     const result = await createTopUpCheckout("pack_500");
     expect(result).toEqual({ clientSecret: "secret_t" });
@@ -259,7 +275,11 @@ describe("createTopUpCheckout", () => {
 
   it("returns error message on Stripe failure", async () => {
     mockSupabase({ id: "u1", email: "u@test.com" });
-    mockTokenPack({ key: "pack_500", stripe_price_id: "price_pack", tokens: 500 });
+    mockTokenPack({
+      key: "pack_500",
+      stripe_price_id: "price_pack",
+      tokens: 500,
+    });
     mockedGetOrCreate.mockRejectedValue(new Error("network"));
 
     const result = await createTopUpCheckout("pack_500");
@@ -268,7 +288,11 @@ describe("createTopUpCheckout", () => {
 
   it("returns generic error on non-Error rejection", async () => {
     mockSupabase({ id: "u1", email: "u@test.com" });
-    mockTokenPack({ key: "pack_500", stripe_price_id: "price_pack", tokens: 500 });
+    mockTokenPack({
+      key: "pack_500",
+      stripe_price_id: "price_pack",
+      tokens: 500,
+    });
     mockedGetOrCreate.mockRejectedValue("oops");
 
     const result = await createTopUpCheckout("pack_500");
@@ -397,7 +421,9 @@ describe("createBillingPortal", () => {
 
   it("returns error when user has no email", async () => {
     mockedCreateClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
     } as never);
     const result = await createBillingPortal();
     expect(result.error).toMatch(/signed in/);

@@ -76,7 +76,9 @@ describe("BillingSection", () => {
     expect(screen.getByText(/free plan/)).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("No token activity yet")).toBeInTheDocument();
-    expect(screen.getByText(/Subscription grants, top-ups/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Subscription grants, top-ups/),
+    ).toBeInTheDocument();
   });
 
   it("renders an active monthly subscription with renewal copy", () => {
@@ -156,7 +158,9 @@ describe("BillingSection", () => {
         topUpPacks={[{ ...sampleTopUps[0], ctaLabel: "Add to balance" }]}
       />,
     );
-    expect(screen.getByRole("link", { name: "Add to balance" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Add to balance" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a recent transactions table with formatted dates and signed amounts", () => {

@@ -19,7 +19,9 @@ describe("Select", () => {
   });
 
   it("renders placeholder", () => {
-    render(<Select options={options} placeholder="Select niche" defaultValue="" />);
+    render(
+      <Select options={options} placeholder="Select niche" defaultValue="" />,
+    );
     expect(screen.getByText("Select niche")).toBeInTheDocument();
   });
 
@@ -32,7 +34,9 @@ describe("Select", () => {
   it("handles change", () => {
     const onChange = vi.fn();
     render(<Select options={options} onChange={onChange} />);
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "tech" } });
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "tech" },
+    });
     expect(onChange).toHaveBeenCalled();
   });
 

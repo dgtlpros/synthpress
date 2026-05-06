@@ -6,12 +6,20 @@ afterEach(cleanup);
 
 describe("LandingLayout", () => {
   it("renders children", () => {
-    render(<LandingLayout><div>Page content</div></LandingLayout>);
+    render(
+      <LandingLayout>
+        <div>Page content</div>
+      </LandingLayout>,
+    );
     expect(screen.getByText("Page content")).toBeInTheDocument();
   });
 
   it("renders navbar", () => {
-    render(<LandingLayout><div>Content</div></LandingLayout>);
+    render(
+      <LandingLayout>
+        <div>Content</div>
+      </LandingLayout>,
+    );
     expect(screen.getByAltText("SynthPress")).toBeInTheDocument();
   });
 });

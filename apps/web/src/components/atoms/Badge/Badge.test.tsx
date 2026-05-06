@@ -11,7 +11,13 @@ describe("Badge", () => {
   });
 
   it("renders all variants without crashing", () => {
-    const variants = ["default", "success", "warning", "error", "brand"] as const;
+    const variants = [
+      "default",
+      "success",
+      "warning",
+      "error",
+      "brand",
+    ] as const;
     variants.forEach((variant) => {
       const { unmount } = render(<Badge variant={variant}>{variant}</Badge>);
       expect(screen.getByText(variant)).toBeInTheDocument();

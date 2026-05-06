@@ -1,7 +1,11 @@
 import "server-only";
 import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import type {
+  Database,
+  Tables,
+  TablesInsert,
+} from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateCustomer } from "./stripe-service";
 import {
@@ -15,7 +19,12 @@ type Client = SupabaseClient<Database>;
 export type Subscription = Tables<"subscriptions">;
 export type Plan = Tables<"plans">;
 
-const ACTIVE_STATUSES = ["active", "trialing", "past_due", "incomplete"] as const;
+const ACTIVE_STATUSES = [
+  "active",
+  "trialing",
+  "past_due",
+  "incomplete",
+] as const;
 
 /**
  * Returns the persisted Stripe customer id for the user, creating one on
@@ -113,7 +122,10 @@ export async function getPlanByStripePriceId(
   return data ?? null;
 }
 
-export async function getPlanByKey(planKey: string, client?: Client): Promise<Plan | null> {
+export async function getPlanByKey(
+  planKey: string,
+  client?: Client,
+): Promise<Plan | null> {
   const supabase = client ?? createAdminClient();
   const { data, error } = await supabase
     .from("plans")
@@ -150,8 +162,9 @@ function tokensForCycle(plan: Plan, stripeSub: Stripe.Subscription): number {
 function extractInvoiceIdFromSubscription(
   stripeSub: Stripe.Subscription,
 ): string | null {
-  const latest = (stripeSub as unknown as { latest_invoice?: string | { id: string } | null })
-    .latest_invoice;
+  const latest = (
+    stripeSub as unknown as { latest_invoice?: string | { id: string } | null }
+  ).latest_invoice;
   if (typeof latest === "string") return latest;
   if (latest && typeof latest === "object" && "id" in latest) return latest.id;
   return null;
@@ -162,20 +175,27 @@ function extractInvoiceIdFromSubscription(
  * `invoice.parent.subscription_details.subscription`. We read the new field
  * first and fall back to the legacy field so older API versions still work.
  */
-function extractSubscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
-  const parent = (invoice as unknown as {
-    parent?: {
-      subscription_details?: { subscription?: string | { id: string } | null } | null;
-    } | null;
-  }).parent;
+function extractSubscriptionIdFromInvoice(
+  invoice: Stripe.Invoice,
+): string | null {
+  const parent = (
+    invoice as unknown as {
+      parent?: {
+        subscription_details?: {
+          subscription?: string | { id: string } | null;
+        } | null;
+      } | null;
+    }
+  ).parent;
   const fromParent = parent?.subscription_details?.subscription ?? null;
   if (typeof fromParent === "string") return fromParent;
   if (fromParent && typeof fromParent === "object" && "id" in fromParent) {
     return fromParent.id;
   }
 
-  const legacy = (invoice as unknown as { subscription?: string | { id: string } | null })
-    .subscription ?? null;
+  const legacy =
+    (invoice as unknown as { subscription?: string | { id: string } | null })
+      .subscription ?? null;
   if (typeof legacy === "string") return legacy;
   if (legacy && typeof legacy === "object" && "id" in legacy) return legacy.id;
 
@@ -191,7 +211,8 @@ function extractSubscriptionIdFromInvoice(invoice: Stripe.Invoice): string | nul
  */
 function isScheduledToCancel(stripeSub: Stripe.Subscription): boolean {
   if (stripeSub.cancel_at_period_end) return true;
-  const cancelAt = (stripeSub as unknown as { cancel_at?: number | null }).cancel_at ?? null;
+  const cancelAt =
+    (stripeSub as unknown as { cancel_at?: number | null }).cancel_at ?? null;
   return cancelAt !== null;
 }
 
@@ -230,7 +251,8 @@ async function resolveSubscriptionContext(
   client: Client,
 ): Promise<{ userId: string; planKey: string } | null> {
   const userId =
-    (typeof stripeSub.metadata?.supabase_user_id === "string" && stripeSub.metadata.supabase_user_id) ||
+    (typeof stripeSub.metadata?.supabase_user_id === "string" &&
+      stripeSub.metadata.supabase_user_id) ||
     null;
 
   if (!userId) return null;
@@ -246,7 +268,9 @@ async function resolveSubscriptionContext(
   // Fallback: subscription is on a price we don't know about (custom price,
   // legacy plan, etc.). Trust the metadata if it points at a known plan_key.
   const metadataPlanKey =
-    typeof stripeSub.metadata?.plan_key === "string" ? stripeSub.metadata.plan_key : null;
+    typeof stripeSub.metadata?.plan_key === "string"
+      ? stripeSub.metadata.plan_key
+      : null;
 
   if (metadataPlanKey) {
     return { userId, planKey: metadataPlanKey };
@@ -307,7 +331,10 @@ export async function handleCheckoutCompleted(
     if (!subscriptionId || !options.retrieveSubscription) return;
 
     const stripeSub = await options.retrieveSubscription(subscriptionId);
-    const ctx = await syncSubscriptionFromStripe({ stripeSub, client: supabase });
+    const ctx = await syncSubscriptionFromStripe({
+      stripeSub,
+      client: supabase,
+    });
     if (!ctx) return;
 
     const plan = await getPlanByKey(ctx.planKey, supabase);
@@ -337,16 +364,20 @@ export async function handleCheckoutCompleted(
 
   if (session.mode === "payment") {
     const packKey =
-      typeof session.metadata?.pack_key === "string" ? session.metadata.pack_key : null;
+      typeof session.metadata?.pack_key === "string"
+        ? session.metadata.pack_key
+        : null;
     const tokensRaw =
-      typeof session.metadata?.tokens === "string" ? session.metadata.tokens : null;
+      typeof session.metadata?.tokens === "string"
+        ? session.metadata.tokens
+        : null;
     const tokens = tokensRaw ? Number.parseInt(tokensRaw, 10) : NaN;
     if (!packKey || !Number.isFinite(tokens) || tokens <= 0) return;
 
     const paymentIntentId =
       typeof session.payment_intent === "string"
         ? session.payment_intent
-        : session.payment_intent?.id ?? null;
+        : (session.payment_intent?.id ?? null);
 
     await grantTokens({
       userId,
@@ -449,11 +480,7 @@ async function recordSubscriptionTransitions(params: {
       getPlanByKey(previousPlanKey, client),
       getPlanByKey(ctx.planKey, client),
     ]);
-    if (
-      fromPlan &&
-      toPlan &&
-      toPlan.monthly_tokens < fromPlan.monthly_tokens
-    ) {
+    if (fromPlan && toPlan && toPlan.monthly_tokens < fromPlan.monthly_tokens) {
       await recordSubscriptionEvent({
         userId: ctx.userId,
         type: "plan_downgraded",
@@ -683,10 +710,12 @@ function tokensToRevoke(params: {
  * `unknown` cast — same pattern used in `handleInvoicePaymentSucceeded`.
  */
 function extractInvoiceIdFromCharge(charge: Stripe.Charge): string | null {
-  const invoice = (charge as unknown as { invoice?: string | { id: string } | null })
-    .invoice;
+  const invoice = (
+    charge as unknown as { invoice?: string | { id: string } | null }
+  ).invoice;
   if (typeof invoice === "string") return invoice;
-  if (invoice && typeof invoice === "object" && "id" in invoice) return invoice.id;
+  if (invoice && typeof invoice === "object" && "id" in invoice)
+    return invoice.id;
   return null;
 }
 
@@ -704,7 +733,7 @@ export async function handleChargeRefunded(
   const customerId =
     typeof charge.customer === "string"
       ? charge.customer
-      : charge.customer?.id ?? null;
+      : (charge.customer?.id ?? null);
   if (!customerId) return;
 
   const userId = await findUserIdForStripeCustomer(customerId, supabase);
@@ -714,7 +743,7 @@ export async function handleChargeRefunded(
   const paymentIntentId =
     typeof charge.payment_intent === "string"
       ? charge.payment_intent
-      : charge.payment_intent?.id ?? null;
+      : (charge.payment_intent?.id ?? null);
 
   let totalGranted = 0;
   if (invoiceId) {
@@ -779,7 +808,9 @@ export async function handleChargeDisputeClosed(
   if (dispute.status !== "lost") return;
 
   const chargeId =
-    typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id ?? null;
+    typeof dispute.charge === "string"
+      ? dispute.charge
+      : (dispute.charge?.id ?? null);
   if (!chargeId || !options.retrieveCharge) return;
 
   const charge = await options.retrieveCharge(chargeId);
@@ -787,7 +818,7 @@ export async function handleChargeDisputeClosed(
   const customerId =
     typeof charge.customer === "string"
       ? charge.customer
-      : charge.customer?.id ?? null;
+      : (charge.customer?.id ?? null);
   if (!customerId) return;
 
   const userId = await findUserIdForStripeCustomer(customerId, supabase);
@@ -797,7 +828,7 @@ export async function handleChargeDisputeClosed(
   const paymentIntentId =
     typeof charge.payment_intent === "string"
       ? charge.payment_intent
-      : charge.payment_intent?.id ?? null;
+      : (charge.payment_intent?.id ?? null);
 
   let totalGranted = 0;
   if (invoiceId) {

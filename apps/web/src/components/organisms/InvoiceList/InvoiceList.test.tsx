@@ -30,7 +30,12 @@ describe("InvoiceList", () => {
       <InvoiceList
         invoices={[
           sampleInvoice,
-          { ...sampleInvoice, id: "in_2", number: "INV-002", amountCents: 5900 },
+          {
+            ...sampleInvoice,
+            id: "in_2",
+            number: "INV-002",
+            amountCents: 5900,
+          },
         ]}
       />,
     );

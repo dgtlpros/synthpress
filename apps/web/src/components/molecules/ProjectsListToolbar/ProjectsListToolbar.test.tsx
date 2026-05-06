@@ -15,7 +15,9 @@ describe("ProjectsListToolbar", () => {
         onSortChange={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByPlaceholderText(/Search projects/), { target: { value: "x" } });
+    fireEvent.change(screen.getByPlaceholderText(/Search projects/), {
+      target: { value: "x" },
+    });
     expect(onSearchChange).toHaveBeenCalledWith("x");
   });
 
@@ -29,7 +31,9 @@ describe("ProjectsListToolbar", () => {
         onSortChange={onSortChange}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Sort/), { target: { value: "newest" } });
+    fireEvent.change(screen.getByLabelText(/Sort/), {
+      target: { value: "newest" },
+    });
     expect(onSortChange).toHaveBeenCalledWith("newest");
   });
 });

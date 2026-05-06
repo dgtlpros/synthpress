@@ -41,7 +41,12 @@ afterEach(cleanup);
 
 describe("HeaderTokenContextConnector", () => {
   it("renders personal balance link outside team routes", () => {
-    render(<HeaderTokenContextConnector personalBalance={150} teamPlans={teamPlans} />);
+    render(
+      <HeaderTokenContextConnector
+        personalBalance={150}
+        teamPlans={teamPlans}
+      />,
+    );
     const link = screen.getByRole("link", { name: /view billing/i });
     expect(link).toHaveAttribute("href", "/account/billing");
     expect(link.textContent).toContain("150 tokens");
@@ -49,7 +54,12 @@ describe("HeaderTokenContextConnector", () => {
 
   it("renders team balance link with owner attribution and role for members", () => {
     mockPathname.mockReturnValue("/teams/t-acme/projects");
-    render(<HeaderTokenContextConnector personalBalance={150} teamPlans={teamPlans} />);
+    render(
+      <HeaderTokenContextConnector
+        personalBalance={150}
+        teamPlans={teamPlans}
+      />,
+    );
     const link = screen.getByRole("link", {
       name: /spending acme balance \(paid by owen\) · member/i,
     });
@@ -58,34 +68,56 @@ describe("HeaderTokenContextConnector", () => {
   });
 
   it("shows Admin role label for admin users", () => {
-    const adminPlans: HeaderTeamPlan[] = [
-      { ...teamPlans[0], myRole: "admin" },
-    ];
+    const adminPlans: HeaderTeamPlan[] = [{ ...teamPlans[0], myRole: "admin" }];
     mockPathname.mockReturnValue("/teams/t-acme/projects");
-    render(<HeaderTokenContextConnector personalBalance={150} teamPlans={adminPlans} />);
+    render(
+      <HeaderTokenContextConnector
+        personalBalance={150}
+        teamPlans={adminPlans}
+      />,
+    );
     expect(
-      screen.getByRole("link", { name: /spending acme balance \(paid by owen\) · admin/i }),
+      screen.getByRole("link", {
+        name: /spending acme balance \(paid by owen\) · admin/i,
+      }),
     ).toBeInTheDocument();
   });
 
   it("links owner-of-team users to their own billing", () => {
     mockPathname.mockReturnValue("/teams/t-self/projects/foo");
-    render(<HeaderTokenContextConnector personalBalance={999} teamPlans={teamPlans} />);
-    const link = screen.getByRole("link", { name: /spending your balance for personal/i });
+    render(
+      <HeaderTokenContextConnector
+        personalBalance={999}
+        teamPlans={teamPlans}
+      />,
+    );
+    const link = screen.getByRole("link", {
+      name: /spending your balance for personal/i,
+    });
     expect(link).toHaveAttribute("href", "/account/billing");
     expect(link.textContent).toContain("30 tokens");
   });
 
   it("falls back to personal balance when team id is unknown", () => {
     mockPathname.mockReturnValue("/teams/unknown-team/projects");
-    render(<HeaderTokenContextConnector personalBalance={42} teamPlans={teamPlans} />);
-    expect(screen.getByRole("link").getAttribute("href")).toBe("/account/billing");
+    render(
+      <HeaderTokenContextConnector
+        personalBalance={42}
+        teamPlans={teamPlans}
+      />,
+    );
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      "/account/billing",
+    );
   });
 
   it("uses warning variant when team balance is low", () => {
     mockPathname.mockReturnValue("/teams/t-self/projects");
     const { container } = render(
-      <HeaderTokenContextConnector personalBalance={500} teamPlans={teamPlans} />,
+      <HeaderTokenContextConnector
+        personalBalance={500}
+        teamPlans={teamPlans}
+      />,
     );
     // t-self has balance 30 (≤50) => warning variant uses bg-warning class.
     const badge = container.querySelector(".bg-warning\\/10");

@@ -2,9 +2,17 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import type {
+  Database,
+  Tables,
+  TablesInsert,
+} from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { assertCan, type TeamRole, TeamPermissionError } from "./team-policy-service";
+import {
+  assertCan,
+  type TeamRole,
+  TeamPermissionError,
+} from "./team-policy-service";
 
 type Client = SupabaseClient<Database>;
 
@@ -51,8 +59,15 @@ export function hashInviteToken(rawToken: string): string {
  * Uses NEXT_PUBLIC_APP_URL when set, otherwise falls back to localhost
  * (matches the convention used in stripe checkout return URLs).
  */
-export function buildInviteAcceptUrl(rawToken: string, appUrl?: string): string {
-  const base = (appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+export function buildInviteAcceptUrl(
+  rawToken: string,
+  appUrl?: string,
+): string {
+  const base = (
+    appUrl ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
   return `${base}/teams/invite/${rawToken}`;
 }
 
@@ -79,9 +94,13 @@ export interface CreateInviteResult {
  * depth (server actions are the only gate today, but services may be
  * reused from other entry points later).
  */
-export async function createInvite(input: CreateInviteInput): Promise<CreateInviteResult> {
+export async function createInvite(
+  input: CreateInviteInput,
+): Promise<CreateInviteResult> {
   if (!INVITABLE_ROLES.includes(input.role)) {
-    throw new Error(`createInvite: invalid role ${input.role} (cannot invite owners)`);
+    throw new Error(
+      `createInvite: invalid role ${input.role} (cannot invite owners)`,
+    );
   }
 
   const supabase = input.client ?? createAdminClient();
@@ -102,12 +121,16 @@ export async function createInvite(input: CreateInviteInput): Promise<CreateInvi
   const { data, error } = await supabase
     .from("team_invites")
     .insert(insert)
-    .select("id, team_id, role, email, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at")
+    .select(
+      "id, team_id, role, email, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at",
+    )
     .single();
 
   if (error) {
     if (error.code === "23505") {
-      throw new Error("An invite for this email is already pending on this team.");
+      throw new Error(
+        "An invite for this email is already pending on this team.",
+      );
     }
     throw error;
   }
@@ -141,7 +164,9 @@ export interface AcceptInviteResult {
  * the invite is still marked accepted (so the link stops working) and
  * the existing role is returned.
  */
-export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInviteResult> {
+export async function acceptInvite(
+  input: AcceptInviteInput,
+): Promise<AcceptInviteResult> {
   const supabase = input.client ?? createAdminClient();
   const tokenHash = hashInviteToken(input.rawToken);
 
@@ -160,7 +185,10 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
     throw new TeamInviteError("revoked", "This invite has been revoked.");
   }
   if (invite.accepted_at) {
-    throw new TeamInviteError("already_accepted", "This invite has already been used.");
+    throw new TeamInviteError(
+      "already_accepted",
+      "This invite has already been used.",
+    );
   }
   if (new Date(invite.expires_at).getTime() < Date.now()) {
     throw new TeamInviteError("expired", "This invite has expired.");
@@ -197,7 +225,10 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
 
   const { error: updErr } = await supabase
     .from("team_invites")
-    .update({ accepted_at: new Date().toISOString(), accepted_by: input.userId })
+    .update({
+      accepted_at: new Date().toISOString(),
+      accepted_by: input.userId,
+    })
     .eq("id", invite.id);
 
   if (updErr) throw updErr;
@@ -231,7 +262,10 @@ export async function revokeInvite(input: RevokeInviteInput): Promise<void> {
   await assertCan(invite.team_id, input.actorUserId, "revoke_invite", supabase);
 
   if (invite.accepted_at) {
-    throw new TeamInviteError("already_accepted", "This invite has already been used.");
+    throw new TeamInviteError(
+      "already_accepted",
+      "This invite has already been used.",
+    );
   }
   if (invite.revoked_at) return;
 
@@ -254,13 +288,17 @@ export interface ListInvitesInput {
  * Returns invites for the team. Pending-only by default; pass
  * `includeAccepted: true` to get the full audit history.
  */
-export async function listInvites(input: ListInvitesInput): Promise<TeamInviteListRow[]> {
+export async function listInvites(
+  input: ListInvitesInput,
+): Promise<TeamInviteListRow[]> {
   const supabase = input.client ?? createAdminClient();
   await assertCan(input.teamId, input.actorUserId, "list_invites", supabase);
 
   let query = supabase
     .from("team_invites")
-    .select("id, team_id, role, email, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at")
+    .select(
+      "id, team_id, role, email, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at",
+    )
     .eq("team_id", input.teamId)
     .order("created_at", { ascending: false });
 

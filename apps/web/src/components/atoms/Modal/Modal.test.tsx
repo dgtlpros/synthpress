@@ -3,7 +3,9 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { Modal } from "./Modal";
 
 beforeEach(() => {
-  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (
+    this: HTMLDialogElement,
+  ) {
     this.setAttribute("open", "");
   });
   HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
@@ -35,7 +37,12 @@ describe("Modal", () => {
 
   it("renders footer", () => {
     render(
-      <Modal open title="T" onClose={vi.fn()} footer={<button type="button">Save</button>}>
+      <Modal
+        open
+        title="T"
+        onClose={vi.fn()}
+        footer={<button type="button">Save</button>}
+      >
         x
       </Modal>,
     );

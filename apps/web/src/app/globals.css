@@ -34,14 +34,26 @@
   --muted-foreground: #94a3b8;
 
   /* Gradients */
-  --sp-gradient-brand: linear-gradient(135deg, #4338ca 0%, #2563eb 50%, #06b6d4 100%);
-  --sp-gradient-accent: linear-gradient(135deg, #2563eb 0%, #7c3aed 50%, #d946ef 100%);
+  --sp-gradient-brand: linear-gradient(
+    135deg,
+    #4338ca 0%,
+    #2563eb 50%,
+    #06b6d4 100%
+  );
+  --sp-gradient-accent: linear-gradient(
+    135deg,
+    #2563eb 0%,
+    #7c3aed 50%,
+    #d946ef 100%
+  );
   --sp-gradient-glow: linear-gradient(135deg, #7c3aed 0%, #d946ef 100%);
 
   /* Shadows */
   --sp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --sp-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
-  --sp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --sp-shadow-md:
+    0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+  --sp-shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
   --sp-shadow-glow: 0 0 20px rgb(99 102 241 / 0.15);
 
   /* Radius */

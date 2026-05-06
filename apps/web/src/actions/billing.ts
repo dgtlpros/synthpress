@@ -53,7 +53,8 @@ export async function createSubscriptionCheckout(
     return { error: `Unknown plan: ${planKey}` };
   }
 
-  const priceId = interval === "year" ? plan.stripe_annual_price_id : plan.stripe_price_id;
+  const priceId =
+    interval === "year" ? plan.stripe_annual_price_id : plan.stripe_price_id;
   if (!priceId) {
     if (interval === "year") {
       return { error: `Plan "${plan.name}" doesn't have an annual price.` };
@@ -79,12 +80,15 @@ export async function createSubscriptionCheckout(
     return { clientSecret: session.clientSecret };
   } catch (error) {
     return {
-      error: error instanceof Error ? error.message : "Could not start checkout.",
+      error:
+        error instanceof Error ? error.message : "Could not start checkout.",
     };
   }
 }
 
-export async function createTopUpCheckout(packKey: string): Promise<CheckoutSessionResult> {
+export async function createTopUpCheckout(
+  packKey: string,
+): Promise<CheckoutSessionResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -150,7 +154,8 @@ export async function createBillingPortal(): Promise<PortalSessionResult> {
     return { url: session.url };
   } catch (err) {
     return {
-      error: err instanceof Error ? err.message : "Could not open billing portal.",
+      error:
+        err instanceof Error ? err.message : "Could not open billing portal.",
     };
   }
 }
@@ -182,7 +187,10 @@ export async function resumeSubscription(): Promise<ResumeSubscriptionResult> {
     const updatedStripeSub = await stripeResumeSubscription(
       subscription.stripe_subscription_id,
     );
-    await syncSubscriptionFromStripe({ stripeSub: updatedStripeSub, client: admin });
+    await syncSubscriptionFromStripe({
+      stripeSub: updatedStripeSub,
+      client: admin,
+    });
 
     // Log the resume in the activity feed eagerly so the user sees the row
     // on next render. The webhook's transition detector will read the
@@ -221,7 +229,8 @@ export async function resumeSubscription(): Promise<ResumeSubscriptionResult> {
     return { ok: true };
   } catch (err) {
     return {
-      error: err instanceof Error ? err.message : "Could not resume subscription.",
+      error:
+        err instanceof Error ? err.message : "Could not resume subscription.",
     };
   }
 }

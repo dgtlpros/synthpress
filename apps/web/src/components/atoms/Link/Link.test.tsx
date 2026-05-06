@@ -15,7 +15,11 @@ describe("Link", () => {
   it("renders all variants", () => {
     const variants = ["default", "muted", "nav"] as const;
     variants.forEach((variant) => {
-      const { unmount } = render(<Link variant={variant} href="#">{variant}</Link>);
+      const { unmount } = render(
+        <Link variant={variant} href="#">
+          {variant}
+        </Link>,
+      );
       expect(screen.getByRole("link")).toBeInTheDocument();
       unmount();
     });
@@ -23,12 +27,18 @@ describe("Link", () => {
 
   it("uses next/link for internal routes", () => {
     render(<Link href="/dashboard">Dashboard</Link>);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "href",
+      "/dashboard",
+    );
   });
 
   it("uses native <a> for anchor links", () => {
     render(<Link href="#section">Jump</Link>);
-    expect(screen.getByRole("link", { name: "Jump" })).toHaveAttribute("href", "#section");
+    expect(screen.getByRole("link", { name: "Jump" })).toHaveAttribute(
+      "href",
+      "#section",
+    );
   });
 
   it("uses native <a> with target _blank for external links", () => {

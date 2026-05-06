@@ -85,7 +85,9 @@ export function InvoiceRow({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-foreground">{label}</span>
-          <span className="text-xs text-muted">{formatTimestamp(createdAt)}</span>
+          <span className="text-xs text-muted">
+            {formatTimestamp(createdAt)}
+          </span>
         </div>
         {periodLabel && <p className="text-xs text-muted">{periodLabel}</p>}
       </div>

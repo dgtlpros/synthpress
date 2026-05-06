@@ -20,7 +20,9 @@ function getSupabaseCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
   return cookieStore.getAll().filter((c) => c.name.startsWith("sb-"));
 }
 
-function supabaseAuthCookieKey(cookieStore: Awaited<ReturnType<typeof cookies>>): string {
+function supabaseAuthCookieKey(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+): string {
   const parts = getSupabaseCookies(cookieStore)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((c) => `${c.name}=${c.value}`);
@@ -106,7 +108,9 @@ export async function createClient() {
       } catch {
         // Same read-only cookie context as setAll — middleware already clears cookies when possible.
       }
-      return { data: { user: null }, error: null } as unknown as Awaited<ReturnType<typeof originalGetUser>>;
+      return { data: { user: null }, error: null } as unknown as Awaited<
+        ReturnType<typeof originalGetUser>
+      >;
     }
     return result;
   };

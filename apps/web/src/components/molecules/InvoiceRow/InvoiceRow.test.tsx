@@ -75,7 +75,9 @@ describe("InvoiceRow", () => {
         <InvoiceRow {...baseProps} pdfUrl={null} />
       </ul>,
     );
-    expect(screen.queryByRole("link", { name: "Download" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Download" }),
+    ).not.toBeInTheDocument();
   });
 
   it("omits the View link when there's no hostedUrl", () => {
@@ -84,7 +86,9 @@ describe("InvoiceRow", () => {
         <InvoiceRow {...baseProps} hostedUrl={null} />
       </ul>,
     );
-    expect(screen.queryByRole("link", { name: "View" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "View" }),
+    ).not.toBeInTheDocument();
   });
 
   it("forwards a custom className", () => {

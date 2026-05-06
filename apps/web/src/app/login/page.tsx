@@ -6,7 +6,9 @@ import { Footer } from "@/components/organisms/Footer";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage() {
-  const { data: { user } } = await getAuthUserOncePerResponse();
+  const {
+    data: { user },
+  } = await getAuthUserOncePerResponse();
 
   if (user) {
     redirect("/dashboard");
@@ -19,12 +21,17 @@ export default async function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="mb-8 text-center">
             <h1 className="text-2xl font-bold text-foreground">Welcome back</h1>
-            <p className="mt-1 text-sm text-muted">Enter your email and we&apos;ll send you a magic link</p>
+            <p className="mt-1 text-sm text-muted">
+              Enter your email and we&apos;ll send you a magic link
+            </p>
           </div>
           <LoginForm />
           <p className="mt-6 text-center text-sm text-muted">
             Don&apos;t have an account?{" "}
-            <Link href="/signup" className="font-medium text-brand-blue hover:text-brand-indigo transition-colors">
+            <Link
+              href="/signup"
+              className="font-medium text-brand-blue hover:text-brand-indigo transition-colors"
+            >
               Sign up
             </Link>
           </p>
