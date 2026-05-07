@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const mockUpdateProjectSettings = vi.fn();
 const mockDeleteProject = vi.fn();
+const mockCreateBlog = vi.fn();
 const mockPush = vi.fn();
 const mockRefresh = vi.fn();
 
@@ -10,6 +11,7 @@ vi.mock("@/actions/workspace", () => ({
   updateProjectSettings: (...args: unknown[]) =>
     mockUpdateProjectSettings(...args),
   deleteProject: (...args: unknown[]) => mockDeleteProject(...args),
+  createBlog: (...args: unknown[]) => mockCreateBlog(...args),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -128,12 +130,13 @@ describe("ProjectOverviewConnector", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders installed blogs as list items", () => {
+  it("renders installed blogs with description as subtitle and CMS in meta", () => {
     const blogs = [
       {
         id: "b1",
         name: "Tech Blog",
         slug: "tech-blog",
+        description: "Stories about modern web development.",
         project_id: "p1",
         wp_url: "https://wp.example.com",
         wp_username: "admin",
@@ -143,6 +146,7 @@ describe("ProjectOverviewConnector", () => {
         keywords: [],
         ai_prompt_template: "",
         schedule_cron: "0 9 * * *",
+        settings: {},
         created_at: "2026-01-01",
         updated_at: "2026-01-01",
       },
@@ -151,49 +155,37 @@ describe("ProjectOverviewConnector", () => {
     render(<ProjectOverviewConnector {...defaultProps} blogs={blogs} />);
     expect(screen.getByText("Tech Blog")).toBeInTheDocument();
     expect(
-      screen.getByText(/2 article\(s\) per day · Tech/),
+      screen.getByText("Stories about modern web development."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Tech · WordPress · wp.example.com/),
     ).toBeInTheDocument();
   });
 
-  it("omits niche from meta when blog niche is empty/whitespace", () => {
+  it("falls back to niche as subtitle when description is empty", () => {
     const blogs = [
       {
-        id: "b-empty",
-        name: "No Niche Blog",
-        slug: "no-niche",
+        id: "b-no-desc",
+        name: "Niche only",
+        slug: "niche-only",
+        description: "",
         project_id: "p1",
         wp_url: "https://wp.example.com",
         wp_username: "admin",
         is_active: true,
         articles_per_day: 1,
-        niche: "   ",
+        niche: "AI tools",
         keywords: [],
         ai_prompt_template: "",
         schedule_cron: "0 9 * * *",
-        created_at: "2026-01-01",
-        updated_at: "2026-01-01",
-      },
-      {
-        id: "b-null",
-        name: "Null Niche Blog",
-        slug: "null-niche",
-        project_id: "p1",
-        wp_url: "https://wp.example.com",
-        wp_username: "admin",
-        is_active: false,
-        articles_per_day: 3,
-        niche: null,
-        keywords: [],
-        ai_prompt_template: "",
-        schedule_cron: "0 9 * * *",
+        settings: {},
         created_at: "2026-01-01",
         updated_at: "2026-01-01",
       },
     ] as never[];
 
     render(<ProjectOverviewConnector {...defaultProps} blogs={blogs} />);
-    expect(screen.getByText("1 article(s) per day")).toBeInTheDocument();
-    expect(screen.getByText("3 article(s) per day")).toBeInTheDocument();
+    expect(screen.getByText("AI tools")).toBeInTheDocument();
   });
 
   it("opens settings modal via ProjectPageHeader settings button", () => {
@@ -335,16 +327,127 @@ describe("ProjectOverviewConnector", () => {
     expect(dialog).not.toHaveAttribute("open");
   });
 
-  it("closes CreateAppChoiceModal via onAfterChooseBlog when Blog is chosen", () => {
+  it("transitions to the name step when the Blog option is clicked", () => {
     render(<ProjectOverviewConnector {...defaultProps} />);
     fireEvent.click(screen.getByRole("button", { name: /create app/i }));
+    fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+
+    expect(
+      screen.getByRole("heading", { name: /name your blog/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/blog name/i)).toBeInTheDocument();
+  });
+
+  it("returns to the choose step when Back is clicked from the name step", () => {
+    render(<ProjectOverviewConnector {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /create app/i }));
+    fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }));
+
     expect(
       screen.getByRole("heading", { name: /create app/i }),
     ).toBeInTheDocument();
+  });
 
+  it("creates a blog with name only and navigates to its detail page", async () => {
+    mockCreateBlog.mockResolvedValue({ data: { id: "b-new" }, error: null });
+
+    render(<ProjectOverviewConnector {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /create app/i }));
     fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+    fireEvent.change(screen.getByLabelText(/blog name/i), {
+      target: { value: "New Blog" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create blog$/i }));
+
+    await vi.waitFor(() =>
+      expect(mockCreateBlog).toHaveBeenCalledWith({
+        teamId: "t1",
+        projectId: "p1",
+        name: "New Blog",
+      }),
+    );
+    expect(mockPush).toHaveBeenCalledWith("/teams/t1/projects/p1/blogs/b-new");
+  });
+
+  it("shows the empty-name error when the form is submitted with whitespace", () => {
+    render(<ProjectOverviewConnector {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /create app/i }));
+    fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+
+    const input = screen.getByLabelText(/blog name/i);
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(screen.getByText("Blog name is required.")).toBeInTheDocument();
+    expect(mockCreateBlog).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a generic error when createBlog returns null data with no error message", async () => {
+    mockCreateBlog.mockResolvedValue({ data: null, error: null });
+
+    render(<ProjectOverviewConnector {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /create app/i }));
+    fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+    fireEvent.change(screen.getByLabelText(/blog name/i), {
+      target: { value: "Some name" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create blog$/i }));
+
+    await vi.waitFor(() =>
+      expect(screen.getByText("Could not create blog.")).toBeInTheDocument(),
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("shows an error in the modal when createBlog fails", async () => {
+    mockCreateBlog.mockResolvedValue({
+      data: null,
+      error: "Slug already exists",
+    });
+
+    render(<ProjectOverviewConnector {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /create app/i }));
+    fireEvent.click(screen.getByRole("option", { name: /blog/i }));
+    fireEvent.change(screen.getByLabelText(/blog name/i), {
+      target: { value: "Dup" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create blog$/i }));
+
+    await vi.waitFor(() =>
+      expect(screen.getByText("Slug already exists")).toBeInTheDocument(),
+    );
+    expect(mockPush).not.toHaveBeenCalled();
     expect(
-      screen.queryByRole("heading", { name: /create app/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: /name your blog/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to a configure-settings hint when blog has no description or niche", () => {
+    const blogs = [
+      {
+        id: "b-pending",
+        name: "Fresh blog",
+        slug: "fresh-blog",
+        description: "",
+        project_id: "p1",
+        wp_url: null,
+        wp_username: null,
+        is_active: false,
+        articles_per_day: 1,
+        niche: "",
+        keywords: [],
+        ai_prompt_template: "",
+        schedule_cron: "0 9 * * *",
+        settings: {},
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    ] as never[];
+
+    render(<ProjectOverviewConnector {...defaultProps} blogs={blogs} />);
+    expect(
+      screen.getByText("Configure tone, audience, and AI rules in settings."),
+    ).toBeInTheDocument();
   });
 });

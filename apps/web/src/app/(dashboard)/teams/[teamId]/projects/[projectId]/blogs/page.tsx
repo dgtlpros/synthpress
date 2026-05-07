@@ -82,8 +82,8 @@ export default async function ProjectBlogsPage({
       <div>
         <h1 className="text-2xl font-bold text-foreground">Blogs</h1>
         <p className="mt-2 max-w-2xl text-muted">
-          Each blog is a WordPress connection inside this project. You can add
-          multiple blogs per project for different sites or brands.
+          Each blog has its own identity, content strategy, AI rules,
+          automation, and (optionally) publishing destinations.
         </p>
       </div>
 
@@ -91,7 +91,8 @@ export default async function ProjectBlogsPage({
         <CardHeader>
           <CardTitle>Add blog</CardTitle>
           <CardDescription>
-            Use a WordPress application password (not your login password).
+            Just a name to start. You can configure tone, audience, and connect
+            a CMS afterwards.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -117,14 +118,13 @@ export default async function ProjectBlogsPage({
                   className="block rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 py-3 text-sm shadow-sm transition-colors hover:border-border-hover hover:bg-surface-hover"
                 >
                   <p className="font-medium text-foreground">{blog.name}</p>
-                  <p
-                    className="mt-1 truncate text-xs text-muted"
-                    title={blog.wp_url}
-                  >
-                    {blog.wp_url}
+                  <p className="mt-1 line-clamp-1 text-xs text-muted">
+                    {blog.description ||
+                      blog.niche ||
+                      "Configure tone, audience, and AI rules in settings."}
                   </p>
                   <p className="mt-2 text-xs font-medium text-brand-blue">
-                    Open settings →
+                    Open dashboard →
                   </p>
                 </Link>
               </li>

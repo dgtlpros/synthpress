@@ -20,6 +20,19 @@ export function Hero({ className }: HeroProps) {
           />
         </div>
 
+        <div className="mb-6 flex justify-center">
+          <span className="inline-flex items-center gap-2 rounded-[var(--sp-radius-full)] border border-brand-lime/30 bg-brand-lime/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-lime-dark">
+            <span
+              aria-hidden="true"
+              className="relative flex h-2 w-2 items-center justify-center"
+            >
+              <span className="sp-anim-pulse-ring absolute inset-0 rounded-full bg-brand-lime/60" />
+              <span className="relative h-2 w-2 rounded-full bg-brand-lime shadow-[var(--sp-shadow-lime)]" />
+            </span>
+            Now in Public Beta
+          </span>
+        </div>
+
         <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-foreground sm:text-6xl">
           AI-Powered Blog Publishing{" "}
           <span className="text-gradient-accent">on Autopilot</span>

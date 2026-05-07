@@ -36,6 +36,7 @@ vi.mock("@/services/workspace-service", () => ({
   listTeamsForUser: vi.fn(),
   listProjectsForTeam: vi.fn(),
   listBlogsForProject: vi.fn(),
+  listPostsForBlog: vi.fn(),
 }));
 
 import { revalidatePath } from "next/cache";
@@ -48,14 +49,17 @@ import {
   generateUniqueProjectSlug,
   generateUniqueBlogSlug,
   listTeamsForUser,
+  listPostsForBlog,
 } from "@/services/workspace-service";
 import {
   createTeam,
   createWorkspaceProject,
   createBlog,
+  createPost,
   getTeamsForCurrentUser,
   getProjectsForTeam,
   getBlogsForProject,
+  getPostsForBlog,
   updateProjectDescription,
   updateProjectSettings,
   updateTeam,
@@ -63,6 +67,7 @@ import {
   deleteProject,
   updateBlog,
   deleteBlog,
+  setBlogActive,
 } from "./workspace";
 
 const mockedRevalidatePath = vi.mocked(revalidatePath);
@@ -249,7 +254,7 @@ describe("createWorkspaceProject", () => {
 });
 
 describe("createBlog", () => {
-  it("returns error when WP fields missing", async () => {
+  it("returns error when only some WP fields are provided", async () => {
     mockAuth({ id: "u1" });
     const result = await createBlog({
       teamId: "tid",
@@ -259,10 +264,10 @@ describe("createBlog", () => {
       wpUsername: "u",
       wpAppPassword: "p",
     });
-    expect(result.error).toMatch(/required/);
+    expect(result.error).toMatch(/all required/);
   });
 
-  it("inserts blog row", async () => {
+  it("inserts blog row with WP fields when all provided", async () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockResolvedValue("main-blog");
 
@@ -313,6 +318,44 @@ describe("createBlog", () => {
     expect(mockedRevalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("inserts blog row with null WP fields when only name is provided", async () => {
+    mockAuth({ id: "u1" });
+    mockedGenerateUniqueBlogSlug.mockResolvedValue("name-only");
+
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "b2" }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ select: vi.fn().mockReturnValue({ single }) });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: vi.fn(() => ({ insert })),
+    } as never);
+
+    const result = await createBlog({
+      teamId: "tid",
+      projectId: "pid",
+      name: "Name only",
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: "b2" });
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: "pid",
+        name: "Name only",
+        slug: "name-only",
+        wp_url: null,
+        wp_username: null,
+        wp_app_password: null,
+      }),
+    );
+  });
+
   it("returns Error message when a regular Error is thrown", async () => {
     mockAuth({ id: "u1" });
     mockedGenerateUniqueBlogSlug.mockRejectedValue(new Error("slug boom"));
@@ -325,9 +368,6 @@ describe("createBlog", () => {
       teamId: "tid",
       projectId: "pid",
       name: "Blog",
-      wpUrl: "https://wp.example.com",
-      wpUsername: "admin",
-      wpAppPassword: "secret",
     });
     expect(result.error).toBe("slug boom");
   });
@@ -344,9 +384,6 @@ describe("createBlog", () => {
       teamId: "tid",
       projectId: "pid",
       name: "Blog",
-      wpUrl: "https://wp.example.com",
-      wpUsername: "admin",
-      wpAppPassword: "secret",
     });
     expect(result.error).toBe("Could not create blog.");
   });
@@ -617,9 +654,6 @@ describe("createBlog — validation", () => {
       teamId: "tid",
       projectId: "pid",
       name: "  ",
-      wpUrl: "https://wp.co",
-      wpUsername: "u",
-      wpAppPassword: "p",
     });
     expect(result.error).toBe("Blog name is required.");
   });
@@ -630,9 +664,6 @@ describe("createBlog — validation", () => {
       teamId: "tid",
       projectId: "pid",
       name: "Blog",
-      wpUrl: "https://wp.co",
-      wpUsername: "u",
-      wpAppPassword: "p",
     });
     expect(result.error).toMatch(/signed in/);
   });
@@ -657,9 +688,6 @@ describe("createBlog — validation", () => {
       teamId: "tid",
       projectId: "pid",
       name: "Blog",
-      wpUrl: "https://wp.co",
-      wpUsername: "u",
-      wpAppPassword: "p",
     });
     expect(result.error).toBe("dup slug");
   });
@@ -1407,6 +1435,695 @@ describe("updateBlog — catch branches", () => {
       }),
     } as never);
     const result = await updateBlog("t1", "p1", "b1", { name: "New" });
-    expect(result.error).toBe("Could not rename blog.");
+    expect(result.error).toBe("Could not update blog.");
+  });
+
+  it("validates description length", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      description: "a".repeat(1001),
+    });
+    expect(result.error).toMatch(/Description must be at most/);
+  });
+
+  it("validates ai prompt template length", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      aiPromptTemplate: "a".repeat(8001),
+    });
+    expect(result.error).toMatch(/AI prompt template must be at most/);
+  });
+
+  it("validates articles per day range", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      articlesPerDay: -1,
+    });
+    expect(result.error).toMatch(/between 0 and 100/);
+  });
+
+  it("rejects partial WordPress connection", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      connection: {
+        wpUrl: "https://x.com",
+        wpUsername: "",
+        wpAppPassword: "",
+      },
+    });
+    expect(result.error).toMatch(/required when connecting/);
+  });
+
+  it("returns ok with no fields to update", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "Blog", slug: "blog", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+    const result = await updateBlog("t1", "p1", "b1", {});
+    expect(result.error).toBeNull();
+  });
+
+  it("merges settings into existing jsonb", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: {
+                    name: "Blog",
+                    slug: "blog",
+                    settings: { identity: { tone: "calm" } },
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { identity: { audience: "Devs" } },
+    });
+
+    expect(result.error).toBeNull();
+    const settingsArg = update.mock.calls[0][0].settings;
+    expect(settingsArg.identity.tone).toBe("calm");
+    expect(settingsArg.identity.audience).toBe("Devs");
+    expect(settingsArg.seo).toBeDefined();
+  });
+
+  it("clears WordPress connection when nulls passed", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      connection: { wpUrl: null, wpUsername: null, wpAppPassword: null },
+    });
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      wp_url: null,
+      wp_username: null,
+      wp_app_password: null,
+    });
+  });
+
+  it("normalizes keywords (trims, dedupes, caps)", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      keywords: [" SEO ", "seo", "ai", "", "AI", "growth"],
+    });
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      keywords: ["SEO", "ai", "growth"],
+    });
+  });
+
+  it("caps keywords at 50 and stops scanning the rest", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    // 60 unique keywords — only the first 50 should land.
+    const inputKeywords = Array.from({ length: 60 }, (_, i) => `kw${i}`);
+    const result = await updateBlog("t1", "p1", "b1", {
+      keywords: inputKeywords,
+    });
+    expect(result.error).toBeNull();
+    const arg = update.mock.calls[0][0];
+    expect(arg.keywords).toHaveLength(50);
+    expect(arg.keywords[0]).toBe("kw0");
+    expect(arg.keywords[49]).toBe("kw49");
+  });
+
+  it("updates description / niche / aiPromptTemplate / articlesPerDay columns when provided", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      description: "  desc  ",
+      niche: "  ai  ",
+      aiPromptTemplate: "{{topic}}",
+      articlesPerDay: 2.7,
+    });
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      description: "desc",
+      niche: "ai",
+      ai_prompt_template: "{{topic}}",
+      articles_per_day: 2,
+    });
+  });
+
+  it("updates the schedule_cron column when scheduleCron is provided", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      scheduleCron: "  0 8 * * *  ",
+    });
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({ schedule_cron: "0 8 * * *" });
+  });
+
+  it("rejects preserve-password when no stored password exists", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: {
+                    name: "B",
+                    slug: "b",
+                    settings: {},
+                    wp_app_password: null,
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      connection: {
+        wpUrl: "https://x.com",
+        wpUsername: "u",
+        wpAppPassword: "",
+      },
+    });
+    expect(result.error).toMatch(/Application password is required/);
+  });
+
+  it("preserves existing password when wpAppPassword is empty string", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: {
+                    name: "B",
+                    slug: "b",
+                    settings: {},
+                    wp_app_password: "existing-password",
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      connection: {
+        wpUrl: "https://x.com",
+        wpUsername: "u",
+        wpAppPassword: "",
+      },
+    });
+    expect(result.error).toBeNull();
+    // wp_app_password should NOT be in the update object since we preserve.
+    const arg = update.mock.calls[0][0];
+    expect(arg).toMatchObject({ wp_url: "https://x.com", wp_username: "u" });
+    expect(arg).not.toHaveProperty("wp_app_password");
+  });
+});
+
+// ── setBlogActive ─────────────────────────────────────────────────────────────
+
+describe("setBlogActive", () => {
+  it("delegates to updateBlog with the boolean", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "B", slug: "b", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+
+    const result = await setBlogActive("t1", "p1", "b1", true);
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledWith({ is_active: true });
+  });
+});
+
+// ── getPostsForBlog ───────────────────────────────────────────────────────────
+
+describe("getPostsForBlog", () => {
+  it("returns error when not signed in", async () => {
+    mockAuth(null);
+    const result = await getPostsForBlog("t1", "p1", "b1");
+    expect(result.error).toMatch(/signed in/);
+  });
+
+  it("returns blog not found when row missing", async () => {
+    mockAuth({ id: "u1" });
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+    const result = await getPostsForBlog("t1", "p1", "b1");
+    expect(result.error).toBe("Blog not found.");
+  });
+
+  it("delegates to listPostsForBlog and returns rows", async () => {
+    mockAuth({ id: "u1" });
+    const mockedList = vi.mocked(listPostsForBlog);
+    mockedList.mockResolvedValue([{ id: "a1", title: "Hello" } as never]);
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: { id: "b1" }, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+
+    const result = await getPostsForBlog("t1", "p1", "b1");
+    expect(result.data?.length).toBe(1);
+  });
+
+  it("returns Error message when listPostsForBlog throws", async () => {
+    mockAuth({ id: "u1" });
+    const mockedList = vi.mocked(listPostsForBlog);
+    mockedList.mockRejectedValue(new Error("db down"));
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: { id: "b1" }, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+
+    const result = await getPostsForBlog("t1", "p1", "b1");
+    expect(result.error).toBe("db down");
+  });
+
+  it("returns generic fallback when a non-Error is thrown", async () => {
+    mockAuth({ id: "u1" });
+    const mockedList = vi.mocked(listPostsForBlog);
+    mockedList.mockRejectedValue("oops");
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: { id: "b1" }, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+
+    const result = await getPostsForBlog("t1", "p1", "b1");
+    expect(result.error).toBe("Could not load posts.");
+  });
+});
+
+// ── createPost ────────────────────────────────────────────────────────────────
+
+describe("createPost", () => {
+  it("returns error when title is empty", async () => {
+    const result = await createPost("t1", "p1", "b1", { title: "  " });
+    expect(result.error).toBe("Post title is required.");
+  });
+
+  it("returns error when title is too long", async () => {
+    const result = await createPost("t1", "p1", "b1", {
+      title: "x".repeat(201),
+    });
+    expect(result.error).toMatch(/at most 200/);
+  });
+
+  it("returns error when not signed in", async () => {
+    mockAuth(null);
+    const result = await createPost("t1", "p1", "b1", { title: "Hello" });
+    expect(result.error).toMatch(/signed in/);
+  });
+
+  it("returns forbidden on permission error", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockRejectedValue(
+      new TeamPermissionError("forbidden", "manage_blog", "member"),
+    );
+    mockAdmin({});
+    const result = await createPost("t1", "p1", "b1", { title: "Hello" });
+    expect(result.error).toBe("forbidden");
+  });
+
+  it("returns blog not found when row missing", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as never);
+    const result = await createPost("t1", "p1", "b1", { title: "Hello" });
+    expect(result.error).toBe("Blog not found.");
+  });
+
+  it("inserts a draft post and returns its id", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const insertSingle = vi.fn().mockResolvedValue({
+      data: { id: "post-1" },
+      error: null,
+    });
+    const insertSelect = vi.fn().mockReturnValue({ single: insertSingle });
+    const insert = vi.fn().mockReturnValue({ select: insertSelect });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: (table: string) => {
+        if (table === "blogs") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({ data: { id: "b1" }, error: null }),
+                }),
+              }),
+            }),
+          };
+        }
+        return { insert };
+      },
+    } as never);
+
+    const result = await createPost("t1", "p1", "b1", {
+      title: "New post",
+      targetKeyword: "ai blogging",
+      authorPersona: "Editorial",
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.data?.id).toBe("post-1");
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blog_id: "b1",
+        title: "New post",
+        target_keyword: "ai blogging",
+        author_persona: "Editorial",
+        status: "draft",
+      }),
+    );
+  });
+
+  it("returns insert error when supabase fails", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const insertSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "insert failed" },
+    });
+    const insertSelect = vi.fn().mockReturnValue({ single: insertSingle });
+    const insert = vi.fn().mockReturnValue({ select: insertSelect });
+
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: (table: string) => {
+        if (table === "blogs") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({ data: { id: "b1" }, error: null }),
+                }),
+              }),
+            }),
+          };
+        }
+        return { insert };
+      },
+    } as never);
+
+    const result = await createPost("t1", "p1", "b1", { title: "x" });
+    expect(result.error).toBe("insert failed");
+  });
+
+  it("returns generic fallback when a non-Error is thrown", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockRejectedValue("some-string");
+    mockAdmin({});
+    const result = await createPost("t1", "p1", "b1", { title: "Hello" });
+    expect(result.error).toBe("Could not create post.");
+  });
+
+  it("returns thrown Error message verbatim", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockRejectedValue(new Error("network down"));
+    mockAdmin({});
+    const result = await createPost("t1", "p1", "b1", { title: "Hello" });
+    expect(result.error).toBe("network down");
   });
 });

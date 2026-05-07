@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
 import type { TeamRole } from "@/lib/team-roles";
+import { pickTokenBadgeVariant } from "@/lib/token-badge-variant";
 
 export interface HeaderTeamPlan {
   teamId: string;
@@ -42,7 +43,7 @@ export function HeaderTokenContextConnector({
 
   if (activeTeam) {
     const balance = activeTeam.balance;
-    const variant = balance <= 50 ? "warning" : "brand";
+    const variant = pickTokenBadgeVariant({ balance });
     const roleLabel =
       activeTeam.myRole === "admin"
         ? " · Admin"
@@ -76,7 +77,7 @@ export function HeaderTokenContextConnector({
     >
       <TokenBadge
         balance={personalBalance}
-        variant={personalBalance <= 50 ? "warning" : "brand"}
+        variant={pickTokenBadgeVariant({ balance: personalBalance })}
         size="lg"
       />
     </Link>

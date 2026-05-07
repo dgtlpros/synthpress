@@ -87,3 +87,28 @@ export type {
 
 export { InvoiceListSkeleton } from "./InvoiceListSkeleton";
 export type { InvoiceListSkeletonProps } from "./InvoiceListSkeleton";
+
+export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
+export type {
+  TabsProps,
+  TabsListProps,
+  TabsTriggerProps,
+  TabsContentProps,
+} from "./Tabs";
+
+export {
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableHeaderCell,
+  TableCell,
+} from "./Table";
+export type { TableProps, TableRowProps } from "./Table";
+
+export {
+  PostStatusBadge,
+  POST_STATUSES,
+  getPostStatusLabel,
+} from "./PostStatusBadge";
+export type { PostStatus, PostStatusBadgeProps } from "./PostStatusBadge";

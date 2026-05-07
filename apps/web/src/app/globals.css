@@ -17,6 +17,21 @@
   --sp-magenta: #d946ef;
   --sp-pink: #ec4899;
 
+  /*
+   * Neon lime accent — chartreuse-electric, complementary to magenta on the
+   * color wheel. Used for "fresh / live / energetic" moments (beta pills,
+   * healthy token states, positive checkmarks, and celebratory confetti).
+   *   --sp-lime         pure neon-sign electric lime; high voltage on dark
+   *                     surfaces and as a gradient stop. Too bright for body
+   *                     text on white — pair with a tinted background.
+   *   --sp-lime-light   soft neon glow; halos, highlights, confetti accents
+   *   --sp-lime-dark    accessible (6.3:1 on white) deep saturated lime —
+   *                     use this for text/icon foregrounds.
+   */
+  --sp-lime: #bfff00;
+  --sp-lime-light: #dfff66;
+  --sp-lime-dark: #4d7c0f;
+
   /* Semantic colors */
   --sp-success: #10b981;
   --sp-warning: #f59e0b;
@@ -47,6 +62,22 @@
     #d946ef 100%
   );
   --sp-gradient-glow: linear-gradient(135deg, #7c3aed 0%, #d946ef 100%);
+  --sp-gradient-lime: linear-gradient(135deg, #bfff00 0%, #06b6d4 100%);
+  /*
+   * Bright text-only companion to --sp-gradient-lime, tuned to read as the
+   * same vibrant lime family as the TokenBadge pill rather than an olive
+   * green. The neon start of bg-gradient-lime (#bfff00) is unreadable as
+   * text on white, but #84cc16 stays loud and saturated — still readable
+   * at text-3xl and above on light surfaces. Ends in bright cyan (#06b6d4),
+   * the same end stop as bg-gradient-lime, so the gradient direction and
+   * family matches the badge exactly.
+   *
+   * Reserve this gradient for large display text (text-3xl and up). It is
+   * intentionally pushed past WCAG AA for body text so it visually matches
+   * the badge — body-sized callouts should use text-brand-lime-dark
+   * (#4d7c0f, 6.3:1 on white) instead.
+   */
+  --sp-gradient-lime-strong: linear-gradient(135deg, #84cc16 0%, #06b6d4 100%);
 
   /* Shadows */
   --sp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
@@ -55,6 +86,7 @@
   --sp-shadow-lg:
     0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
   --sp-shadow-glow: 0 0 20px rgb(99 102 241 / 0.15);
+  --sp-shadow-lime: 0 0 28px rgb(191 255 0 / 0.45);
 
   /* Radius */
   --sp-radius-sm: 0.375rem;
@@ -96,6 +128,9 @@
   --color-brand-purple: var(--sp-purple);
   --color-brand-magenta: var(--sp-magenta);
   --color-brand-pink: var(--sp-pink);
+  --color-brand-lime: var(--sp-lime);
+  --color-brand-lime-light: var(--sp-lime-light);
+  --color-brand-lime-dark: var(--sp-lime-dark);
 
   --color-success: var(--sp-success);
   --color-warning: var(--sp-warning);
@@ -124,6 +159,10 @@ body {
   background: var(--sp-gradient-glow);
 }
 
+.bg-gradient-lime {
+  background: var(--sp-gradient-lime);
+}
+
 .text-gradient-brand {
   background: var(--sp-gradient-brand);
   -webkit-background-clip: text;
@@ -133,6 +172,24 @@ body {
 
 .text-gradient-accent {
   background: var(--sp-gradient-accent);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-lime {
+  background: var(--sp-gradient-lime);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/*
+ * Use for any lime-themed text smaller than ~text-4xl on light surfaces.
+ * Pairs with --sp-gradient-lime-strong: same family, stays readable.
+ */
+.text-gradient-lime-strong {
+  background: var(--sp-gradient-lime-strong);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

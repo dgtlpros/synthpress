@@ -6,6 +6,7 @@ import {
   type SubscriptionStatus,
 } from "@/components/atoms/PlanBadge";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
+import { pickTokenBadgeVariant } from "@/lib/token-badge-variant";
 
 const KNOWN_STATUSES: SubscriptionStatus[] = [
   "active",
@@ -90,7 +91,11 @@ export function TeamListItem({
         <p className="text-xs text-muted sm:text-right">{stats}</p>
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <PlanBadge planName={planDisplayName} status={badgeStatus} />
-          <TokenBadge balance={balance} size="sm" variant="neutral" />
+          <TokenBadge
+            balance={balance}
+            size="sm"
+            variant={pickTokenBadgeVariant({ balance })}
+          />
         </div>
       </div>
     </NextLink>

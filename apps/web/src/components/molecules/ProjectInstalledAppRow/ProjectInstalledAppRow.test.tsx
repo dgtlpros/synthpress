@@ -5,7 +5,7 @@ import { ProjectInstalledAppRow } from "./ProjectInstalledAppRow";
 afterEach(cleanup);
 
 describe("ProjectInstalledAppRow", () => {
-  it("renders link to href", () => {
+  it("renders link to href and an Active badge in the lime variant", () => {
     render(
       <ProjectInstalledAppRow
         href="/t/p/b/1"
@@ -18,7 +18,9 @@ describe("ProjectInstalledAppRow", () => {
     const link = screen.getByRole("link", { name: /Main/i });
     expect(link).toHaveAttribute("href", "/t/p/b/1");
     expect(screen.getByText("Blog")).toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    const activeBadge = screen.getByText("Active");
+    expect(activeBadge).toBeInTheDocument();
+    expect(activeBadge.className).toMatch(/brand-lime/);
   });
 
   it("renders Paused badge when isActive is false", () => {

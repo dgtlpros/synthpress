@@ -9,6 +9,8 @@ import {
   listTeamsForUser,
   listProjectsForTeam,
   listBlogsForProject,
+  getBlogById,
+  listPostsForBlog,
   createTeamWithOwner,
 } from "./workspace-service";
 
@@ -486,6 +488,118 @@ describe("listBlogsForProject", () => {
     } as unknown as SupabaseClient<Database>;
 
     const result = await listBlogsForProject("p1", client);
+    expect(result).toEqual([]);
+  });
+});
+
+describe("getBlogById", () => {
+  it("returns the blog row when found", async () => {
+    const blog = { id: "b1", name: "Blog", slug: "blog" };
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: blog, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    const result = await getBlogById("p1", "b1", client);
+    expect(result).toEqual(blog);
+  });
+
+  it("returns null when no row is found", async () => {
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi
+                .fn()
+                .mockResolvedValue({ data: null, error: null }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    const result = await getBlogById("p1", "b1", client);
+    expect(result).toBeNull();
+  });
+
+  it("throws on supabase error", async () => {
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: null,
+                error: new Error("blog fetch failed"),
+              }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    await expect(getBlogById("p1", "b1", client)).rejects.toThrow(
+      "blog fetch failed",
+    );
+  });
+});
+
+describe("listPostsForBlog", () => {
+  it("returns post rows ordered by updated_at desc", async () => {
+    const articles = [
+      {
+        id: "a1",
+        blog_id: "b1",
+        title: "First",
+        status: "draft",
+      },
+    ];
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi.fn().mockResolvedValue({ data: articles, error: null }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    const result = await listPostsForBlog("b1", client);
+    expect(result).toEqual(articles);
+  });
+
+  it("throws on query error", async () => {
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi
+              .fn()
+              .mockResolvedValue({ data: null, error: new Error("posts fail") }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    await expect(listPostsForBlog("b1", client)).rejects.toThrow("posts fail");
+  });
+
+  it("returns empty array when data is null", async () => {
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi.fn().mockResolvedValue({ data: null, error: null }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+    const result = await listPostsForBlog("b1", client);
     expect(result).toEqual([]);
   });
 });

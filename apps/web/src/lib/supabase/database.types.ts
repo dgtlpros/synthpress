@@ -38,6 +38,7 @@ export type Database = {
         Row: {
           ai_model: string | null;
           ai_prompt: string | null;
+          author_persona: string | null;
           blog_id: string;
           content: string;
           created_at: string;
@@ -46,14 +47,19 @@ export type Database = {
           featured_image_url: string | null;
           id: string;
           published_at: string | null;
+          scheduled_at: string | null;
           status: Database["public"]["Enums"]["article_status"];
+          target_keyword: string | null;
           title: string;
+          updated_at: string;
+          word_count: number | null;
           wp_post_id: number | null;
           wp_post_url: string | null;
         };
         Insert: {
           ai_model?: string | null;
           ai_prompt?: string | null;
+          author_persona?: string | null;
           blog_id: string;
           content?: string;
           created_at?: string;
@@ -62,14 +68,19 @@ export type Database = {
           featured_image_url?: string | null;
           id?: string;
           published_at?: string | null;
+          scheduled_at?: string | null;
           status?: Database["public"]["Enums"]["article_status"];
+          target_keyword?: string | null;
           title?: string;
+          updated_at?: string;
+          word_count?: number | null;
           wp_post_id?: number | null;
           wp_post_url?: string | null;
         };
         Update: {
           ai_model?: string | null;
           ai_prompt?: string | null;
+          author_persona?: string | null;
           blog_id?: string;
           content?: string;
           created_at?: string;
@@ -78,8 +89,12 @@ export type Database = {
           featured_image_url?: string | null;
           id?: string;
           published_at?: string | null;
+          scheduled_at?: string | null;
           status?: Database["public"]["Enums"]["article_status"];
+          target_keyword?: string | null;
           title?: string;
+          updated_at?: string;
+          word_count?: number | null;
           wp_post_id?: number | null;
           wp_post_url?: string | null;
         };
@@ -98,6 +113,7 @@ export type Database = {
           ai_prompt_template: string;
           articles_per_day: number;
           created_at: string;
+          description: string;
           id: string;
           is_active: boolean;
           keywords: string[];
@@ -105,16 +121,18 @@ export type Database = {
           niche: string;
           project_id: string;
           schedule_cron: string;
+          settings: Json;
           slug: string;
           updated_at: string;
-          wp_app_password: string;
-          wp_url: string;
-          wp_username: string;
+          wp_app_password: string | null;
+          wp_url: string | null;
+          wp_username: string | null;
         };
         Insert: {
           ai_prompt_template?: string;
           articles_per_day?: number;
           created_at?: string;
+          description?: string;
           id?: string;
           is_active?: boolean;
           keywords?: string[];
@@ -122,16 +140,18 @@ export type Database = {
           niche?: string;
           project_id: string;
           schedule_cron?: string;
+          settings?: Json;
           slug: string;
           updated_at?: string;
-          wp_app_password: string;
-          wp_url: string;
-          wp_username: string;
+          wp_app_password?: string | null;
+          wp_url?: string | null;
+          wp_username?: string | null;
         };
         Update: {
           ai_prompt_template?: string;
           articles_per_day?: number;
           created_at?: string;
+          description?: string;
           id?: string;
           is_active?: boolean;
           keywords?: string[];
@@ -139,11 +159,12 @@ export type Database = {
           niche?: string;
           project_id?: string;
           schedule_cron?: string;
+          settings?: Json;
           slug?: string;
           updated_at?: string;
-          wp_app_password?: string;
-          wp_url?: string;
-          wp_username?: string;
+          wp_app_password?: string | null;
+          wp_url?: string | null;
+          wp_username?: string | null;
         };
         Relationships: [
           {
@@ -620,9 +641,11 @@ export type Database = {
         | "draft"
         | "generating"
         | "ready"
+        | "scheduled"
         | "publishing"
         | "published"
-        | "failed";
+        | "failed"
+        | "archived";
       team_role: "owner" | "admin" | "member";
     };
     CompositeTypes: {
@@ -761,9 +784,11 @@ export const Constants = {
         "draft",
         "generating",
         "ready",
+        "scheduled",
         "publishing",
         "published",
         "failed",
+        "archived",
       ],
       team_role: ["owner", "admin", "member"],
     },

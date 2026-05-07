@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/atoms/Card";
+import { LOW_BALANCE_THRESHOLD } from "@/lib/token-badge-variant";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,8 @@ export default async function TeamUsagePage({
   ]);
 
   const ownerLabel = plan?.ownerId === user.id ? "you" : "the team owner";
+  const remainingBalance = plan?.balance ?? 0;
+  const isLowRemaining = remainingBalance <= LOW_BALANCE_THRESHOLD;
 
   return (
     <div className="space-y-8">
@@ -95,7 +98,16 @@ export default async function TeamUsagePage({
         <p className="mt-2 max-w-2xl text-muted">
           Tokens spent by automations and member-triggered jobs in {team.name}.
           All spend draws from {ownerLabel}&apos;s balance (
-          {formatNumber(plan?.balance ?? 0)} tokens remaining
+          <span
+            className={
+              isLowRemaining
+                ? "font-semibold text-warning"
+                : "font-semibold text-brand-lime-dark"
+            }
+            data-testid="usage-remaining-emphasis"
+          >
+            {formatNumber(remainingBalance)} tokens remaining
+          </span>
           {plan?.planKey ? ` on the ${plan.planKey} plan` : ""}).
         </p>
       </div>

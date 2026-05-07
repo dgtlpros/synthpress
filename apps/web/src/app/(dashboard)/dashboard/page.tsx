@@ -7,6 +7,8 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBalance } from "@/services/token-service";
 import { listTeamsForUser } from "@/services/workspace-service";
+import { pickTokenBadgeVariant } from "@/lib/token-badge-variant";
+import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/atoms/Avatar";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
 import {
@@ -73,6 +75,7 @@ export default async function DashboardPage() {
     listTeamsForUser(user.id, supabase),
     getBalance(user.id, admin),
   ]);
+  const tokenVariant = pickTokenBadgeVariant({ balance });
 
   const teamIds = teams.map((t) => t.id);
   let projectCount = 0;
@@ -144,11 +147,7 @@ export default async function DashboardPage() {
             className="self-start sm:self-center"
             aria-label="View billing and synth tokens"
           >
-            <TokenBadge
-              balance={balance}
-              variant={balance <= 50 ? "warning" : "brand"}
-              size="lg"
-            />
+            <TokenBadge balance={balance} variant={tokenVariant} size="lg" />
           </Link>
         </div>
       </div>
@@ -196,7 +195,12 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardDescription>Synth tokens</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle
+              className={cn(
+                "text-3xl",
+                tokenVariant === "lime" && "text-gradient-lime-strong",
+              )}
+            >
               {numberFormatter.format(balance)}
             </CardTitle>
           </CardHeader>

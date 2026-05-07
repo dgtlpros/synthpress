@@ -29,7 +29,10 @@ export type {
 } from "./ProjectInstalledAppList";
 
 export { CreateAppChoiceModal } from "./CreateAppChoiceModal";
-export type { CreateAppChoiceModalProps } from "./CreateAppChoiceModal";
+export type {
+  CreateAppChoiceModalProps,
+  CreateAppChoiceModalStep,
+} from "./CreateAppChoiceModal";
 
 export { ProjectsListToolbar } from "./ProjectsListToolbar";
 export type {
@@ -58,3 +61,18 @@ export { BillingNotice } from "./BillingNotice";
 export type { BillingNoticeProps, BillingNoticeVariant } from "./BillingNotice";
 export { InvoiceRow } from "./InvoiceRow";
 export type { InvoiceRowProps } from "./InvoiceRow";
+
+export { StatCard } from "./StatCard";
+export type { StatCardProps, StatCardTone } from "./StatCard";
+
+export { BlogSubNav } from "./BlogSubNav";
+export type { BlogSubNavProps, BlogSubNavItem } from "./BlogSubNav";
+
+export { BlogHeader } from "./BlogHeader";
+export type { BlogHeaderProps } from "./BlogHeader";
+
+export { WordPressConnectionForm } from "./WordPressConnectionForm";
+export type { WordPressConnectionFormProps } from "./WordPressConnectionForm";
+
+export { ComingSoonPanel } from "./ComingSoonPanel";
+export type { ComingSoonPanelProps } from "./ComingSoonPanel";

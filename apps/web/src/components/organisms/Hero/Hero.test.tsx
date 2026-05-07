@@ -30,4 +30,9 @@ describe("Hero", () => {
     render(<Hero />);
     expect(screen.getByAltText("SynthPress mascot")).toBeInTheDocument();
   });
+
+  it("renders the public beta indicator pill", () => {
+    render(<Hero />);
+    expect(screen.getByText("Now in Public Beta")).toBeInTheDocument();
+  });
 });

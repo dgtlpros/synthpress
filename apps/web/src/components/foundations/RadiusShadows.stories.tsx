@@ -45,6 +45,11 @@ const shadows = [
     var: "--sp-shadow-glow",
     desc: "Focus states, brand highlights",
   },
+  {
+    name: "lime",
+    var: "--sp-shadow-lime",
+    desc: "Live indicators, fresh moments",
+  },
 ];
 
 export const BorderRadius: Story = {

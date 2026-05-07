@@ -56,7 +56,12 @@ export function PricingCard({
             key={feature}
             className="flex items-start gap-2 text-sm text-foreground"
           >
-            <span className="mt-0.5 text-success">&#10003;</span>
+            <span
+              aria-hidden="true"
+              className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-brand-lime/15 text-[10px] font-bold text-brand-lime-dark"
+            >
+              &#10003;
+            </span>
             {feature}
           </li>
         ))}

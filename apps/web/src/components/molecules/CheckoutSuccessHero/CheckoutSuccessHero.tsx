@@ -317,6 +317,30 @@ const confettiPieces: Array<{
     delay: "0.45s",
     duration: "2.2s",
   },
+  {
+    top: "16%",
+    left: "34%",
+    bg: "var(--sp-lime)",
+    size: 9,
+    rounded: "9999px",
+    rotate: "120deg",
+    translateX: "-25px",
+    translateY: "-45px",
+    delay: "0.35s",
+    duration: "2.5s",
+  },
+  {
+    top: "50%",
+    left: "70%",
+    bg: "var(--sp-lime-light)",
+    size: 7,
+    rounded: "2px",
+    rotate: "-240deg",
+    translateX: "45px",
+    translateY: "30px",
+    delay: "0.55s",
+    duration: "2.1s",
+  },
 ];
 
 function ConfettiBurst() {

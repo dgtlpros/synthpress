@@ -17,6 +17,8 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/atoms/Card";
+import { pickTokenBadgeVariant } from "@/lib/token-badge-variant";
+import { cn } from "@/lib/cn";
 import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +73,7 @@ export default async function AccountPage() {
   ]);
 
   const fullName = user.user_metadata?.full_name as string | undefined;
+  const tokenVariant = pickTokenBadgeVariant({ balance });
   const planName = current?.plan.name ?? "Free";
   const status = current
     ? normalizeStatus(current.subscription.status)
@@ -113,7 +116,7 @@ export default async function AccountPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <TokenBadge balance={balance} variant="brand" size="lg" />
+            <TokenBadge balance={balance} variant={tokenVariant} size="lg" />
           </div>
         </div>
       </div>
@@ -123,7 +126,12 @@ export default async function AccountPage() {
         <Card>
           <CardHeader>
             <CardDescription>Synth tokens</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle
+              className={cn(
+                "text-3xl",
+                tokenVariant === "lime" && "text-gradient-lime-strong",
+              )}
+            >
               {numberFormatter.format(balance)}
             </CardTitle>
           </CardHeader>

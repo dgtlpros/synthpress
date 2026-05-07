@@ -30,6 +30,15 @@ const teamPlans: HeaderTeamPlan[] = [
     balance: 30,
     planKey: null,
   },
+  {
+    teamId: "t-healthy",
+    teamName: "Healthy",
+    ownerName: "Helen",
+    isOwner: false,
+    myRole: "admin",
+    balance: 9_999,
+    planKey: "scale",
+  },
 ];
 
 beforeEach(() => {
@@ -123,5 +132,39 @@ describe("HeaderTokenContextConnector", () => {
     const badge = container.querySelector(".bg-warning\\/10");
     expect(badge).not.toBeNull();
     expect(screen.getByText("30 tokens")).toBeInTheDocument();
+  });
+
+  it("uses the lime variant for any team balance above the warning threshold", () => {
+    mockPathname.mockReturnValue("/teams/t-healthy/projects");
+    const { container } = render(
+      <HeaderTokenContextConnector
+        personalBalance={500}
+        teamPlans={teamPlans}
+      />,
+    );
+    expect(container.querySelector(".bg-gradient-lime")).not.toBeNull();
+    expect(screen.getByText("9,999 tokens")).toBeInTheDocument();
+  });
+
+  it("uses the lime variant for a personal balance above the warning threshold", () => {
+    const { container } = render(
+      <HeaderTokenContextConnector
+        personalBalance={9_999}
+        teamPlans={teamPlans}
+      />,
+    );
+    expect(container.querySelector(".bg-gradient-lime")).not.toBeNull();
+  });
+
+  it("uses the lime variant even for modest balances above the warning threshold", () => {
+    mockPathname.mockReturnValue("/teams/t-acme/projects");
+    const { container } = render(
+      <HeaderTokenContextConnector
+        personalBalance={500}
+        teamPlans={teamPlans}
+      />,
+    );
+    // t-acme has balance 250 — above the 50 threshold, so lime applies.
+    expect(container.querySelector(".bg-gradient-lime")).not.toBeNull();
   });
 });

@@ -119,7 +119,7 @@ export async function listProjectsForTeam(
 }
 
 const BLOG_LIST_COLUMNS =
-  "id, name, slug, project_id, wp_url, wp_username, is_active, articles_per_day, niche, keywords, ai_prompt_template, schedule_cron, created_at, updated_at" as const;
+  "id, name, slug, description, project_id, wp_url, wp_username, is_active, articles_per_day, niche, keywords, ai_prompt_template, schedule_cron, settings, created_at, updated_at" as const;
 
 export async function listBlogsForProject(
   projectId: string,
@@ -133,6 +133,56 @@ export async function listBlogsForProject(
 
   if (error) throw error;
   return (data ?? []) as BlogListRow[];
+}
+
+export async function getBlogById(
+  projectId: string,
+  blogId: string,
+  client: Client,
+): Promise<BlogListRow | null> {
+  const { data, error } = await client
+    .from("blogs")
+    .select(BLOG_LIST_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("id", blogId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data ?? null) as BlogListRow | null;
+}
+
+const ARTICLE_LIST_COLUMNS =
+  "id, blog_id, title, status, target_keyword, author_persona, word_count, scheduled_at, published_at, created_at, updated_at, error_message, wp_post_url" as const;
+
+export type ArticleListRow = Pick<
+  Tables<"articles">,
+  | "id"
+  | "blog_id"
+  | "title"
+  | "status"
+  | "target_keyword"
+  | "author_persona"
+  | "word_count"
+  | "scheduled_at"
+  | "published_at"
+  | "created_at"
+  | "updated_at"
+  | "error_message"
+  | "wp_post_url"
+>;
+
+export async function listPostsForBlog(
+  blogId: string,
+  client: Client,
+): Promise<ArticleListRow[]> {
+  const { data, error } = await client
+    .from("articles")
+    .select(ARTICLE_LIST_COLUMNS)
+    .eq("blog_id", blogId)
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as ArticleListRow[];
 }
 
 export async function createTeamWithOwner(input: {

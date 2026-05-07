@@ -9,7 +9,7 @@ const meta = {
   argTypes: {
     variant: {
       control: "select",
-      options: ["default", "success", "warning", "error", "brand"],
+      options: ["default", "success", "warning", "error", "brand", "lime"],
     },
     size: { control: "select", options: ["sm", "md", "lg"] },
   },
@@ -27,6 +27,9 @@ export const Warning: Story = {
 };
 export const Error: Story = { args: { children: "Failed", variant: "error" } };
 export const Brand: Story = { args: { children: "Pro", variant: "brand" } };
+export const Lime: Story = {
+  args: { children: "Public Beta", variant: "lime" },
+};
 export const Small: Story = {
   args: { children: "New", size: "sm", variant: "brand" },
 };

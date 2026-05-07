@@ -17,6 +17,9 @@ const brandColors = [
   { name: "Purple", var: "--sp-purple", value: "#7c3aed" },
   { name: "Magenta", var: "--sp-magenta", value: "#d946ef" },
   { name: "Pink", var: "--sp-pink", value: "#ec4899" },
+  { name: "Lime", var: "--sp-lime", value: "#bfff00" },
+  { name: "Lime Light", var: "--sp-lime-light", value: "#dfff66" },
+  { name: "Lime Dark", var: "--sp-lime-dark", value: "#4d7c0f" },
 ];
 
 const semanticColors = [

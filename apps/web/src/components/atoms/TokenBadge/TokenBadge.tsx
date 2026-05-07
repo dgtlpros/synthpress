@@ -7,6 +7,7 @@ const variantStyles = {
     "bg-gradient-accent text-white border-0 shadow-[var(--sp-shadow-sm)] hover:shadow-[var(--sp-shadow-md)] hover:brightness-110",
   warning:
     "bg-warning/10 text-warning border border-warning/30 shadow-[var(--sp-shadow-sm)]",
+  lime: "bg-gradient-lime text-brand-navy border-0 shadow-[var(--sp-shadow-sm)] hover:shadow-[var(--sp-shadow-lime)] hover:brightness-110",
 } as const;
 
 const sizeStyles = {
@@ -30,7 +31,7 @@ const formatter = new Intl.NumberFormat("en-US");
 export function TokenBadge({
   balance,
   compact = false,
-  variant = "neutral",
+  variant = "lime",
   size = "md",
   className,
   ...props

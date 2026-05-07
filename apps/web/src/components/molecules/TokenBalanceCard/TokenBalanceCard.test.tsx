@@ -39,4 +39,23 @@ describe("TokenBalanceCard", () => {
     render(<TokenBalanceCard balance={500} lowBalanceThreshold={1000} />);
     expect(screen.getByText(/Running low/)).toBeInTheDocument();
   });
+
+  it("renders the balance number with the strong lime gradient by default (with allowance)", () => {
+    render(<TokenBalanceCard balance={5400} monthlyAllowance={5000} />);
+    const big = screen.getByText("5,400");
+    expect(big.className).toMatch(/text-gradient-lime-strong/);
+  });
+
+  it("renders the balance number with the strong lime gradient by default (no allowance)", () => {
+    render(<TokenBalanceCard balance={5400} />);
+    const big = screen.getByText("5,400");
+    expect(big.className).toMatch(/text-gradient-lime-strong/);
+  });
+
+  it("does NOT render the lime gradient when balance is at or below the warning threshold", () => {
+    render(<TokenBalanceCard balance={50} />);
+    const big = screen.getByText("50");
+    expect(big.className).not.toMatch(/text-gradient-lime/);
+    expect(big.className).toMatch(/text-foreground/);
+  });
 });

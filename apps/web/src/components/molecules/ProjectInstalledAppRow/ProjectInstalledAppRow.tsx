@@ -40,7 +40,7 @@ export function ProjectInstalledAppRow({
           <span className="text-xs font-semibold uppercase tracking-wide text-muted">
             {appKindLabel}
           </span>
-          <Badge variant={isActive ? "brand" : "default"}>
+          <Badge variant={isActive ? "lime" : "default"}>
             {isActive ? "Active" : "Paused"}
           </Badge>
         </div>

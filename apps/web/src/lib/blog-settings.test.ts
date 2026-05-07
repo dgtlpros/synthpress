@@ -1,0 +1,230 @@
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_BLOG_SETTINGS,
+  loadBlogSettings,
+  mergeBlogSettings,
+} from "./blog-settings";
+
+describe("loadBlogSettings", () => {
+  it("returns defaults when input is null", () => {
+    expect(loadBlogSettings(null)).toEqual(DEFAULT_BLOG_SETTINGS);
+  });
+
+  it("returns defaults when input is undefined", () => {
+    expect(loadBlogSettings(undefined)).toEqual(DEFAULT_BLOG_SETTINGS);
+  });
+
+  it("returns defaults when input is not an object", () => {
+    expect(loadBlogSettings("nope")).toEqual(DEFAULT_BLOG_SETTINGS);
+    expect(loadBlogSettings(42)).toEqual(DEFAULT_BLOG_SETTINGS);
+    expect(loadBlogSettings([])).toEqual(DEFAULT_BLOG_SETTINGS);
+  });
+
+  it("preserves valid string fields", () => {
+    const out = loadBlogSettings({
+      identity: { audience: "Indie hackers", tone: "Punchy" },
+    });
+    expect(out.identity.audience).toBe("Indie hackers");
+    expect(out.identity.tone).toBe("Punchy");
+    expect(out.identity.language).toBe(DEFAULT_BLOG_SETTINGS.identity.language);
+  });
+
+  it("falls back to default when enums are invalid", () => {
+    const out = loadBlogSettings({
+      identity: { readingLevel: "phd-level" },
+      seo: { keywordUsage: "hyperaggressive" },
+    });
+    expect(out.identity.readingLevel).toBe("intermediate");
+    expect(out.seo.keywordUsage).toBe("balanced");
+  });
+
+  it("filters arrays to expected types", () => {
+    const out = loadBlogSettings({
+      strategy: { goals: ["educate", "rank", "not-a-goal", 42] },
+      automation: { preferredDays: ["Mon", "Tue", null, "Wed"] },
+    });
+    expect(out.strategy.goals).toEqual(["educate", "rank"]);
+    expect(out.automation.preferredDays).toEqual(["Mon", "Tue", "Wed"]);
+  });
+
+  it("preserves valid numeric fields", () => {
+    const out = loadBlogSettings({
+      seo: { defaultArticleLength: 2400 },
+    });
+    expect(out.seo.defaultArticleLength).toBe(2400);
+  });
+
+  it("ignores NaN / non-finite numbers", () => {
+    const out = loadBlogSettings({
+      seo: { defaultArticleLength: Number.NaN },
+    });
+    expect(out.seo.defaultArticleLength).toBe(
+      DEFAULT_BLOG_SETTINGS.seo.defaultArticleLength,
+    );
+  });
+
+  it("preserves valid boolean fields", () => {
+    const out = loadBlogSettings({
+      seo: { faqSection: true, schemaMarkup: true },
+      automation: { requireReview: false },
+    });
+    expect(out.seo.faqSection).toBe(true);
+    expect(out.seo.schemaMarkup).toBe(true);
+    expect(out.automation.requireReview).toBe(false);
+  });
+
+  it("ignores unrecognized top-level sections", () => {
+    const out = loadBlogSettings({
+      identity: { audience: "Devs" },
+      mystery: { foo: "bar" },
+    } as never);
+    expect(out.identity.audience).toBe("Devs");
+    // No surprise extra keys.
+    expect(Object.keys(out)).toEqual(Object.keys(DEFAULT_BLOG_SETTINGS));
+  });
+
+  it("falls back when an enum field is a non-string", () => {
+    const out = loadBlogSettings({
+      identity: { readingLevel: 42 },
+      seo: { keywordUsage: false, slugFormat: null },
+    } as never);
+    expect(out.identity.readingLevel).toBe("intermediate");
+    expect(out.seo.keywordUsage).toBe("balanced");
+    expect(out.seo.slugFormat).toBe("lowercase-hyphenated");
+  });
+
+  it("normalizes valid values across every section", () => {
+    const out = loadBlogSettings({
+      identity: {
+        audience: "x",
+        language: "es",
+        tone: "y",
+        readingLevel: "advanced",
+        pointOfView: "first_person_plural",
+        defaultAuthorPersona: "Editor",
+      },
+      strategy: {
+        goals: ["rank", "leads"],
+        monetization: "ads",
+        competitors: "site.com",
+        contentFreshness: "trending",
+        preferredArticleTypes: ["how_to", "comparison"],
+        topicsToCover: "A",
+        topicsToAvoid: "B",
+      },
+      ai: {
+        positivePrompt: "p",
+        negativePrompt: "n",
+        approvedTerminology: "ok",
+        bannedTerminology: "ban",
+        exampleArticleStyle: "style",
+        defaultArticleStructure: "outline",
+        preferredCta: "cta",
+      },
+      seo: {
+        strategy: "long-tail",
+        metaDescriptionStyle: "short",
+        keywordUsage: "aggressive",
+        internalLinkingPreference: "aggressive",
+        externalLinkingPreference: "none",
+        slugFormat: "title-case",
+        titleFormat: "{T}",
+        defaultArticleLength: 1800,
+        defaultHeadingsStructure: "H2",
+        faqSection: true,
+        schemaMarkup: true,
+        featuredImagePreference: "always",
+      },
+      automation: {
+        mode: "autopilot",
+        generatePerWeek: 14,
+        requireReview: false,
+        autoSchedule: true,
+        preferredDays: ["Mon", "Wed", "Fri"],
+        publishWindowStart: "07:00",
+        publishWindowEnd: "19:00",
+        timezone: "UTC",
+        maxPostsPerDay: 4,
+        regenerateOnFail: false,
+      },
+      publishing: {
+        defaultDestination: "wordpress",
+        defaultStatus: "scheduled",
+        defaultCategory: "tech",
+        defaultTags: ["a", "b"],
+        defaultAuthor: "alice",
+        uploadFeaturedImage: false,
+        updateExistingPosts: true,
+      },
+      media: {
+        generateFeaturedImage: true,
+        imageStylePrompt: "soft",
+        imageSource: "manual_upload",
+        generateAltText: false,
+        defaultImageDimensions: "800x600",
+        includeInlineImages: true,
+      },
+      advanced: {
+        customSystemPrompt: "system",
+        customArticleTemplate: "tmpl",
+        customOutlineTemplate: "outline",
+        defaultDisclaimer: "disc",
+        affiliateDisclosure: "aff",
+        internalLinksToPrioritize: "x",
+        competitorsToAvoid: "y",
+      },
+    });
+    expect(out.identity.pointOfView).toBe("first_person_plural");
+    expect(out.strategy.goals).toEqual(["rank", "leads"]);
+    expect(out.ai.preferredCta).toBe("cta");
+    expect(out.seo.featuredImagePreference).toBe("always");
+    expect(out.automation.mode).toBe("autopilot");
+    expect(out.publishing.defaultDestination).toBe("wordpress");
+    expect(out.media.imageSource).toBe("manual_upload");
+    expect(out.advanced.competitorsToAvoid).toBe("y");
+  });
+
+  it("falls back when whole sections are non-objects", () => {
+    const out = loadBlogSettings({
+      identity: "not-an-object",
+      strategy: 42,
+      ai: null,
+      seo: [],
+      automation: true,
+      publishing: undefined,
+      media: "x",
+      advanced: 0,
+    } as never);
+    expect(out).toEqual(DEFAULT_BLOG_SETTINGS);
+  });
+});
+
+describe("mergeBlogSettings", () => {
+  it("merges shallow patches per section", () => {
+    const merged = mergeBlogSettings(DEFAULT_BLOG_SETTINGS, {
+      identity: { audience: "Founders" },
+    });
+    expect(merged.identity.audience).toBe("Founders");
+    expect(merged.identity.tone).toBe(DEFAULT_BLOG_SETTINGS.identity.tone);
+    expect(merged.seo).toEqual(DEFAULT_BLOG_SETTINGS.seo);
+  });
+
+  it("does not mutate the input", () => {
+    const before = JSON.stringify(DEFAULT_BLOG_SETTINGS);
+    mergeBlogSettings(DEFAULT_BLOG_SETTINGS, {
+      seo: { faqSection: true },
+    });
+    expect(JSON.stringify(DEFAULT_BLOG_SETTINGS)).toBe(before);
+  });
+
+  it("can patch multiple sections at once", () => {
+    const merged = mergeBlogSettings(DEFAULT_BLOG_SETTINGS, {
+      identity: { tone: "Witty" },
+      seo: { defaultArticleLength: 1800 },
+      automation: { mode: "autopilot" },
+    });
+    expect(merged.identity.tone).toBe("Witty");
+    expect(merged.seo.defaultArticleLength).toBe(1800);
+    expect(merged.automation.mode).toBe("autopilot");
+  });
+});

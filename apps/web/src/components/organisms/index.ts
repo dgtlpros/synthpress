@@ -20,3 +20,12 @@ export type {
 } from "./BillingSection";
 export { InvoiceList } from "./InvoiceList";
 export type { InvoiceListProps, InvoiceListItemView } from "./InvoiceList";
+
+export { PostsDashboard } from "./PostsDashboard";
+export type { PostsDashboardProps, PostsDashboardPost } from "./PostsDashboard";
+
+export { BlogSettingsTabs } from "./BlogSettingsTabs";
+export type {
+  BlogSettingsTabsProps,
+  BlogSettingsTabsValue,
+} from "./BlogSettingsTabs";

@@ -7,7 +7,10 @@ const meta = {
   parameters: { layout: "centered" },
   tags: ["autodocs"],
   argTypes: {
-    variant: { control: "select", options: ["neutral", "brand", "warning"] },
+    variant: {
+      control: "select",
+      options: ["neutral", "brand", "warning", "lime"],
+    },
     size: { control: "select", options: ["sm", "md", "lg"] },
   },
 } satisfies Meta<typeof TokenBadge>;
@@ -19,6 +22,10 @@ export const Default: Story = { args: { balance: 1500 } };
 export const Brand: Story = { args: { balance: 5000, variant: "brand" } };
 export const BrandLarge: Story = {
   args: { balance: 5100, variant: "brand", size: "lg" },
+};
+export const Lime: Story = { args: { balance: 12500, variant: "lime" } };
+export const LimeLarge: Story = {
+  args: { balance: 12500, variant: "lime", size: "lg" },
 };
 export const LowBalance: Story = { args: { balance: 25, variant: "warning" } };
 export const Compact: Story = { args: { balance: 250, compact: true } };

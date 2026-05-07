@@ -15,6 +15,8 @@ import {
 } from "@/components/atoms/Card";
 import { TokenBadge } from "@/components/atoms/TokenBadge";
 import { PriceTag } from "@/components/atoms/PriceTag";
+import { pickTokenBadgeVariant } from "@/lib/token-badge-variant";
+import { RefreshAfterCheckout } from "./refresh-after-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +81,7 @@ export default async function CheckoutReturnPage({
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-10 py-10 sm:py-14">
+      {status === "complete" && <RefreshAfterCheckout />}
       <CheckoutHeroForStatus status={status} details={details} />
 
       {status === "complete" && details && (
@@ -225,7 +228,11 @@ function ReceiptCard({
                   Synth tokens available right now.
                 </div>
               </div>
-              <TokenBadge balance={balance} variant="brand" size="lg" />
+              <TokenBadge
+                balance={balance}
+                variant={pickTokenBadgeVariant({ balance })}
+                size="lg"
+              />
             </div>
           </>
         )}
@@ -340,7 +347,11 @@ function FallbackCompleteCard({ balance }: { balance: number | null }) {
         <div className="text-3xl font-bold text-foreground">
           {formatNumber(balance)}
         </div>
-        <TokenBadge balance={balance} variant="brand" size="lg" />
+        <TokenBadge
+          balance={balance}
+          variant={pickTokenBadgeVariant({ balance })}
+          size="lg"
+        />
       </CardContent>
     </Card>
   );

@@ -3,14 +3,25 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { TablesInsert } from "@/lib/supabase/database.types";
+import type {
+  Json,
+  TablesInsert,
+  TablesUpdate,
+} from "@/lib/supabase/database.types";
+import {
+  type BlogSettings,
+  loadBlogSettings,
+  mergeBlogSettings,
+} from "@/lib/blog-settings";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
+  type ArticleListRow,
   createTeamWithOwner,
   generateUniqueBlogSlug,
   generateUniqueProjectSlug,
   generateUniqueTeamSlug,
   listBlogsForProject,
+  listPostsForBlog,
   listProjectsForTeam,
   listTeamsForUser,
 } from "@/services/workspace-service";
@@ -188,13 +199,19 @@ export async function updateProjectDescription(
   });
 }
 
+/**
+ * Name is the only required field. WordPress connection details are now opt-in
+ * — users wire those up later from the blog's settings page. If any one of
+ * the three WP fields is provided, all three must be present (we treat them
+ * as a single credential bundle).
+ */
 export type CreateBlogInput = {
   projectId: string;
   teamId: string;
   name: string;
-  wpUrl: string;
-  wpUsername: string;
-  wpAppPassword: string;
+  wpUrl?: string;
+  wpUsername?: string;
+  wpAppPassword?: string;
 };
 
 export async function createBlog(
@@ -204,13 +221,17 @@ export async function createBlog(
   if (!name) {
     return { data: null, error: "Blog name is required." };
   }
-  const wpUrl = input.wpUrl.trim();
-  const wpUsername = input.wpUsername.trim();
-  const wpAppPassword = input.wpAppPassword.trim();
-  if (!wpUrl || !wpUsername || !wpAppPassword) {
+
+  const wpUrl = input.wpUrl?.trim() ?? "";
+  const wpUsername = input.wpUsername?.trim() ?? "";
+  const wpAppPassword = input.wpAppPassword?.trim() ?? "";
+  const anyWp = Boolean(wpUrl || wpUsername || wpAppPassword);
+  const allWp = Boolean(wpUrl && wpUsername && wpAppPassword);
+  if (anyWp && !allWp) {
     return {
       data: null,
-      error: "WordPress URL, username, and application password are required.",
+      error:
+        "WordPress URL, username, and application password are all required when connecting a site.",
     };
   }
 
@@ -225,9 +246,9 @@ export async function createBlog(
       project_id: input.projectId,
       name,
       slug,
-      wp_url: wpUrl,
-      wp_username: wpUsername,
-      wp_app_password: wpAppPassword,
+      wp_url: allWp ? wpUrl : null,
+      wp_username: allWp ? wpUsername : null,
+      wp_app_password: allWp ? wpAppPassword : null,
     };
 
     const { data, error } = await supabase
@@ -427,15 +448,134 @@ export async function deleteProject(
   }
 }
 
+const MAX_BLOG_DESCRIPTION = 1000;
+const MAX_AI_PROMPT = 8000;
+const MAX_KEYWORDS = 50;
+
+/**
+ * Connection bundle for the WordPress (or future CMS) connection card.
+ *
+ * Three semantics for `wpAppPassword`:
+ *   • non-empty string → set / replace the stored password
+ *   • `""` (empty)     → preserve the existing stored password (used when
+ *                        the user only wants to tweak the URL or username)
+ *   • `null`           → disconnect; URL and username should also be null
+ *
+ * Migration 00014 enforces "all three together OR all three null" as a soft
+ * business rule; the action validates this below.
+ */
+export type BlogConnectionInput = {
+  /** Site root URL ("https://example.com"). Pass `null` to disconnect. */
+  wpUrl: string | null;
+  /** REST username. */
+  wpUsername: string | null;
+  /** Application password. See class comment for `""` semantics. */
+  wpAppPassword: string | null;
+};
+
+/**
+ * Full payload for the redesigned blog settings UI. Everything is optional;
+ * callers send only the fields they want to update. `settings` is a section
+ * patch that's merged into the existing jsonb (see {@link mergeBlogSettings}).
+ */
+export type UpdateBlogInput = {
+  name?: string;
+  description?: string;
+  niche?: string;
+  keywords?: string[];
+  aiPromptTemplate?: string;
+  articlesPerDay?: number;
+  scheduleCron?: string;
+  isActive?: boolean;
+  /** Shallow-merged into `blogs.settings`. */
+  settings?: Partial<{
+    [K in keyof BlogSettings]: Partial<BlogSettings[K]>;
+  }>;
+  /** Pass to update WordPress connection (or pass nulls to disconnect). */
+  connection?: BlogConnectionInput;
+};
+
+function normalizeKeywords(input: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of input) {
+    const k = String(raw).trim();
+    if (!k) continue;
+    const key = k.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(k);
+    if (out.length >= MAX_KEYWORDS) break;
+  }
+  return out;
+}
+
 export async function updateBlog(
   teamId: string,
   projectId: string,
   blogId: string,
-  input: { name: string },
+  input: UpdateBlogInput,
 ): Promise<ActionResult<null>> {
-  const name = input.name.trim();
-  if (!name) {
+  const trimmedName =
+    typeof input.name === "string" ? input.name.trim() : undefined;
+  if (input.name !== undefined && !trimmedName) {
     return { data: null, error: "Blog name is required." };
+  }
+
+  if (
+    typeof input.description === "string" &&
+    input.description.length > MAX_BLOG_DESCRIPTION
+  ) {
+    return {
+      data: null,
+      error: `Description must be at most ${MAX_BLOG_DESCRIPTION} characters.`,
+    };
+  }
+
+  if (
+    typeof input.aiPromptTemplate === "string" &&
+    input.aiPromptTemplate.length > MAX_AI_PROMPT
+  ) {
+    return {
+      data: null,
+      error: `AI prompt template must be at most ${MAX_AI_PROMPT} characters.`,
+    };
+  }
+
+  if (
+    typeof input.articlesPerDay === "number" &&
+    (!Number.isFinite(input.articlesPerDay) ||
+      input.articlesPerDay < 0 ||
+      input.articlesPerDay > 100)
+  ) {
+    return {
+      data: null,
+      error: "Articles per day must be between 0 and 100.",
+    };
+  }
+
+  if (input.connection) {
+    const { wpUrl, wpUsername, wpAppPassword } = input.connection;
+    const isClearing =
+      wpUrl === null && wpUsername === null && wpAppPassword === null;
+    const urlAndUserSet = Boolean(
+      typeof wpUrl === "string" &&
+      wpUrl.trim() &&
+      typeof wpUsername === "string" &&
+      wpUsername.trim(),
+    );
+    // Empty string for the password means "preserve existing"; we'll validate
+    // below that an existing password is on file.
+    const passwordOk =
+      (typeof wpAppPassword === "string" && wpAppPassword.trim()) ||
+      wpAppPassword === "";
+    if (!isClearing && !(urlAndUserSet && passwordOk)) {
+      return {
+        data: null,
+        error:
+          "WordPress URL, username, and application password are all required when connecting a site.",
+      };
+    }
   }
 
   const { supabase, user } = await requireUser();
@@ -449,7 +589,7 @@ export async function updateBlog(
 
     const { data: existing } = await supabase
       .from("blogs")
-      .select("name, slug")
+      .select("name, slug, settings, wp_app_password")
       .eq("id", blogId)
       .eq("project_id", projectId)
       .maybeSingle();
@@ -458,20 +598,84 @@ export async function updateBlog(
       return { data: null, error: "Blog not found." };
     }
 
-    let slug = existing.slug;
-    if (name !== existing.name.trim()) {
-      slug = await generateUniqueBlogSlug(projectId, name, supabase);
+    const update: TablesUpdate<"blogs"> = {};
+
+    if (trimmedName) {
+      update.name = trimmedName;
+      if (trimmedName !== existing.name.trim()) {
+        update.slug = await generateUniqueBlogSlug(
+          projectId,
+          trimmedName,
+          supabase,
+        );
+      }
+    }
+
+    if (typeof input.description === "string") {
+      update.description = input.description.trim();
+    }
+    if (typeof input.niche === "string") {
+      update.niche = input.niche.trim();
+    }
+    if (Array.isArray(input.keywords)) {
+      update.keywords = normalizeKeywords(input.keywords);
+    }
+    if (typeof input.aiPromptTemplate === "string") {
+      update.ai_prompt_template = input.aiPromptTemplate;
+    }
+    if (typeof input.articlesPerDay === "number") {
+      update.articles_per_day = Math.floor(input.articlesPerDay);
+    }
+    if (typeof input.scheduleCron === "string") {
+      update.schedule_cron = input.scheduleCron.trim();
+    }
+    if (typeof input.isActive === "boolean") {
+      update.is_active = input.isActive;
+    }
+
+    if (input.settings) {
+      const current = loadBlogSettings(existing.settings as Json);
+      const next = mergeBlogSettings(current, input.settings);
+      update.settings = next as unknown as Json;
+    }
+
+    if (input.connection) {
+      const { wpUrl, wpUsername, wpAppPassword } = input.connection;
+      update.wp_url = wpUrl;
+      update.wp_username = wpUsername;
+      if (wpAppPassword === "") {
+        // Preserve existing password — only valid if one is already stored.
+        if (!existing.wp_app_password) {
+          return {
+            data: null,
+            error:
+              "Application password is required to connect a WordPress site.",
+          };
+        }
+      } else {
+        update.wp_app_password = wpAppPassword;
+      }
+    }
+
+    if (Object.keys(update).length === 0) {
+      return { data: null, error: null };
     }
 
     const { error } = await supabase
       .from("blogs")
-      .update({ name, slug })
+      .update(update)
       .eq("id", blogId)
       .eq("project_id", projectId);
 
     if (error) return { data: null, error: error.message };
 
     revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/settings`,
+    );
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/connections`,
+    );
     revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs`);
     revalidatePath(`/teams/${teamId}/projects/${projectId}`);
     return { data: null, error: null };
@@ -480,7 +684,113 @@ export async function updateBlog(
       return { data: null, error: err.code };
     return {
       data: null,
-      error: err instanceof Error ? err.message : "Could not rename blog.",
+      error: err instanceof Error ? err.message : "Could not update blog.",
+    };
+  }
+}
+
+export async function setBlogActive(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  isActive: boolean,
+): Promise<ActionResult<null>> {
+  return updateBlog(teamId, projectId, blogId, { isActive });
+}
+
+export async function getPostsForBlog(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+): Promise<ActionResult<ArticleListRow[]>> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { data: null, error: "You must be signed in." };
+
+  try {
+    const { data: blog, error: blogErr } = await supabase
+      .from("blogs")
+      .select("id")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (blogErr || !blog) {
+      // Make sure callers get a helpful message even when RLS hides the row.
+      void teamId;
+      return { data: null, error: "Blog not found." };
+    }
+
+    const posts = await listPostsForBlog(blogId, supabase);
+    return { data: posts, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not load posts.",
+    };
+  }
+}
+
+const MAX_POST_TITLE = 200;
+
+export async function createPost(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  input: { title: string; targetKeyword?: string; authorPersona?: string },
+): Promise<ActionResult<{ id: string }>> {
+  const title = input.title.trim();
+  if (!title) {
+    return { data: null, error: "Post title is required." };
+  }
+  if (title.length > MAX_POST_TITLE) {
+    return {
+      data: null,
+      error: `Title must be at most ${MAX_POST_TITLE} characters.`,
+    };
+  }
+
+  const { supabase, user } = await requireUser();
+  if (!user) return { data: null, error: "You must be signed in." };
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { data: blog } = await supabase
+      .from("blogs")
+      .select("id")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (!blog) {
+      return { data: null, error: "Blog not found." };
+    }
+
+    const row: TablesInsert<"articles"> = {
+      blog_id: blogId,
+      title,
+      target_keyword: input.targetKeyword?.trim() || null,
+      author_persona: input.authorPersona?.trim() || null,
+      status: "draft",
+    };
+
+    const { data, error } = await supabase
+      .from("articles")
+      .insert(row)
+      .select("id")
+      .single();
+
+    if (error) return { data: null, error: error.message };
+
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+    return { data: { id: data.id }, error: null };
+  } catch (err) {
+    if (err instanceof TeamPermissionError)
+      return { data: null, error: err.code };
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "Could not create post.",
     };
   }
 }

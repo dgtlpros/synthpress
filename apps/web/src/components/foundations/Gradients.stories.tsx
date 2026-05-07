@@ -20,6 +20,11 @@ const gradients = [
     className: "bg-gradient-accent",
   },
   { name: "Glow", desc: "Purple → Magenta", className: "bg-gradient-glow" },
+  {
+    name: "Lime",
+    desc: "Lime → Cyan — fresh, energetic accents",
+    className: "bg-gradient-lime",
+  },
 ];
 
 export const AllGradients: Story = {
@@ -54,6 +59,12 @@ export const AllGradients: Story = {
           <p className="text-3xl font-bold text-gradient-accent">
             Accent gradient text
           </p>
+          <p className="text-3xl font-bold text-gradient-lime">
+            Lime gradient text
+          </p>
+          <p className="text-3xl font-bold text-gradient-lime-strong">
+            Lime gradient text (strong — readable on white at small sizes)
+          </p>
         </div>
       </div>
 
@@ -70,6 +81,9 @@ export const AllGradients: Story = {
           </button>
           <button className="bg-gradient-glow text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:brightness-110 transition-all">
             Glow Button
+          </button>
+          <button className="bg-gradient-lime text-brand-navy px-6 py-2.5 rounded-lg font-medium shadow-md hover:brightness-110 transition-all">
+            Lime Button
           </button>
         </div>
       </div>

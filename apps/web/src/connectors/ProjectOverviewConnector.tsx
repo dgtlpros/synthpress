@@ -2,11 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { deleteProject, updateProjectSettings } from "@/actions/workspace";
+import {
+  createBlog,
+  deleteProject,
+  updateProjectSettings,
+} from "@/actions/workspace";
 import type { BlogListRow } from "@/services/workspace-service";
 import { Button } from "@/components/atoms/Button";
 import { DeleteConfirmModal } from "@/components/atoms/DeleteConfirmModal";
-import { CreateAppChoiceModal } from "@/components/molecules/CreateAppChoiceModal";
+import {
+  CreateAppChoiceModal,
+  type CreateAppChoiceModalStep,
+} from "@/components/molecules/CreateAppChoiceModal";
 import { EditProjectSettingsModal } from "@/components/molecules/EditProjectSettingsModal";
 import {
   ProjectInstalledAppList,
@@ -14,6 +21,10 @@ import {
 } from "@/components/molecules/ProjectInstalledAppList";
 import { ProjectPageHeader } from "@/components/molecules/ProjectPageHeader";
 import { roleCan, type TeamRole } from "@/lib/team-roles";
+
+function stripScheme(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
 
 export interface ProjectOverviewConnectorProps {
   teamId: string;
@@ -37,6 +48,11 @@ export function ProjectOverviewConnector({
   const router = useRouter();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createStep, setCreateStep] =
+    useState<CreateAppChoiceModalStep>("choose");
+  const [blogNameDraft, setBlogNameDraft] = useState("");
+  const [createBlogError, setCreateBlogError] = useState<string | null>(null);
+  const [isCreatingBlog, startCreateBlogTransition] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
   const [descDraft, setDescDraft] = useState(projectDescription);
@@ -58,15 +74,26 @@ export function ProjectOverviewConnector({
 
   const appItems: ProjectInstalledAppListItem[] = useMemo(
     () =>
-      blogs.map((b) => ({
-        id: b.id,
-        href: `${blogBase}/${b.id}`,
-        appKindLabel: "Blog",
-        title: b.name,
-        subtitle: b.wp_url,
-        isActive: b.is_active,
-        meta: `${b.articles_per_day} article(s) per day${b.niche?.trim() ? ` · ${b.niche.trim()}` : ""}`,
-      })),
+      blogs.map((b) => {
+        const description = b.description?.trim();
+        const niche = b.niche?.trim();
+        const subtitle =
+          description ||
+          niche ||
+          "Configure tone, audience, and AI rules in settings.";
+        const metaParts: string[] = [];
+        if (niche && description) metaParts.push(niche);
+        if (b.wp_url) metaParts.push(`WordPress · ${stripScheme(b.wp_url)}`);
+        return {
+          id: b.id,
+          href: `${blogBase}/${b.id}`,
+          appKindLabel: "Blog",
+          title: b.name,
+          subtitle,
+          isActive: b.is_active,
+          meta: metaParts.length ? metaParts.join(" · ") : undefined,
+        };
+      }),
     [blogs, blogBase],
   );
 
@@ -89,6 +116,43 @@ export function ProjectOverviewConnector({
         return;
       }
       setSettingsOpen(false);
+      router.refresh();
+    });
+  }
+
+  function openCreateApp() {
+    setCreateStep("choose");
+    setBlogNameDraft("");
+    setCreateBlogError(null);
+    setCreateOpen(true);
+  }
+
+  function closeCreateApp() {
+    setCreateOpen(false);
+    setCreateStep("choose");
+    setBlogNameDraft("");
+    setCreateBlogError(null);
+  }
+
+  function handleCreateBlog() {
+    const trimmed = blogNameDraft.trim();
+    if (!trimmed) {
+      setCreateBlogError("Blog name is required.");
+      return;
+    }
+    setCreateBlogError(null);
+    startCreateBlogTransition(async () => {
+      const result = await createBlog({
+        teamId,
+        projectId,
+        name: trimmed,
+      });
+      if (!result.data) {
+        setCreateBlogError(result.error ?? "Could not create blog.");
+        return;
+      }
+      closeCreateApp();
+      router.push(`${blogBase}/${result.data.id}`);
       router.refresh();
     });
   }
@@ -153,7 +217,7 @@ export function ProjectOverviewConnector({
               variant="secondary"
               size="sm"
               className="cursor-pointer"
-              onClick={() => setCreateOpen(true)}
+              onClick={openCreateApp}
             >
               Create app
             </Button>
@@ -196,9 +260,18 @@ export function ProjectOverviewConnector({
 
       <CreateAppChoiceModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        blogSetupHref={blogBase}
-        onAfterChooseBlog={() => setCreateOpen(false)}
+        onClose={closeCreateApp}
+        step={createStep}
+        onChooseBlog={() => setCreateStep("name")}
+        onBack={() => {
+          setCreateStep("choose");
+          setCreateBlogError(null);
+        }}
+        blogName={blogNameDraft}
+        onBlogNameChange={setBlogNameDraft}
+        onCreateBlog={handleCreateBlog}
+        pending={isCreatingBlog}
+        errorMessage={createBlogError}
       />
 
       <DeleteConfirmModal

@@ -22,7 +22,7 @@ describe("TokenBadge", () => {
   });
 
   it("renders all variants without crashing", () => {
-    for (const variant of ["neutral", "brand", "warning"] as const) {
+    for (const variant of ["neutral", "brand", "warning", "lime"] as const) {
       const { unmount } = render(
         <TokenBadge balance={100} variant={variant} />,
       );
@@ -37,5 +37,10 @@ describe("TokenBadge", () => {
       expect(screen.getByText(/tokens/)).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("defaults to the lime variant so synth tokens have a consistent identity color", () => {
+    const { container } = render(<TokenBadge balance={500} />);
+    expect(container.querySelector(".bg-gradient-lime")).not.toBeNull();
   });
 });
