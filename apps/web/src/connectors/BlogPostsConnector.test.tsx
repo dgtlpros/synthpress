@@ -29,9 +29,11 @@ const post: PostsDashboardPost = {
   id: "p1",
   title: "Hello",
   status: "draft",
+  excerpt: null,
   targetKeyword: null,
   authorPersona: null,
   wordCount: null,
+  generatedByModel: null,
   scheduledAt: null,
   publishedAt: null,
   createdAt: new Date().toISOString(),
@@ -64,6 +66,38 @@ describe("BlogPostsConnector", () => {
     fireEvent.click(screen.getByText("Hello"));
     expect(pushMock).toHaveBeenCalledWith(
       "/teams/t1/projects/pr1/blogs/b1/posts/p1",
+    );
+  });
+
+  it("links to the Ideas tab from the empty state and the bottom toolbar", () => {
+    render(
+      <BlogPostsConnector
+        teamId="t1"
+        projectId="pr1"
+        blogId="b1"
+        initialPosts={[]}
+      />,
+    );
+    const ideasLink = screen.getByRole("link", { name: /go to ideas/i });
+    expect(ideasLink).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/pr1/blogs/b1/ideas",
+    );
+  });
+
+  it("renders the bottom 'Generate from an idea' link when posts exist", () => {
+    render(
+      <BlogPostsConnector
+        teamId="t1"
+        projectId="pr1"
+        blogId="b1"
+        initialPosts={[post]}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /generate from an idea/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/pr1/blogs/b1/ideas",
     );
   });
 

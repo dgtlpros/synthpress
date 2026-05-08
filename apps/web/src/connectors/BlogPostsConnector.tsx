@@ -27,6 +27,8 @@ export function BlogPostsConnector({
     blogId,
   });
 
+  const blogBase = `/teams/${teamId}/projects/${projectId}/blogs/${blogId}`;
+
   return (
     <div className="space-y-4">
       {createError ? (
@@ -38,11 +40,8 @@ export function BlogPostsConnector({
         posts={initialPosts}
         onCreatePost={createPost}
         isCreating={isCreating}
-        onPostClick={(postId) =>
-          router.push(
-            `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/posts/${postId}`,
-          )
-        }
+        ideasHref={`${blogBase}/ideas`}
+        onPostClick={(postId) => router.push(`${blogBase}/posts/${postId}`)}
       />
     </div>
   );

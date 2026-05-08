@@ -11,9 +11,11 @@ function makePost(
     id: "p1",
     title: "Hello world",
     status: "draft",
+    excerpt: null,
     targetKeyword: null,
     authorPersona: null,
     wordCount: null,
+    generatedByModel: null,
     scheduledAt: null,
     publishedAt: null,
     createdAt: new Date().toISOString(),
@@ -72,6 +74,23 @@ describe("PostsDashboard", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Published/ }));
     expect(screen.queryByText("Draft 1")).not.toBeInTheDocument();
     expect(screen.getByText("Pub 1")).toBeInTheDocument();
+  });
+
+  it("the 'Ready for review' filter matches both ready and ready_for_review", () => {
+    const posts = [
+      makePost({ id: "1", status: "ready", title: "Legacy ready" }),
+      makePost({
+        id: "2",
+        status: "ready_for_review",
+        title: "Canonical ready",
+      }),
+      makePost({ id: "3", status: "draft", title: "Just a draft" }),
+    ];
+    render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Ready for review/ }));
+    expect(screen.getByText("Legacy ready")).toBeInTheDocument();
+    expect(screen.getByText("Canonical ready")).toBeInTheDocument();
+    expect(screen.queryByText("Just a draft")).not.toBeInTheDocument();
   });
 
   it("filters posts by search query", () => {
@@ -142,17 +161,16 @@ describe("PostsDashboard", () => {
     expect(screen.getByText("WordPress (example.com)")).toBeInTheDocument();
   });
 
-  it("disables the AI generate button while generating", () => {
+  it("renders a 'Generate from an idea' link in the bottom toolbar when ideasHref is set", () => {
     render(
       <PostsDashboard
         posts={[makePost()]}
         onCreatePost={vi.fn()}
-        onGeneratePost={vi.fn()}
-        isGenerating
+        ideasHref="/teams/t1/projects/p1/blogs/b1/ideas"
       />,
     );
-    const generate = screen.getByRole("button", { name: /Generate with AI/ });
-    expect(generate).toHaveAttribute("aria-busy", "true");
+    const link = screen.getByRole("link", { name: /generate from an idea/i });
+    expect(link).toHaveAttribute("href", "/teams/t1/projects/p1/blogs/b1/ideas");
   });
 
   it("renders 'Untitled' when title is empty", () => {
@@ -288,18 +306,27 @@ describe("PostsDashboard", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("renders '... generating' hint and Generate button on the empty state", () => {
-    const onGenerate = vi.fn();
+  it("renders the 'Go to Ideas' link on the empty state when ideasHref is set", () => {
     render(
       <PostsDashboard
         posts={[]}
         onCreatePost={vi.fn()}
-        onGeneratePost={onGenerate}
+        ideasHref="/teams/t1/projects/p1/blogs/b1/ideas"
       />,
     );
-    // Empty-state Generate button (covers the truthy branch in EmptyState).
-    fireEvent.click(screen.getByRole("button", { name: /Generate with AI/ }));
-    expect(onGenerate).toHaveBeenCalled();
+    const link = screen.getByRole("link", { name: /go to ideas/i });
+    expect(link).toHaveAttribute("href", "/teams/t1/projects/p1/blogs/b1/ideas");
+  });
+
+  it("omits the 'Go to Ideas' link on the empty state when ideasHref is not provided", () => {
+    render(<PostsDashboard posts={[]} onCreatePost={vi.fn()} />);
+    expect(
+      screen.queryByRole("link", { name: /go to ideas/i }),
+    ).not.toBeInTheDocument();
+    // The manual "New post" fallback is still there.
+    expect(
+      screen.getByRole("button", { name: "New post" }),
+    ).toBeInTheDocument();
   });
 
   it("renders the 'generating' hint when generating posts exist", () => {
@@ -389,5 +416,77 @@ describe("PostsDashboard", () => {
     const row = screen.getByText("Activate").closest("tr")!;
     fireEvent.keyDown(row, { key: "Tab" });
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("calls onPostClick with the article id when a row is clicked", () => {
+    const onClick = vi.fn();
+    const posts = [
+      makePost({ id: "row-1", title: "First post" }),
+      makePost({ id: "row-2", title: "Second post" }),
+    ];
+    render(
+      <PostsDashboard
+        posts={posts}
+        onCreatePost={vi.fn()}
+        onPostClick={onClick}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Second post"));
+    expect(onClick).toHaveBeenCalledWith("row-2");
+  });
+
+  it("renders the article excerpt under the title for AI-generated rows", () => {
+    const posts = [
+      makePost({
+        id: "p1",
+        title: "How to ship faster",
+        excerpt: "A 30-day plan to ship your first ten posts.",
+        generatedByModel: "claude-sonnet-4-6",
+      }),
+    ];
+    render(
+      <PostsDashboard posts={posts} onCreatePost={vi.fn()} />,
+    );
+    expect(
+      screen.getByText("A 30-day plan to ship your first ten posts."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("via claude-sonnet-4-6"),
+    ).toBeInTheDocument();
+  });
+
+  it("combines author persona + model in the subtitle when both are set", () => {
+    const posts = [
+      makePost({
+        id: "p1",
+        title: "Manual + AI hybrid",
+        excerpt: null,
+        authorPersona: "Editorial team",
+        generatedByModel: "claude-sonnet-4-6",
+      }),
+    ];
+    render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
+    expect(
+      screen.getByText("By Editorial team · via claude-sonnet-4-6"),
+    ).toBeInTheDocument();
+  });
+
+  it("displays the failed status badge inside the row for failed articles", () => {
+    const posts = [makePost({ id: "p1", status: "failed", title: "Bad run" })];
+    render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
+    // "Failed" also appears in the stat card label + filter tab; scope
+    // to the row so we only assert on the badge.
+    const row = screen.getByText("Bad run").closest("tr")!;
+    expect(row.textContent).toContain("Failed");
+  });
+
+  it("displays the generating status badge inside the row for in-flight articles", () => {
+    const posts = [
+      makePost({ id: "p1", status: "generating", title: "In flight" }),
+    ];
+    render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
+    const row = screen.getByText("In flight").closest("tr")!;
+    expect(row.textContent).toContain("Generating");
   });
 });

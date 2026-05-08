@@ -76,3 +76,13 @@ export type { WordPressConnectionFormProps } from "./WordPressConnectionForm";
 
 export { ComingSoonPanel } from "./ComingSoonPanel";
 export type { ComingSoonPanelProps } from "./ComingSoonPanel";
+
+export { GenerateIdeasModal } from "./GenerateIdeasModal";
+export type { GenerateIdeasModalProps } from "./GenerateIdeasModal";
+
+export { IdeaCard } from "./IdeaCard";
+export type {
+  IdeaCardProps,
+  IdeaCardIdea,
+  IdeaCardPendingAction,
+} from "./IdeaCard";

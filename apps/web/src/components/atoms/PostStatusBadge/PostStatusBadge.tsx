@@ -5,15 +5,17 @@ import {
 } from "@/components/atoms/Badge";
 
 /**
- * The status surface stored in the DB enum is intentionally narrower than the
- * status surface we want to expose in the UI. We map the DB values to a more
- * editorial vocabulary ("Ready for review" rather than just "Ready") and add
- * the synthetic "scheduled" / "archived" rows the redesigned UI needs.
+ * Mirrors the `article_status` Postgres enum 1:1. The UI labels are
+ * editorial — "Ready for review" rather than `ready_for_review`. Both
+ * `ready` (legacy, pre-migration 00016) and `ready_for_review` (current
+ * canonical value) collapse to the same UI label so generated articles
+ * and any older drafts render consistently.
  */
 export type PostStatus =
   | "draft"
   | "generating"
   | "ready"
+  | "ready_for_review"
   | "scheduled"
   | "publishing"
   | "published"
@@ -24,6 +26,7 @@ const labels: Record<PostStatus, string> = {
   draft: "Draft",
   generating: "Generating",
   ready: "Ready for review",
+  ready_for_review: "Ready for review",
   scheduled: "Scheduled",
   publishing: "Publishing",
   published: "Published",
@@ -35,6 +38,7 @@ const variants: Record<PostStatus, BadgeProps["variant"]> = {
   draft: "default",
   generating: "warning",
   ready: "lime",
+  ready_for_review: "lime",
   scheduled: "brand",
   publishing: "warning",
   published: "success",
@@ -64,6 +68,7 @@ export const POST_STATUSES: readonly PostStatus[] = [
   "draft",
   "generating",
   "ready",
+  "ready_for_review",
   "scheduled",
   "publishing",
   "published",

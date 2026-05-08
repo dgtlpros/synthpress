@@ -152,17 +152,19 @@ export async function getBlogById(
 }
 
 const ARTICLE_LIST_COLUMNS =
-  "id, blog_id, title, status, target_keyword, author_persona, word_count, scheduled_at, published_at, created_at, updated_at, error_message, wp_post_url" as const;
+  "id, blog_id, title, excerpt, status, target_keyword, author_persona, word_count, generated_by_model, scheduled_at, published_at, created_at, updated_at, error_message, wp_post_url" as const;
 
 export type ArticleListRow = Pick<
   Tables<"articles">,
   | "id"
   | "blog_id"
   | "title"
+  | "excerpt"
   | "status"
   | "target_keyword"
   | "author_persona"
   | "word_count"
+  | "generated_by_model"
   | "scheduled_at"
   | "published_at"
   | "created_at"

@@ -34,24 +34,180 @@ export type Database = {
   };
   public: {
     Tables: {
+      article_ideas: {
+        Row: {
+          article_type: string | null;
+          blog_id: string;
+          created_at: string;
+          estimated_word_count: number | null;
+          executive_summary: string | null;
+          id: string;
+          raw_ai_response: Json | null;
+          slug: string | null;
+          status: string;
+          target_keyword: string | null;
+          title: string;
+          updated_at: string;
+          user_id: string | null;
+        };
+        Insert: {
+          article_type?: string | null;
+          blog_id: string;
+          created_at?: string;
+          estimated_word_count?: number | null;
+          executive_summary?: string | null;
+          id?: string;
+          raw_ai_response?: Json | null;
+          slug?: string | null;
+          status?: string;
+          target_keyword?: string | null;
+          title: string;
+          updated_at?: string;
+          user_id?: string | null;
+        };
+        Update: {
+          article_type?: string | null;
+          blog_id?: string;
+          created_at?: string;
+          estimated_word_count?: number | null;
+          executive_summary?: string | null;
+          id?: string;
+          raw_ai_response?: Json | null;
+          slug?: string | null;
+          status?: string;
+          target_keyword?: string | null;
+          title?: string;
+          updated_at?: string;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "article_ideas_blog_id_fkey";
+            columns: ["blog_id"];
+            isOneToOne: false;
+            referencedRelation: "blogs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "article_ideas_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      article_jobs: {
+        Row: {
+          article_id: string | null;
+          article_idea_id: string | null;
+          attempts: number;
+          blog_id: string;
+          completed_at: string | null;
+          created_at: string;
+          current_step: string | null;
+          error_message: string | null;
+          id: string;
+          input: Json;
+          output: Json;
+          started_at: string | null;
+          status: string;
+          type: string;
+          updated_at: string;
+          user_id: string | null;
+        };
+        Insert: {
+          article_id?: string | null;
+          article_idea_id?: string | null;
+          attempts?: number;
+          blog_id: string;
+          completed_at?: string | null;
+          created_at?: string;
+          current_step?: string | null;
+          error_message?: string | null;
+          id?: string;
+          input?: Json;
+          output?: Json;
+          started_at?: string | null;
+          status?: string;
+          type: string;
+          updated_at?: string;
+          user_id?: string | null;
+        };
+        Update: {
+          article_id?: string | null;
+          article_idea_id?: string | null;
+          attempts?: number;
+          blog_id?: string;
+          completed_at?: string | null;
+          created_at?: string;
+          current_step?: string | null;
+          error_message?: string | null;
+          id?: string;
+          input?: Json;
+          output?: Json;
+          started_at?: string | null;
+          status?: string;
+          type?: string;
+          updated_at?: string;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "article_jobs_article_id_fkey";
+            columns: ["article_id"];
+            isOneToOne: false;
+            referencedRelation: "articles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "article_jobs_article_idea_id_fkey";
+            columns: ["article_idea_id"];
+            isOneToOne: false;
+            referencedRelation: "article_ideas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "article_jobs_blog_id_fkey";
+            columns: ["blog_id"];
+            isOneToOne: false;
+            referencedRelation: "blogs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "article_jobs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       articles: {
         Row: {
           ai_model: string | null;
           ai_prompt: string | null;
+          article_idea_id: string | null;
           author_persona: string | null;
           blog_id: string;
           content: string;
+          content_markdown: string | null;
           created_at: string;
           error_message: string | null;
           excerpt: string;
           featured_image_url: string | null;
+          generated_by_model: string | null;
           id: string;
+          meta_description: string | null;
           published_at: string | null;
+          raw_ai_response: Json | null;
           scheduled_at: string | null;
+          slug: string | null;
           status: Database["public"]["Enums"]["article_status"];
           target_keyword: string | null;
           title: string;
           updated_at: string;
+          user_id: string | null;
           word_count: number | null;
           wp_post_id: number | null;
           wp_post_url: string | null;
@@ -59,20 +215,27 @@ export type Database = {
         Insert: {
           ai_model?: string | null;
           ai_prompt?: string | null;
+          article_idea_id?: string | null;
           author_persona?: string | null;
           blog_id: string;
           content?: string;
+          content_markdown?: string | null;
           created_at?: string;
           error_message?: string | null;
           excerpt?: string;
           featured_image_url?: string | null;
+          generated_by_model?: string | null;
           id?: string;
+          meta_description?: string | null;
           published_at?: string | null;
+          raw_ai_response?: Json | null;
           scheduled_at?: string | null;
+          slug?: string | null;
           status?: Database["public"]["Enums"]["article_status"];
           target_keyword?: string | null;
           title?: string;
           updated_at?: string;
+          user_id?: string | null;
           word_count?: number | null;
           wp_post_id?: number | null;
           wp_post_url?: string | null;
@@ -80,30 +243,51 @@ export type Database = {
         Update: {
           ai_model?: string | null;
           ai_prompt?: string | null;
+          article_idea_id?: string | null;
           author_persona?: string | null;
           blog_id?: string;
           content?: string;
+          content_markdown?: string | null;
           created_at?: string;
           error_message?: string | null;
           excerpt?: string;
           featured_image_url?: string | null;
+          generated_by_model?: string | null;
           id?: string;
+          meta_description?: string | null;
           published_at?: string | null;
+          raw_ai_response?: Json | null;
           scheduled_at?: string | null;
+          slug?: string | null;
           status?: Database["public"]["Enums"]["article_status"];
           target_keyword?: string | null;
           title?: string;
           updated_at?: string;
+          user_id?: string | null;
           word_count?: number | null;
           wp_post_id?: number | null;
           wp_post_url?: string | null;
         };
         Relationships: [
           {
+            foreignKeyName: "articles_article_idea_id_fkey";
+            columns: ["article_idea_id"];
+            isOneToOne: false;
+            referencedRelation: "article_ideas";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "articles_blog_id_fkey";
             columns: ["blog_id"];
             isOneToOne: false;
             referencedRelation: "blogs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "articles_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
         ];
@@ -586,6 +770,90 @@ export type Database = {
         };
         Relationships: [];
       };
+      usage_events: {
+        Row: {
+          article_id: string | null;
+          article_idea_id: string | null;
+          blog_id: string | null;
+          created_at: string;
+          credits_used: number | null;
+          estimated_cost: number | null;
+          id: string;
+          input_tokens: number | null;
+          job_id: string | null;
+          model: string | null;
+          output_tokens: number | null;
+          provider: string | null;
+          user_id: string | null;
+        };
+        Insert: {
+          article_id?: string | null;
+          article_idea_id?: string | null;
+          blog_id?: string | null;
+          created_at?: string;
+          credits_used?: number | null;
+          estimated_cost?: number | null;
+          id?: string;
+          input_tokens?: number | null;
+          job_id?: string | null;
+          model?: string | null;
+          output_tokens?: number | null;
+          provider?: string | null;
+          user_id?: string | null;
+        };
+        Update: {
+          article_id?: string | null;
+          article_idea_id?: string | null;
+          blog_id?: string | null;
+          created_at?: string;
+          credits_used?: number | null;
+          estimated_cost?: number | null;
+          id?: string;
+          input_tokens?: number | null;
+          job_id?: string | null;
+          model?: string | null;
+          output_tokens?: number | null;
+          provider?: string | null;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "usage_events_article_id_fkey";
+            columns: ["article_id"];
+            isOneToOne: false;
+            referencedRelation: "articles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "usage_events_article_idea_id_fkey";
+            columns: ["article_idea_id"];
+            isOneToOne: false;
+            referencedRelation: "article_ideas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "usage_events_blog_id_fkey";
+            columns: ["blog_id"];
+            isOneToOne: false;
+            referencedRelation: "blogs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "usage_events_job_id_fkey";
+            columns: ["job_id"];
+            isOneToOne: false;
+            referencedRelation: "article_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "usage_events_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -641,6 +909,7 @@ export type Database = {
         | "draft"
         | "generating"
         | "ready"
+        | "ready_for_review"
         | "scheduled"
         | "publishing"
         | "published"
@@ -784,6 +1053,7 @@ export const Constants = {
         "draft",
         "generating",
         "ready",
+        "ready_for_review",
         "scheduled",
         "publishing",
         "published",

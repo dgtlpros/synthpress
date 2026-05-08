@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/atoms/Badge";
@@ -27,9 +28,13 @@ export interface PostsDashboardPost {
   id: string;
   title: string;
   status: PostStatus;
+  /** Short summary, populated by AI generation; fallback to authorPersona for manual drafts. */
+  excerpt: string | null;
   targetKeyword: string | null;
   authorPersona: string | null;
   wordCount: number | null;
+  /** Model id (e.g. `claude-sonnet-4-6`) — set for AI-generated articles. */
+  generatedByModel: string | null;
   scheduledAt: string | null;
   publishedAt: string | null;
   createdAt: string;
@@ -41,21 +46,28 @@ export interface PostsDashboardProps {
   posts: PostsDashboardPost[];
   /** Loading state for the create-post mutation. */
   isCreating?: boolean;
-  /** Loading state for the generate-post mutation (placeholder for now). */
-  isGenerating?: boolean;
   onCreatePost: (input: { title: string }) => void;
-  onGeneratePost?: () => void;
+  /**
+   * URL of the blog's Ideas tab. Surfaced from the empty state's primary
+   * CTA so users without posts land on the canonical AI-first flow.
+   */
+  ideasHref?: string;
   onPostClick?: (postId: string) => void;
   className?: string;
 }
 
 type FilterValue = "all" | PostStatus;
 
+// `ready` (legacy) and `ready_for_review` (current) collapse to a single
+// editorial filter — clicking "Ready for review" finds posts in either
+// underlying enum value.
+const READY_STATUSES: readonly PostStatus[] = ["ready", "ready_for_review"];
+
 const FILTERS: { value: FilterValue; label: string }[] = [
   { value: "all", label: "All" },
   { value: "draft", label: "Drafts" },
   { value: "generating", label: "Generating" },
-  { value: "ready", label: "Ready" },
+  { value: "ready_for_review", label: "Ready for review" },
   { value: "scheduled", label: "Scheduled" },
   { value: "published", label: "Published" },
   { value: "failed", label: "Failed" },
@@ -69,6 +81,7 @@ function countBy(posts: PostsDashboardPost[]): Record<PostStatus, number> {
     draft: 0,
     generating: 0,
     ready: 0,
+    ready_for_review: 0,
     scheduled: 0,
     publishing: 0,
     published: 0,
@@ -111,9 +124,8 @@ function absoluteTime(iso: string | null): string {
 export function PostsDashboard({
   posts,
   isCreating,
-  isGenerating,
   onCreatePost,
-  onGeneratePost,
+  ideasHref,
   onPostClick,
   className,
 }: PostsDashboardProps) {
@@ -127,7 +139,15 @@ export function PostsDashboard({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return posts.filter((p) => {
-      if (filter !== "all" && p.status !== filter) return false;
+      if (filter !== "all") {
+        // "Ready for review" is a virtual filter that matches both the
+        // legacy `ready` and the canonical `ready_for_review` enum values.
+        if (filter === "ready_for_review") {
+          if (!READY_STATUSES.includes(p.status)) return false;
+        } else if (p.status !== filter) {
+          return false;
+        }
+      }
       if (!q) return true;
       const haystack = [p.title, p.targetKeyword ?? "", p.authorPersona ?? ""]
         .join(" ")
@@ -164,7 +184,7 @@ export function PostsDashboard({
         />
         <StatCard
           label="Ready / Scheduled"
-          value={counts.ready + counts.scheduled}
+          value={counts.ready + counts.ready_for_review + counts.scheduled}
           tone="brand"
           hint={
             counts.scheduled > 0 ? `${counts.scheduled} scheduled` : undefined
@@ -189,7 +209,9 @@ export function PostsDashboard({
               const count =
                 f.value === "all"
                   ? total
-                  : (counts as Record<string, number>)[f.value];
+                  : f.value === "ready_for_review"
+                    ? counts.ready + counts.ready_for_review
+                    : (counts as Record<string, number>)[f.value];
               return (
                 <TabsTrigger
                   key={f.value}
@@ -262,8 +284,7 @@ export function PostsDashboard({
       {posts.length === 0 ? (
         <EmptyState
           onCreate={() => setCreateOpen(true)}
-          onGenerate={onGeneratePost}
-          isGenerating={isGenerating}
+          ideasHref={ideasHref}
         />
       ) : filtered.length === 0 ? (
         <Card className="flex flex-col items-center gap-2 py-12 text-center">
@@ -280,15 +301,13 @@ export function PostsDashboard({
 
       {!createOpen && posts.length > 0 ? (
         <div className="flex items-center justify-end gap-2">
-          {onGeneratePost ? (
-            <Button
-              variant="secondary"
-              size="md"
-              loading={isGenerating}
-              onClick={onGeneratePost}
+          {ideasHref ? (
+            <Link
+              href={ideasHref}
+              className="inline-flex h-10 items-center justify-center rounded-[var(--sp-radius-lg)] border border-border bg-surface px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
             >
-              Generate with AI
-            </Button>
+              Generate from an idea
+            </Link>
           ) : null}
           <Button size="md" onClick={() => setCreateOpen(true)}>
             New post
@@ -341,16 +360,29 @@ function PostsTable({ posts, onPostClick }: PostsTableProps) {
             }
           >
             <TableCell>
-              <div className="flex flex-col">
+              <div className="flex flex-col gap-0.5">
                 <span
                   className="line-clamp-1 max-w-[28rem] font-medium text-foreground"
                   title={p.title || "Untitled"}
                 >
                   {p.title || "Untitled"}
                 </span>
-                {p.authorPersona ? (
+                {p.excerpt ? (
+                  <span
+                    className="line-clamp-1 max-w-[28rem] text-xs text-muted"
+                    title={p.excerpt}
+                  >
+                    {p.excerpt}
+                  </span>
+                ) : null}
+                {p.authorPersona || p.generatedByModel ? (
                   <span className="text-xs text-muted">
-                    By {p.authorPersona}
+                    {[
+                      p.authorPersona && `By ${p.authorPersona}`,
+                      p.generatedByModel && `via ${p.generatedByModel}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 ) : null}
               </div>
@@ -390,11 +422,11 @@ function PostsTable({ posts, onPostClick }: PostsTableProps) {
 
 interface EmptyStateProps {
   onCreate: () => void;
-  onGenerate?: () => void;
-  isGenerating?: boolean;
+  /** When provided, the empty state shows a primary "Go to Ideas" CTA. */
+  ideasHref?: string;
 }
 
-function EmptyState({ onCreate, onGenerate, isGenerating }: EmptyStateProps) {
+function EmptyState({ onCreate, ideasHref }: EmptyStateProps) {
   return (
     <Card className="flex flex-col items-center gap-4 py-16 text-center">
       <div className="rounded-[var(--sp-radius-full)] bg-gradient-accent p-3 text-white shadow-md">
@@ -403,22 +435,20 @@ function EmptyState({ onCreate, onGenerate, isGenerating }: EmptyStateProps) {
       <div className="space-y-1">
         <p className="text-lg font-semibold text-foreground">No posts yet</p>
         <p className="max-w-md text-sm text-muted">
-          Start by creating a draft manually, or let the AI generate one based
-          on your blog&apos;s fingerprint and content strategy.
+          Generate ideas, approve one, then generate an article draft. Posts
+          you publish will land here for review and editing.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
-        {onGenerate ? (
-          <Button
-            variant="secondary"
-            size="md"
-            loading={isGenerating}
-            onClick={onGenerate}
+        {ideasHref ? (
+          <Link
+            href={ideasHref}
+            className="inline-flex h-10 items-center justify-center rounded-[var(--sp-radius-lg)] bg-gradient-accent px-4 text-sm font-medium text-white shadow-md transition-all duration-150 hover:shadow-lg hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
           >
-            Generate with AI
-          </Button>
+            Go to Ideas
+          </Link>
         ) : null}
-        <Button size="md" onClick={onCreate}>
+        <Button variant="secondary" size="md" onClick={onCreate}>
           New post
         </Button>
       </div>

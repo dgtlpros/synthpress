@@ -50,7 +50,11 @@ export default async function BlogLayout({
 
   if (!blog) notFound();
 
-  const [{ count: postCount }, { count: queueCount }] = await Promise.all([
+  const [
+    { count: postCount },
+    { count: queueCount },
+    { count: ideasCount },
+  ] = await Promise.all([
     supabase
       .from("articles")
       .select("id", { count: "exact", head: true })
@@ -59,7 +63,17 @@ export default async function BlogLayout({
       .from("articles")
       .select("id", { count: "exact", head: true })
       .eq("blog_id", blogId)
-      .in("status", ["generating", "ready", "scheduled"]),
+      .in("status", [
+        "generating",
+        "ready",
+        "ready_for_review",
+        "scheduled",
+      ]),
+    supabase
+      .from("article_ideas")
+      .select("id", { count: "exact", head: true })
+      .eq("blog_id", blogId)
+      .in("status", ["generated", "approved"]),
   ]);
 
   const settings = loadBlogSettings(blog.settings);
@@ -125,6 +139,7 @@ export default async function BlogLayout({
         basePath={blogBase}
         items={[
           { segment: "", label: "Posts", badge: postCount ?? 0 },
+          { segment: "ideas", label: "Ideas", badge: ideasCount ?? 0 },
           {
             segment: "queue",
             label: "Queue",
