@@ -11,10 +11,7 @@ vi.mock("@/actions/articles", () => ({
 }));
 
 import { updateArticle } from "@/actions/articles";
-import {
-  useArticleEdit,
-  type ArticleEditFormValue,
-} from "./useArticleEdit";
+import { useArticleEdit, type ArticleEditFormValue } from "./useArticleEdit";
 
 const mockedUpdate = vi.mocked(updateArticle);
 

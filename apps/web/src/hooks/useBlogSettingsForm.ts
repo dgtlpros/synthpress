@@ -54,16 +54,6 @@ function diff(
     out.aiPromptTemplate = next.general.aiPromptTemplate;
   }
 
-  if (next.cadence.isActive !== initial.cadence.isActive) {
-    out.isActive = next.cadence.isActive;
-  }
-  if (next.cadence.articlesPerDay !== initial.cadence.articlesPerDay) {
-    out.articlesPerDay = next.cadence.articlesPerDay;
-  }
-  if (next.cadence.scheduleCron !== initial.cadence.scheduleCron) {
-    out.scheduleCron = next.cadence.scheduleCron;
-  }
-
   // Settings: deep-compare per section and only ship the sections that changed.
   const settingsPatch: UpdateBlogInput["settings"] = {};
   let anySettingsChange = false;

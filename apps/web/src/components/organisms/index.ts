@@ -34,10 +34,7 @@ export { IdeasList } from "./IdeasList";
 export type { IdeasListProps } from "./IdeasList";
 
 export { ArticleDetail } from "./ArticleDetail";
-export type {
-  ArticleDetailProps,
-  ArticleDetailData,
-} from "./ArticleDetail";
+export type { ArticleDetailProps, ArticleDetailData } from "./ArticleDetail";
 
 export { ArticleEditForm } from "./ArticleEditForm";
 export type {

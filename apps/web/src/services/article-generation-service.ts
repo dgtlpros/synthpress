@@ -19,7 +19,7 @@ import {
   generateArticleDraft,
   generateIdeas,
 } from "@/lib/ai/provider";
-import { consumeTeamTokens } from "./team-billing-service";
+import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 
 /**
  * Reusable building blocks for the AI generation pipeline.
@@ -1007,6 +1007,10 @@ export async function generateArticleDraftFromIdea(
   });
 
   let articleId: string | null = null;
+  let consumed = false;
+  // Hoisted out of the try so the catch can reference the cost when
+  // building the refund call. Same value as the consume amount above.
+  const creditsUsed = getCreditCost("generateArticle");
 
   try {
     // 4. Move into processing. Stamp `started_at`, bump attempts.
@@ -1020,34 +1024,24 @@ export async function generateArticleDraftFromIdea(
 
     // 5. Reserve credits BEFORE the AI call so an out-of-tokens team
     // doesn't burn a Claude request. Idempotency key = job id so a
-    // workflow replay no-ops on the credit ledger.
-    const creditsUsed = getCreditCost("generateArticle");
-    try {
-      await consumeTeamTokens({
-        teamId: input.teamId,
-        amount: creditsUsed,
-        actingUserId: input.userId,
-        description: `Generate article draft for "${idea.title}"`,
-        metadata: {
-          blog_id: input.blogId,
-          job_id: job.id,
-          job_type: "generate_article",
-          idea_id: input.ideaId,
-          trigger_source: input.triggerSource,
-        },
-        idempotencyKey: `article_job::${job.id}`,
-        client: supabase,
-      });
-    } catch (err) {
-      // No article placeholder yet — just fail the job and rethrow.
-      const message = err instanceof Error ? err.message : String(err);
-      await failArticleJob({
-        jobId: job.id,
-        errorMessage: message,
-        client: supabase,
-      });
-      throw err;
-    }
+    // workflow replay no-ops on the credit ledger. The catch-all below
+    // refunds these credits if anything after this line fails.
+    await consumeTeamTokens({
+      teamId: input.teamId,
+      amount: creditsUsed,
+      actingUserId: input.userId,
+      description: `Generate article draft for "${idea.title}"`,
+      metadata: {
+        blog_id: input.blogId,
+        job_id: job.id,
+        job_type: "generate_article",
+        idea_id: input.ideaId,
+        trigger_source: input.triggerSource,
+      },
+      idempotencyKey: `article_job::${job.id}`,
+      client: supabase,
+    });
+    consumed = true;
 
     // 6. Insert the article placeholder. We seed `title` from the idea
     // (articles.title is NOT NULL) so it shows something meaningful in
@@ -1067,14 +1061,7 @@ export async function generateArticleDraftFromIdea(
       .select("id")
       .single();
 
-    if (insertArticleErr) {
-      await failArticleJob({
-        jobId: job.id,
-        errorMessage: insertArticleErr.message,
-        client: supabase,
-      });
-      throw insertArticleErr;
-    }
+    if (insertArticleErr) throw insertArticleErr;
     articleId = insertedArticle.id;
 
     // 7. Link the job to the article (so the queue page can resolve
@@ -1125,10 +1112,7 @@ export async function generateArticleDraftFromIdea(
       .update(articleUpdate)
       .eq("id", articleId);
 
-    if (updateArticleErr) {
-      await failArticleAndJob(supabase, articleId, job.id, updateArticleErr.message);
-      throw updateArticleErr;
-    }
+    if (updateArticleErr) throw updateArticleErr;
 
     // 10. Audit log.
     await updateArticleJobStatus({
@@ -1189,11 +1173,18 @@ export async function generateArticleDraftFromIdea(
       completionTokens: draft.completionTokens,
     };
   } catch (err) {
-    // Catch-all for anything between createArticleJob and completion
-    // that wasn't already wrapped (e.g. AI provider errors). Best
-    // effort: mark the article failed if one was created, then mark
-    // the job failed. The idea status is NEVER touched here — it stays
-    // approved so the user can retry.
+    // Single failure handler for everything between `createArticleJob`
+    // and a successful return:
+    //   1. Mark article (if created) + job as failed.
+    //   2. If credits were consumed, refund them. The refund is
+    //      idempotent on `refund::article_job::{jobId}` so a retried
+    //      handler is a no-op on the ledger. The user keeps their
+    //      tokens — they can click Generate Article again from the
+    //      same approved idea (which is still approved because the
+    //      orchestration only flips it on success).
+    //   3. After a successful refund, mark `article_jobs.output.refunded`
+    //      so the queue page / analytics can see at a glance which
+    //      jobs were reimbursed without joining `token_transactions`.
     const message = err instanceof Error ? err.message : String(err);
     try {
       await failArticleAndJob(supabase, articleId, job.id, message);
@@ -1202,6 +1193,34 @@ export async function generateArticleDraftFromIdea(
       // Swallow — the primary error is what the caller cares about.
     }
     /* v8 ignore stop */
+
+    if (consumed) {
+      try {
+        await refundTeamTokens({
+          teamId: input.teamId,
+          amount: creditsUsed,
+          actingUserId: input.userId,
+          description: `Refund for failed article job ${job.id}: ${message}`,
+          metadata: {
+            refunded_for_job_id: job.id,
+            refunded_for_blog_id: input.blogId,
+            refunded_for_idea_id: input.ideaId,
+            reason: message,
+          },
+          idempotencyKey: `refund::article_job::${job.id}`,
+          client: supabase,
+        });
+        await markJobRefunded(supabase, job.id, creditsUsed);
+        /* v8 ignore start -- defensive: secondary failure during refund */
+      } catch {
+        // Swallow — the primary error is what the caller cares about.
+        // Operators can detect missing refunds by joining article_jobs
+        // (status=failed, output.refunded != true) against
+        // token_transactions (no usage_refund row for the job).
+      }
+      /* v8 ignore stop */
+    }
+
     throw err;
   }
 }
@@ -1226,4 +1245,44 @@ async function failArticleAndJob(
       .eq("id", articleId);
   }
   await failArticleJob({ jobId, errorMessage, client });
+}
+
+/**
+ * Stamps `article_jobs.output.refunded = true` (+ refundedCredits +
+ * refundedAt) after a successful refund so the queue page can show
+ * "refunded ✓" without joining `token_transactions`. Read-then-write
+ * is fine here because each job has exactly one writer.
+ */
+async function markJobRefunded(
+  client: Client,
+  jobId: string,
+  refundedCredits: number,
+): Promise<void> {
+  const { data, error: readErr } = await client
+    .from("article_jobs")
+    .select("output")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+
+  const currentOutput =
+    data?.output &&
+    typeof data.output === "object" &&
+    !Array.isArray(data.output)
+      ? (data.output as Record<string, unknown>)
+      : {};
+
+  const { error: updateErr } = await client
+    .from("article_jobs")
+    .update({
+      output: {
+        ...currentOutput,
+        refunded: true,
+        refundedCredits,
+        refundedAt: new Date().toISOString(),
+      } as Json,
+    })
+    .eq("id", jobId);
+  /* v8 ignore next -- defensive throw; swallowed by caller's refund try/catch */
+  if (updateErr) throw updateErr;
 }

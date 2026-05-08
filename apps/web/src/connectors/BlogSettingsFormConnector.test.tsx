@@ -32,7 +32,6 @@ const initial: BlogSettingsTabsValue = {
     keywordsText: "ai",
     aiPromptTemplate: "",
   },
-  cadence: { isActive: true, articlesPerDay: 1, scheduleCron: "0 9 * * *" },
   settings: DEFAULT_BLOG_SETTINGS,
 };
 

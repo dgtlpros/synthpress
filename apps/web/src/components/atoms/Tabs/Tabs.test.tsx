@@ -151,5 +151,4 @@ describe("Tabs", () => {
     // Still on the Posts panel.
     expect(screen.getByText("posts panel")).toBeInTheDocument();
   });
-
 });

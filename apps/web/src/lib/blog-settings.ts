@@ -105,7 +105,19 @@ export interface BlogSeoSettings {
 }
 
 export interface BlogAutomationSettings {
+  /**
+   * Workflow shape: `manual` = the user drives generation; `autopilot` =
+   * the future scheduler will pick up this blog. Independent of `enabled`
+   * so users can configure autopilot without arming it.
+   */
   mode: BlogAutomationMode;
+  /**
+   * Kill switch for the autopilot scheduler. The scheduler treats a blog
+   * as eligible only when `mode === "autopilot" && enabled === true`.
+   * Defaults to `false` so a brand new blog never starts spending tokens
+   * on its own.
+   */
+  enabled: boolean;
   generatePerWeek: number;
   requireReview: boolean;
   autoSchedule: boolean;
@@ -115,6 +127,16 @@ export interface BlogAutomationSettings {
   timezone: string;
   maxPostsPerDay: number;
   regenerateOnFail: boolean;
+  /**
+   * Autopilot tops the approved-idea pool back up when the count of
+   * approved-but-not-yet-converted ideas drops below this threshold.
+   */
+  backlogThreshold: number;
+  /**
+   * Per-blog daily Synth-token cap for autopilot. `null` means no
+   * per-blog cap beyond the team's overall balance / plan limit.
+   */
+  dailyTokenBudget: number | null;
 }
 
 export interface BlogPublishingSettings {
@@ -200,15 +222,21 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
   },
   automation: {
     mode: "manual",
+    enabled: false,
     generatePerWeek: 5,
     requireReview: true,
     autoSchedule: false,
     preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
     publishWindowStart: "08:00",
     publishWindowEnd: "17:00",
-    timezone: "America/Boise",
+    // UTC by default — the dev's local zone shouldn't leak into every
+    // blog created on the platform. The settings UI lets users pick
+    // their own zone if they want windowed publishing.
+    timezone: "Etc/UTC",
     maxPostsPerDay: 3,
     regenerateOnFail: true,
+    backlogThreshold: 10,
+    dailyTokenBudget: null,
   },
   publishing: {
     defaultDestination: "none",
@@ -260,6 +288,23 @@ function pickNumber(
   if (!source) return fallback;
   const v = source[key];
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/**
+ * Like {@link pickNumber} but allows `null` as a meaningful value.
+ * Used for the autopilot daily-token-budget where `null` ≠ default; it
+ * encodes "no per-blog cap, fall back to the team's overall balance".
+ */
+function pickNumberOrNull(
+  source: Record<string, unknown> | undefined,
+  key: string,
+  fallback: number | null,
+): number | null {
+  if (!source) return fallback;
+  const v = source[key];
+  if (v === null) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  return fallback;
 }
 
 function pickBoolean(
@@ -490,6 +535,7 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
     },
     automation: {
       mode: pickEnum(automation, "mode", AUTOMATION_MODES, d.automation.mode),
+      enabled: pickBoolean(automation, "enabled", d.automation.enabled),
       generatePerWeek: pickNumber(
         automation,
         "generatePerWeek",
@@ -530,6 +576,16 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         automation,
         "regenerateOnFail",
         d.automation.regenerateOnFail,
+      ),
+      backlogThreshold: pickNumber(
+        automation,
+        "backlogThreshold",
+        d.automation.backlogThreshold,
+      ),
+      dailyTokenBudget: pickNumberOrNull(
+        automation,
+        "dailyTokenBudget",
+        d.automation.dailyTokenBudget,
       ),
     },
     publishing: {

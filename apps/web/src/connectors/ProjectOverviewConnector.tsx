@@ -8,6 +8,7 @@ import {
   updateProjectSettings,
 } from "@/actions/workspace";
 import type { BlogListRow } from "@/services/workspace-service";
+import { loadBlogSettings } from "@/lib/blog-settings";
 import { Button } from "@/components/atoms/Button";
 import { DeleteConfirmModal } from "@/components/atoms/DeleteConfirmModal";
 import {
@@ -84,13 +85,20 @@ export function ProjectOverviewConnector({
         const metaParts: string[] = [];
         if (niche && description) metaParts.push(niche);
         if (b.wp_url) metaParts.push(`WordPress · ${stripScheme(b.wp_url)}`);
+        // "Active" used to come from the legacy `blogs.is_active` column.
+        // Migration 00018 dropped that in favor of
+        // `settings.automation.{mode,enabled}` — a blog is treated as
+        // active in the project list when its autopilot is configured AND
+        // armed.
+        const automation = loadBlogSettings(b.settings).automation;
+        const isActive = automation.mode === "autopilot" && automation.enabled;
         return {
           id: b.id,
           href: `${blogBase}/${b.id}`,
           appKindLabel: "Blog",
           title: b.name,
           subtitle,
-          isActive: b.is_active,
+          isActive,
           meta: metaParts.length ? metaParts.join(" · ") : undefined,
         };
       }),

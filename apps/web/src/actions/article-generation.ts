@@ -3,10 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   type ArticleIdeaStatus,
   generateArticleDraftFromIdea,
@@ -130,7 +127,8 @@ export async function generateIdeasManual(
     if (err instanceof TeamPermissionError) {
       return { data: null, error: err.code };
     }
-    const message = err instanceof Error ? err.message : "Could not generate ideas.";
+    const message =
+      err instanceof Error ? err.message : "Could not generate ideas.";
     // Translate the orchestration's typed errors into friendlier UI text.
     if (message === "blog_not_found") {
       return { data: null, error: "Blog not found." };

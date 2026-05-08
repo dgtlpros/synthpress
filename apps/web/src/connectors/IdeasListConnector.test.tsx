@@ -50,7 +50,8 @@ function clickEmptyStateGenerate(): void {
   const buttons = Array.from(
     document.querySelectorAll<HTMLButtonElement>("button"),
   ).filter(
-    (b) => /generate ideas/i.test(b.textContent ?? "") && !getDialog().contains(b),
+    (b) =>
+      /generate ideas/i.test(b.textContent ?? "") && !getDialog().contains(b),
   );
   if (buttons.length === 0) {
     throw new Error("no empty-state Generate ideas button");
@@ -89,12 +90,16 @@ const mockedUseGenerateArticleFromIdea = vi.mocked(useGenerateArticleFromIdea);
 beforeAll(() => {
   // jsdom needs the dialog API stubbed.
   if (!HTMLDialogElement.prototype.showModal) {
-    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    HTMLDialogElement.prototype.showModal = function showModal(
+      this: HTMLDialogElement,
+    ) {
       this.setAttribute("open", "");
     };
   }
   if (!HTMLDialogElement.prototype.close) {
-    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    HTMLDialogElement.prototype.close = function close(
+      this: HTMLDialogElement,
+    ) {
       this.removeAttribute("open");
     };
   }
@@ -424,9 +429,7 @@ describe("IdeasListConnector", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /generate article/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /generate article/i }));
     expect(generateArticle).toHaveBeenCalledWith("i1");
   });
 

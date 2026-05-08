@@ -12,14 +12,12 @@ vi.mock("@/lib/ai/provider", () => ({
 
 vi.mock("./team-billing-service", () => ({
   consumeTeamTokens: vi.fn(),
+  refundTeamTokens: vi.fn(),
 }));
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  generateArticleDraft,
-  generateIdeas,
-} from "@/lib/ai/provider";
-import { consumeTeamTokens } from "./team-billing-service";
+import { generateArticleDraft, generateIdeas } from "@/lib/ai/provider";
+import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 import {
   ARTICLE_IDEA_STATUSES,
   ARTICLE_JOB_STATUSES,
@@ -46,6 +44,7 @@ import {
 const mockedGenerateIdeas = vi.mocked(generateIdeas);
 const mockedGenerateArticleDraft = vi.mocked(generateArticleDraft);
 const mockedConsumeTeamTokens = vi.mocked(consumeTeamTokens);
+const mockedRefundTeamTokens = vi.mocked(refundTeamTokens);
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 
@@ -76,9 +75,7 @@ interface MockClient {
   __chains: Record<string, ReturnType<typeof makeChain>>;
 }
 
-function makeClient(
-  table: Record<string, ChainResult<unknown>>,
-): MockClient {
+function makeClient(table: Record<string, ChainResult<unknown>>): MockClient {
   const chains: Record<string, ReturnType<typeof makeChain>> = {};
   for (const [name, result] of Object.entries(table)) {
     chains[name] = makeChain(result);
@@ -867,9 +864,10 @@ describe("convertIdeaToArticle", () => {
       articles: { data: null, error: null },
       article_ideas: { data: null, error: null },
     });
-    client.__chains.articles!.eq = vi
-      .fn()
-      .mockResolvedValueOnce({ data: null, error: { message: "article boom" } });
+    client.__chains.articles!.eq = vi.fn().mockResolvedValueOnce({
+      data: null,
+      error: { message: "article boom" },
+    });
 
     await expect(
       convertIdeaToArticle({
@@ -979,11 +977,13 @@ function makeOrchestrationClient(opts?: {
 
   // article_ideas: the orchestration calls .insert(...).select("*"); make
   // .select resolve to the inserted rows (or an error).
-  client.__chains.article_ideas!.select = vi.fn().mockResolvedValue(
-    opts?.insertIdeasError
-      ? { data: null, error: opts.insertIdeasError }
-      : { data: insertedIdeas, error: null },
-  );
+  client.__chains.article_ideas!.select = vi
+    .fn()
+    .mockResolvedValue(
+      opts?.insertIdeasError
+        ? { data: null, error: opts.insertIdeasError }
+        : { data: insertedIdeas, error: null },
+    );
 
   return client;
 }
@@ -1073,10 +1073,10 @@ describe("generateArticleIdeas", () => {
       client: client as never,
     });
 
-    const insertArg =
-      client.__chains.article_jobs!.insert.mock.calls[0]![0] as {
-        input: Record<string, unknown>;
-      };
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as {
+      input: Record<string, unknown>;
+    };
     expect(insertArg.input).toMatchObject({
       triggerSource: "autopilot",
       brief: null,
@@ -1100,10 +1100,10 @@ describe("generateArticleIdeas", () => {
       client: client as never,
     });
 
-    const insertArg =
-      client.__chains.article_jobs!.insert.mock.calls[0]![0] as {
-        input: Record<string, unknown>;
-      };
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as {
+      input: Record<string, unknown>;
+    };
     expect(insertArg.input.brief).toBeNull();
   });
 
@@ -1122,10 +1122,10 @@ describe("generateArticleIdeas", () => {
     expect(mockedGenerateIdeas).toHaveBeenCalledWith(
       expect.objectContaining({ count: 5 }),
     );
-    const insertArg =
-      client.__chains.article_jobs!.insert.mock.calls[0]![0] as {
-        input: { count: number };
-      };
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as {
+      input: { count: number };
+    };
     expect(insertArg.input.count).toBe(5);
   });
 
@@ -1196,9 +1196,7 @@ describe("generateArticleIdeas", () => {
     const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
       (c) => c[0],
     );
-    expect(
-      updateCalls.some((u) => u.status === "failed"),
-    ).toBe(true);
+    expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
     // AI provider must NOT have been called.
     expect(mockedGenerateIdeas).not.toHaveBeenCalled();
   });
@@ -1412,17 +1410,15 @@ describe("updateArticleIdeaStatus", () => {
     //   2) .update().eq().eq().select("*").single() — the write
     // The default `single` mock returns the read data; we override it
     // for the update so the helper sees the new row.
-    client.__chains.article_ideas!.single = vi
-      .fn()
-      .mockResolvedValueOnce({
-        data: {
-          id: "i1",
-          blog_id: "b1",
-          status: "approved",
-          title: "X",
-        },
-        error: null,
-      });
+    client.__chains.article_ideas!.single = vi.fn().mockResolvedValueOnce({
+      data: {
+        id: "i1",
+        blog_id: "b1",
+        status: "approved",
+        title: "X",
+      },
+      error: null,
+    });
 
     const result = await updateArticleIdeaStatus({
       ideaId: "i1",
@@ -1435,10 +1431,7 @@ describe("updateArticleIdeaStatus", () => {
     expect(client.__chains.article_ideas!.update).toHaveBeenCalledWith({
       status: "approved",
     });
-    expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith(
-      "id",
-      "i1",
-    );
+    expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith("id", "i1");
     expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith(
       "blog_id",
       "b1",
@@ -1685,16 +1678,18 @@ function makeArticleOrchestrationClient(opts?: {
   // articles: insert(...).select("id").single() — first single resolves the
   // placeholder insert; second .eq resolves the post-AI update; eq calls in
   // between handle the job.article_id link.
-  client.__chains.articles!.single = vi.fn().mockResolvedValueOnce(
-    opts?.insertArticleError
-      ? { data: null, error: opts.insertArticleError }
-      : { data: { id: "article-X" }, error: null },
-  );
+  client.__chains.articles!.single = vi
+    .fn()
+    .mockResolvedValueOnce(
+      opts?.insertArticleError
+        ? { data: null, error: opts.insertArticleError }
+        : { data: { id: "article-X" }, error: null },
+    );
   // The post-AI update chain ends with .eq() — we need to control that
   // resolved value too. Default it to success unless overridden.
-  client.__chains.articles!.eq = vi.fn(function (
-    this: { __chain: typeof client.__chains.articles },
-  ) {
+  client.__chains.articles!.eq = vi.fn(function (this: {
+    __chain: typeof client.__chains.articles;
+  }) {
     return client.__chains.articles!;
   }) as never;
   // The articles update().eq() resolves at the .eq() terminal. Replace
@@ -1727,6 +1722,8 @@ describe("generateArticleDraftFromIdea", () => {
   beforeEach(() => {
     mockedGenerateArticleDraft.mockResolvedValue(draftStub as never);
     mockedConsumeTeamTokens.mockResolvedValue(95);
+    // Default refund returns the new balance after the credit goes back.
+    mockedRefundTeamTokens.mockResolvedValue(100);
   });
 
   it("runs the happy path end-to-end and returns the new article id", async () => {
@@ -1764,7 +1761,8 @@ describe("generateArticleDraftFromIdea", () => {
       client: client as never,
     });
 
-    const insertArg = client.__chains.article_jobs!.insert.mock.calls[0]![0] as {
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as {
       type: string;
       input: {
         triggerSource: string;
@@ -2037,7 +2035,7 @@ describe("generateArticleDraftFromIdea", () => {
     ).rejects.toEqual({ message: "read boom" });
   });
 
-  it("marks only the job failed when consume_team_tokens fails (no article placeholder yet)", async () => {
+  it("marks only the job failed when consume_team_tokens fails (no article placeholder, no refund)", async () => {
     const client = makeArticleOrchestrationClient();
     mockedConsumeTeamTokens.mockRejectedValueOnce(
       new Error("insufficient_tokens"),
@@ -2063,9 +2061,11 @@ describe("generateArticleDraftFromIdea", () => {
       (c) => c[0],
     );
     expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
+    // CRITICAL: no refund — credits were never consumed.
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
   });
 
-  it("marks both the article and the job failed when the AI call fails (idea stays approved)", async () => {
+  it("refunds credits + stamps output.refunded when the AI call fails", async () => {
     const client = makeArticleOrchestrationClient();
     mockedGenerateArticleDraft.mockRejectedValueOnce(
       new Error("schema mismatch"),
@@ -2082,7 +2082,7 @@ describe("generateArticleDraftFromIdea", () => {
       }),
     ).rejects.toThrow(/schema mismatch/);
 
-    // The article placeholder was created and then marked failed.
+    // Article placeholder was created and then marked failed.
     expect(client.__chains.articles!.insert).toHaveBeenCalled();
     expect(client.__chains.articles!.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2090,16 +2090,41 @@ describe("generateArticleDraftFromIdea", () => {
         error_message: expect.stringContaining("schema mismatch"),
       }),
     );
-    // The job was marked failed.
+    // Job was marked failed.
     const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
       (c) => c[0],
     );
     expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
-    // The idea status was NEVER touched.
+    // Idea status NEVER touched.
     expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+    // Credits were refunded with the right idempotency key + metadata.
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "t1",
+        amount: 5,
+        actingUserId: "u1",
+        idempotencyKey: "refund::article_job::job-X",
+        metadata: expect.objectContaining({
+          refunded_for_job_id: "job-X",
+          refunded_for_blog_id: "b1",
+          refunded_for_idea_id: "idea-1",
+          reason: expect.stringContaining("schema mismatch"),
+        }),
+      }),
+    );
+    // Job output was stamped with refunded=true (last update on the
+    // jobs chain after the failure path).
+    const refundedUpdate = updateCalls.find(
+      (u) =>
+        (u.output as Record<string, unknown> | undefined)?.refunded === true,
+    );
+    expect(refundedUpdate).toBeDefined();
+    const output = refundedUpdate!.output as Record<string, unknown>;
+    expect(output.refundedCredits).toBe(5);
+    expect(typeof output.refundedAt).toBe("string");
   });
 
-  it("marks both article and job failed when the article placeholder insert fails", async () => {
+  it("refunds credits when the article placeholder insert fails after consume", async () => {
     const client = makeArticleOrchestrationClient({
       insertArticleError: { message: "constraint violation" },
     });
@@ -2119,11 +2144,13 @@ describe("generateArticleDraftFromIdea", () => {
       (c) => c[0],
     );
     expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
-    // No article was actually written, but the idea wasn't touched either.
+    // Idea wasn't touched.
     expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+    // Credits WERE consumed before the placeholder insert, so we refund.
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
   });
 
-  it("marks article + job failed when the post-AI article update fails", async () => {
+  it("refunds credits when the post-AI article update fails", async () => {
     const client = makeArticleOrchestrationClient({
       updateArticleError: { message: "update boom" },
     });
@@ -2144,6 +2171,7 @@ describe("generateArticleDraftFromIdea", () => {
     );
     expect(articleUpdates.some((u) => u.status === "failed")).toBe(true);
     expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
   });
 
   it("uses the admin client when none is injected", async () => {
@@ -2161,7 +2189,7 @@ describe("generateArticleDraftFromIdea", () => {
     expect(mockedCreateAdmin).toHaveBeenCalled();
   });
 
-  it("propagates non-Error throws as their string form", async () => {
+  it("propagates non-Error throws as their string form (no refund — consume failed)", async () => {
     const client = makeArticleOrchestrationClient();
     mockedConsumeTeamTokens.mockRejectedValueOnce("plain-string-failure");
 
@@ -2183,5 +2211,165 @@ describe("generateArticleDraftFromIdea", () => {
     expect((failedCall![0] as { error_message: string }).error_message).toBe(
       "plain-string-failure",
     );
+    // Consume failed → no refund.
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("propagates non-Error throws after consume — refunds and surfaces the original throw", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockRejectedValueOnce("oh no");
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toBe("oh no");
+
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "refund::article_job::job-X",
+        metadata: expect.objectContaining({ reason: "oh no" }),
+      }),
+    );
+  });
+
+  it("never refunds on the happy path", async () => {
+    const client = makeArticleOrchestrationClient();
+
+    await generateArticleDraftFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("preserves an existing job.output payload when stamping refunded fields", async () => {
+    const client = makeArticleOrchestrationClient();
+    // The article_jobs chain sees TWO maybeSingle calls during a
+    // failed run:
+    //   1. updateArticleJobStatus({incrementAttempts:true}) reads `attempts`
+    //   2. markJobRefunded() reads `output`
+    // Sequence the mock so we can verify the second read's payload
+    // makes it into the merged update.
+    const articleJobsChain = client.__chains.article_jobs!;
+    articleJobsChain.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { id: "job-X", attempts: 0 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { output: { previousField: "value" } },
+        error: null,
+      });
+    mockedGenerateArticleDraft.mockRejectedValueOnce(new Error("ai down"));
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/ai down/);
+
+    const updateCalls = articleJobsChain.update.mock.calls.map((c) => c[0]);
+    const refundedUpdate = updateCalls.find(
+      (u) =>
+        (u.output as Record<string, unknown> | undefined)?.refunded === true,
+    );
+    expect(refundedUpdate).toBeDefined();
+    const output = refundedUpdate!.output as Record<string, unknown>;
+    expect(output.previousField).toBe("value");
+    expect(output.refunded).toBe(true);
+  });
+
+  it("treats a non-object job.output as empty when stamping refunded fields", async () => {
+    const client = makeArticleOrchestrationClient();
+    const articleJobsChain = client.__chains.article_jobs!;
+    articleJobsChain.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { id: "job-X", attempts: 0 },
+        error: null,
+      })
+      // Defensive guard: if `output` somehow was an array or scalar.
+      .mockResolvedValueOnce({
+        data: { output: ["unexpected", "shape"] },
+        error: null,
+      });
+    mockedGenerateArticleDraft.mockRejectedValueOnce(new Error("ai down"));
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/ai down/);
+
+    const refundedUpdate = articleJobsChain.update.mock.calls
+      .map((c) => c[0])
+      .find(
+        (u) =>
+          (u.output as Record<string, unknown> | undefined)?.refunded === true,
+      );
+    expect(refundedUpdate).toBeDefined();
+    // The bad shape is dropped — we only write the refunded fields.
+    const output = refundedUpdate!.output as Record<string, unknown>;
+    expect(Object.keys(output).sort()).toEqual([
+      "refunded",
+      "refundedAt",
+      "refundedCredits",
+    ]);
+  });
+
+  it("propagates errors from the markJobRefunded read", async () => {
+    // markJobRefunded throws if its read fails; the outer catch's
+    // refund-try-block swallows it (the original error is what matters).
+    // This test exercises the swallow path indirectly — the user still
+    // sees the original throw and we don't get a noisy stack.
+    const client = makeArticleOrchestrationClient();
+    const articleJobsChain = client.__chains.article_jobs!;
+    articleJobsChain.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { id: "job-X", attempts: 0 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "read boom" },
+      });
+    mockedGenerateArticleDraft.mockRejectedValueOnce(new Error("ai down"));
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/ai down/);
+
+    // Refund still happened — markJobRefunded failed silently.
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
   });
 });

@@ -77,9 +77,7 @@ describe("ArticleDetailConnector", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: baseArticle.title }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /^edit$/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument();
   });
 
   it("invokes enterEdit when the Edit button is clicked", () => {
@@ -94,15 +92,11 @@ describe("ArticleDetailConnector", () => {
     );
 
     render(<ArticleDetailConnector {...baseProps} />);
-    expect(
-      (screen.getByLabelText(/title/i) as HTMLInputElement).value,
-    ).toBe(baseArticle.title);
-    expect(
-      screen.getByRole("button", { name: /^save$/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /cancel/i }),
-    ).toBeInTheDocument();
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe(
+      baseArticle.title,
+    );
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
   });
 
   it("calls save when the form is submitted", () => {

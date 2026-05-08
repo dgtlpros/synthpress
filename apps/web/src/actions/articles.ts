@@ -3,10 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   type ArticleEditableFields,
   updateArticleFields,
@@ -23,8 +20,7 @@ import type { ActionResult } from "./workspace";
  * errors into UI copy.
  */
 
-export type UpdateArticleStatus =
-  Database["public"]["Enums"]["article_status"];
+export type UpdateArticleStatus = Database["public"]["Enums"]["article_status"];
 
 export interface UpdateArticleResult {
   articleId: string;

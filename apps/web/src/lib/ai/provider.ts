@@ -106,10 +106,7 @@ const ideaSchema = z.object({
   title: z.string().min(1).max(200),
   slug: z
     .string()
-    .regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-      "slug must be lowercase-hyphenated",
-    )
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "slug must be lowercase-hyphenated")
     .max(120),
   targetKeyword: z.string().min(1).max(120),
   executiveSummary: z.string().min(20).max(500),
@@ -187,8 +184,7 @@ export async function generateIdeas(
     promptTokens: result.usage.inputTokens ?? null,
     completionTokens: result.usage.outputTokens ?? null,
     cachedReadTokens: result.usage.inputTokenDetails.cacheReadTokens ?? null,
-    cachedWriteTokens:
-      result.usage.inputTokenDetails.cacheWriteTokens ?? null,
+    cachedWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens ?? null,
   };
 }
 
@@ -294,10 +290,7 @@ const articleDraftSchema = z.object({
     .max(200, "title must be 200 chars or fewer"),
   slug: z
     .string()
-    .regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-      "slug must be lowercase-hyphenated",
-    )
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "slug must be lowercase-hyphenated")
     .max(120),
   excerpt: z.string().min(1).max(500),
   metaDescription: z.string().min(1).max(200),
@@ -373,8 +366,7 @@ export async function generateArticleDraft(
     promptTokens: result.usage.inputTokens ?? null,
     completionTokens: result.usage.outputTokens ?? null,
     cachedReadTokens: result.usage.inputTokenDetails.cacheReadTokens ?? null,
-    cachedWriteTokens:
-      result.usage.inputTokenDetails.cacheWriteTokens ?? null,
+    cachedWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens ?? null,
   };
 }
 
@@ -384,9 +376,10 @@ export async function generateArticleDraft(
  * without spinning up a fake AI SDK. Exported only for tests; treat as
  * an implementation detail outside this file.
  */
-export function buildArticlePromptParts(
-  input: GenerateArticleDraftInput,
-): { system: string; prompt: string } {
+export function buildArticlePromptParts(input: GenerateArticleDraftInput): {
+  system: string;
+  prompt: string;
+} {
   const { blogName, blogDescription, settings, brief } = input;
   const { identity, strategy, ai, seo, advanced } = settings;
 

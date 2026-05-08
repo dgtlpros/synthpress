@@ -58,9 +58,7 @@ describe("IdeasList", () => {
   });
 
   it("propagates the loading flag to the Generate button", () => {
-    render(
-      <IdeasList ideas={sample} onGenerateClick={vi.fn()} isGenerating />,
-    );
+    render(<IdeasList ideas={sample} onGenerateClick={vi.fn()} isGenerating />);
     const button = screen.getByRole("button", { name: /generate ideas/i });
     expect(button).toBeDisabled();
   });
@@ -169,12 +167,12 @@ describe("IdeasList", () => {
 
   it("hides Approve / Reject buttons when no handlers are provided", () => {
     render(<IdeasList ideas={sample} onGenerateClick={vi.fn()} />);
-    expect(
-      screen.queryAllByRole("button", { name: /approve/i }),
-    ).toHaveLength(0);
-    expect(
-      screen.queryAllByRole("button", { name: /reject/i }),
-    ).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /approve/i })).toHaveLength(
+      0,
+    );
+    expect(screen.queryAllByRole("button", { name: /reject/i })).toHaveLength(
+      0,
+    );
   });
 
   it("renders Generate article only on approved idea cards", () => {
@@ -204,9 +202,7 @@ describe("IdeasList", () => {
         onGenerateArticleFromIdea={onGenerate}
       />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /generate article/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /generate article/i }));
     expect(onGenerate).toHaveBeenCalledWith("i2");
   });
 

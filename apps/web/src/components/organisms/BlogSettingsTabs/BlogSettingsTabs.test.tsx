@@ -19,11 +19,6 @@ function makeValue(
       keywordsText: "indie, micro-saas",
       aiPromptTemplate: "",
     },
-    cadence: {
-      isActive: true,
-      articlesPerDay: 1,
-      scheduleCron: "0 9 * * *",
-    },
     settings: DEFAULT_BLOG_SETTINGS,
     ...overrides,
   };
@@ -125,13 +120,21 @@ describe("BlogSettingsTabs", () => {
     expect(screen.getByText("Could not save.")).toBeInTheDocument();
   });
 
-  it("toggles preferred publishing days", () => {
+  it("gates auto-publishing controls behind a Coming Soon panel", () => {
     render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
-    const sat = screen.getByRole("button", { name: "Sat" });
-    expect(sat).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(sat);
-    expect(sat).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Coming soon/)).toBeInTheDocument();
+    expect(screen.getByText(/WordPress connection/)).toBeInTheDocument();
+    // None of the publishing-only controls are rendered.
+    expect(
+      screen.queryByLabelText(/Publish window \(start\)/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sat" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Auto-schedule new drafts/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles boolean settings via switch toggles", () => {
@@ -360,9 +363,7 @@ describe("BlogSettingsTabs", () => {
     fireEvent.click(
       screen.getByRole("switch", { name: /Include FAQ section/ }),
     );
-    fireEvent.click(
-      screen.getByRole("switch", { name: /Schema.org markup/ }),
-    );
+    fireEvent.click(screen.getByRole("switch", { name: /Schema.org markup/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
     expect(v.settings.seo.strategy).toBe("long-tail");
@@ -403,84 +404,96 @@ describe("BlogSettingsTabs", () => {
     const onSave = vi.fn();
     render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
     fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
+    fireEvent.click(screen.getByRole("switch", { name: /Autopilot enabled/ }));
     fireEvent.change(screen.getByLabelText("Mode"), {
       target: { value: "autopilot" },
     });
     fireEvent.change(screen.getByLabelText(/Generate per week/), {
       target: { value: "20" },
     });
-    fireEvent.change(screen.getByLabelText(/Max posts published/), {
+    fireEvent.change(screen.getByLabelText(/Max drafts \/ day/), {
       target: { value: "5" },
     });
     fireEvent.change(screen.getByLabelText(/Timezone/), {
       target: { value: "UTC" },
     });
-    fireEvent.change(screen.getByLabelText(/Publish window \(start\)/), {
-      target: { value: "07:00" },
+    fireEvent.change(screen.getByLabelText(/Approved-idea backlog target/), {
+      target: { value: "25" },
     });
-    fireEvent.change(screen.getByLabelText(/Publish window \(end\)/), {
-      target: { value: "19:00" },
+    fireEvent.change(screen.getByLabelText(/Daily Synth-token budget/), {
+      target: { value: "500" },
     });
     fireEvent.click(
       screen.getByRole("switch", { name: /Require human review/ }),
     );
     fireEvent.click(
-      screen.getByRole("switch", { name: /Auto-regenerate failed posts/ }),
+      screen.getByRole("switch", { name: /Auto-regenerate failed drafts/ }),
     );
-    fireEvent.click(
-      screen.getByRole("switch", { name: /Auto-schedule new drafts/ }),
-    );
-    fireEvent.click(screen.getByRole("switch", { name: /Blog is active/ }));
-    fireEvent.change(screen.getByLabelText(/Articles per day/), {
-      target: { value: "3" },
-    });
-    fireEvent.change(screen.getByLabelText(/Schedule \(cron\)/), {
-      target: { value: "0 8 * * *" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
+    expect(v.settings.automation.enabled).toBe(true);
     expect(v.settings.automation.mode).toBe("autopilot");
     expect(v.settings.automation.generatePerWeek).toBe(20);
     expect(v.settings.automation.maxPostsPerDay).toBe(5);
     expect(v.settings.automation.timezone).toBe("UTC");
-    expect(v.settings.automation.publishWindowStart).toBe("07:00");
-    expect(v.settings.automation.publishWindowEnd).toBe("19:00");
+    expect(v.settings.automation.backlogThreshold).toBe(25);
+    expect(v.settings.automation.dailyTokenBudget).toBe(500);
     expect(v.settings.automation.requireReview).toBe(false);
     expect(v.settings.automation.regenerateOnFail).toBe(false);
-    expect(v.settings.automation.autoSchedule).toBe(true);
-    expect(v.cadence.isActive).toBe(false);
-    expect(v.cadence.articlesPerDay).toBe(3);
-    expect(v.cadence.scheduleCron).toBe("0 8 * * *");
   });
 
-  it("falls back to 0 when generate-per-week and max-posts-per-day are empty", () => {
+  it("falls back to 0 when generate-per-week, max-drafts, and backlog are empty", () => {
     const onSave = vi.fn();
     render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
     fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
     fireEvent.change(screen.getByLabelText(/Generate per week/), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText(/Max posts published/), {
+    fireEvent.change(screen.getByLabelText(/Max drafts \/ day/), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText(/Articles per day/), {
+    fireEvent.change(screen.getByLabelText(/Approved-idea backlog target/), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
     expect(v.settings.automation.generatePerWeek).toBe(0);
     expect(v.settings.automation.maxPostsPerDay).toBe(0);
-    expect(v.cadence.articlesPerDay).toBe(0);
+    expect(v.settings.automation.backlogThreshold).toBe(0);
   });
 
-  it("toggles a preferred publishing day OFF when already on", () => {
-    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+  it("treats a blank daily-token-budget input as null (no per-blog cap)", () => {
+    const onSave = vi.fn();
+    const initial = makeValue();
+    initial.settings = {
+      ...initial.settings,
+      automation: { ...initial.settings.automation, dailyTokenBudget: 250 },
+    };
+    render(<BlogSettingsTabs initialValue={initial} onSave={onSave} />);
     fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
-    // 'Mon' is on by default
-    const mon = screen.getByRole("button", { name: "Mon" });
-    expect(mon).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(mon);
-    expect(mon).toHaveAttribute("aria-pressed", "false");
+    fireEvent.change(screen.getByLabelText(/Daily Synth-token budget/), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const v = onSave.mock.calls[0][0];
+    expect(v.settings.automation.dailyTokenBudget).toBeNull();
+  });
+
+  it("falls back to null when daily-token-budget is a negative number", () => {
+    const onSave = vi.fn();
+    const initial = makeValue();
+    initial.settings = {
+      ...initial.settings,
+      automation: { ...initial.settings.automation, dailyTokenBudget: 250 },
+    };
+    render(<BlogSettingsTabs initialValue={initial} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
+    fireEvent.change(screen.getByLabelText(/Daily Synth-token budget/), {
+      target: { value: "-10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const v = onSave.mock.calls[0][0];
+    expect(v.settings.automation.dailyTokenBudget).toBeNull();
   });
 
   // ─── Publishing tab ──────────────────────────────────────────────────────
@@ -516,7 +529,11 @@ describe("BlogSettingsTabs", () => {
     expect(v.settings.publishing.defaultStatus).toBe("scheduled");
     expect(v.settings.publishing.defaultAuthor).toBe("alice");
     expect(v.settings.publishing.defaultCategory).toBe("tech");
-    expect(v.settings.publishing.defaultTags).toEqual(["ai", "tooling", "growth"]);
+    expect(v.settings.publishing.defaultTags).toEqual([
+      "ai",
+      "tooling",
+      "growth",
+    ]);
     expect(v.settings.publishing.uploadFeaturedImage).toBe(false);
     expect(v.settings.publishing.updateExistingPosts).toBe(true);
   });
@@ -530,9 +547,7 @@ describe("BlogSettingsTabs", () => {
     fireEvent.click(
       screen.getByRole("switch", { name: /Generate a featured image/ }),
     );
-    fireEvent.click(
-      screen.getByRole("switch", { name: /Generate alt text/ }),
-    );
+    fireEvent.click(screen.getByRole("switch", { name: /Generate alt text/ }));
     fireEvent.click(
       screen.getByRole("switch", { name: /Inline images in body/ }),
     );
@@ -579,10 +594,9 @@ describe("BlogSettingsTabs", () => {
     fireEvent.change(screen.getByLabelText(/Internal links to prioritize/), {
       target: { value: "links" },
     });
-    fireEvent.change(
-      screen.getByLabelText(/Competitors to avoid linking to/),
-      { target: { value: "comps" } },
-    );
+    fireEvent.change(screen.getByLabelText(/Competitors to avoid linking to/), {
+      target: { value: "comps" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
     expect(v.settings.advanced.customSystemPrompt).toBe("system");
@@ -599,9 +613,7 @@ describe("BlogSettingsTabs", () => {
     fireEvent.change(screen.getByLabelText(/Blog name/), {
       target: { value: "Edited" },
     });
-    expect(
-      screen.getByText("You have unsaved changes."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("You have unsaved changes.")).toBeInTheDocument();
   });
 
   it("disables Discard when not dirty", () => {

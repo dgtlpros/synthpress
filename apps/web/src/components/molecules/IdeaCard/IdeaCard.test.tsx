@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { IdeaCard, type IdeaCardIdea } from "./IdeaCard";
 
 const baseIdea: IdeaCardIdea = {
@@ -160,19 +155,11 @@ describe("IdeaCard action footer", () => {
   });
 
   it("renders both Approve and Reject for a generated idea", () => {
-    render(
-      <IdeaCard
-        idea={baseIdea}
-        onApprove={vi.fn()}
-        onReject={vi.fn()}
-      />,
-    );
+    render(<IdeaCard idea={baseIdea} onApprove={vi.fn()} onReject={vi.fn()} />);
     expect(
       screen.getByRole("button", { name: /approve/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /reject/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reject/i })).toBeInTheDocument();
   });
 
   it("only renders Reject when the idea is already approved", () => {
@@ -186,9 +173,7 @@ describe("IdeaCard action footer", () => {
     expect(
       screen.queryByRole("button", { name: /approve/i }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /reject/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reject/i })).toBeInTheDocument();
   });
 
   it("only renders Approve when the idea is already rejected", () => {
@@ -228,9 +213,7 @@ describe("IdeaCard action footer", () => {
     expect(
       screen.queryByRole("button", { name: /approve/i }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /reject/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reject/i })).toBeInTheDocument();
   });
 
   it("hides Reject when only the approve callback is provided", () => {
@@ -245,14 +228,18 @@ describe("IdeaCard action footer", () => {
 
   it("calls onApprove with the idea id when Approve is clicked", () => {
     const onApprove = vi.fn();
-    render(<IdeaCard idea={baseIdea} onApprove={onApprove} onReject={vi.fn()} />);
+    render(
+      <IdeaCard idea={baseIdea} onApprove={onApprove} onReject={vi.fn()} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
     expect(onApprove).toHaveBeenCalledWith(baseIdea.id);
   });
 
   it("calls onReject with the idea id when Reject is clicked", () => {
     const onReject = vi.fn();
-    render(<IdeaCard idea={baseIdea} onApprove={vi.fn()} onReject={onReject} />);
+    render(
+      <IdeaCard idea={baseIdea} onApprove={vi.fn()} onReject={onReject} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /reject/i }));
     expect(onReject).toHaveBeenCalledWith(baseIdea.id);
   });
@@ -348,9 +335,7 @@ describe("IdeaCard Generate article action", () => {
     expect(
       screen.getByRole("button", { name: /generate article/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /reject/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reject/i })).toBeInTheDocument();
     // Approve is hidden — Generate article is the primary next step.
     expect(
       screen.queryByRole("button", { name: /approve/i }),
@@ -414,9 +399,7 @@ describe("IdeaCard Generate article action", () => {
         onGenerate={onGenerate}
       />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /generate article/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /generate article/i }));
     expect(onGenerate).toHaveBeenCalledWith(baseIdea.id);
   });
 

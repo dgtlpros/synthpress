@@ -6,16 +6,18 @@ afterEach(cleanup);
 
 describe("MarkdownPreview", () => {
   it("renders headings as the matching tag", () => {
-    render(
-      <MarkdownPreview markdown={"# H1\n\n## H2\n\n### H3"} />,
-    );
+    render(<MarkdownPreview markdown={"# H1\n\n## H2\n\n### H3"} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("H1");
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("H2");
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent("H3");
   });
 
   it("renders paragraphs", () => {
-    render(<MarkdownPreview markdown={"A first paragraph.\n\nA second paragraph."} />);
+    render(
+      <MarkdownPreview
+        markdown={"A first paragraph.\n\nA second paragraph."}
+      />,
+    );
     expect(screen.getByText("A first paragraph.")).toBeInTheDocument();
     expect(screen.getByText("A second paragraph.")).toBeInTheDocument();
   });

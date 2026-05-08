@@ -431,12 +431,9 @@ describe("listBlogsForProject", () => {
         project_id: "p1",
         wp_url: "https://x.co",
         wp_username: "admin",
-        is_active: true,
-        articles_per_day: 1,
         niche: "",
         keywords: [],
         ai_prompt_template: "",
-        schedule_cron: "0 9 * * *",
         created_at: "",
         updated_at: "",
       },
@@ -579,9 +576,10 @@ describe("listPostsForBlog", () => {
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
-            order: vi
-              .fn()
-              .mockResolvedValue({ data: null, error: new Error("posts fail") }),
+            order: vi.fn().mockResolvedValue({
+              data: null,
+              error: new Error("posts fail"),
+            }),
           }),
         }),
       }),

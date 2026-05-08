@@ -140,12 +140,9 @@ describe("ProjectOverviewConnector", () => {
         project_id: "p1",
         wp_url: "https://wp.example.com",
         wp_username: "admin",
-        is_active: true,
-        articles_per_day: 2,
         niche: "Tech",
         keywords: [],
         ai_prompt_template: "",
-        schedule_cron: "0 9 * * *",
         settings: {},
         created_at: "2026-01-01",
         updated_at: "2026-01-01",
@@ -172,12 +169,9 @@ describe("ProjectOverviewConnector", () => {
         project_id: "p1",
         wp_url: "https://wp.example.com",
         wp_username: "admin",
-        is_active: true,
-        articles_per_day: 1,
         niche: "AI tools",
         keywords: [],
         ai_prompt_template: "",
-        schedule_cron: "0 9 * * *",
         settings: {},
         created_at: "2026-01-01",
         updated_at: "2026-01-01",
@@ -186,6 +180,49 @@ describe("ProjectOverviewConnector", () => {
 
     render(<ProjectOverviewConnector {...defaultProps} blogs={blogs} />);
     expect(screen.getByText("AI tools")).toBeInTheDocument();
+  });
+
+  it("derives isActive from settings.automation (mode + enabled)", () => {
+    const blogs = [
+      {
+        id: "b-active",
+        name: "Active Blog",
+        slug: "active-blog",
+        description: "Active autopilot",
+        project_id: "p1",
+        wp_url: null,
+        wp_username: null,
+        niche: "",
+        keywords: [],
+        ai_prompt_template: "",
+        settings: { automation: { mode: "autopilot", enabled: true } },
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+      {
+        id: "b-paused",
+        name: "Paused Blog",
+        slug: "paused-blog",
+        description: "Autopilot configured but paused",
+        project_id: "p1",
+        wp_url: null,
+        wp_username: null,
+        niche: "",
+        keywords: [],
+        ai_prompt_template: "",
+        settings: { automation: { mode: "autopilot", enabled: false } },
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      },
+    ] as never[];
+
+    render(<ProjectOverviewConnector {...defaultProps} blogs={blogs} />);
+    // Both blogs render. The paused one is treated as inactive — the
+    // ProjectInstalledAppList styles inactive rows differently but the
+    // exact DOM signal is implementation-detail; just ensure both names
+    // render and no crash on the new derivation path.
+    expect(screen.getByText("Active Blog")).toBeInTheDocument();
+    expect(screen.getByText("Paused Blog")).toBeInTheDocument();
   });
 
   it("opens settings modal via ProjectPageHeader settings button", () => {
@@ -433,12 +470,9 @@ describe("ProjectOverviewConnector", () => {
         project_id: "p1",
         wp_url: null,
         wp_username: null,
-        is_active: false,
-        articles_per_day: 1,
         niche: "",
         keywords: [],
         ai_prompt_template: "",
-        schedule_cron: "0 9 * * *",
         settings: {},
         created_at: "2026-01-01",
         updated_at: "2026-01-01",

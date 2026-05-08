@@ -5,25 +5,29 @@ import { DEFAULT_BLOG_SETTINGS, type BlogSettings } from "@/lib/blog-settings";
 // `vi.hoisted` ensures the mock fns are constructed before the `vi.mock`
 // factories run (factories themselves are hoisted to the top of the file),
 // so they can be referenced both by the factories and by the tests below.
-const { generateTextMock, outputObjectMock, anthropicCallable, createAnthropicMock } =
-  vi.hoisted(() => ({
-    generateTextMock: vi.fn(),
-    outputObjectMock: vi.fn(({ schema, name, description }) => ({
-      __outputKind: "object" as const,
-      schema,
-      name,
-      description,
-    })),
-    anthropicCallable: vi.fn((modelId: string) => ({
-      __anthropicModelId: modelId,
-    })),
-    createAnthropicMock: vi.fn((options: { apiKey: string }) =>
-      Object.assign(
-        (modelId: string) => ({ __injected: true, modelId, options }),
-        { __isInjectedProvider: true },
-      ),
+const {
+  generateTextMock,
+  outputObjectMock,
+  anthropicCallable,
+  createAnthropicMock,
+} = vi.hoisted(() => ({
+  generateTextMock: vi.fn(),
+  outputObjectMock: vi.fn(({ schema, name, description }) => ({
+    __outputKind: "object" as const,
+    schema,
+    name,
+    description,
+  })),
+  anthropicCallable: vi.fn((modelId: string) => ({
+    __anthropicModelId: modelId,
+  })),
+  createAnthropicMock: vi.fn((options: { apiKey: string }) =>
+    Object.assign(
+      (modelId: string) => ({ __injected: true, modelId, options }),
+      { __isInjectedProvider: true },
     ),
-  }));
+  ),
+}));
 
 vi.mock("ai", () => {
   // The error class lives inside the factory because `vi.mock` is
@@ -194,9 +198,7 @@ describe("buildArticlePromptParts", () => {
     });
 
     expect(prompt).toContain("user provided this topic / brief");
-    expect(prompt).toContain(
-      "How to onboard new SaaS customers in week one",
-    );
+    expect(prompt).toContain("How to onboard new SaaS customers in week one");
     expect(prompt).not.toContain("  How to onboard");
   });
 
@@ -274,9 +276,7 @@ describe("buildArticlePromptParts", () => {
 
     expect(system).not.toContain("DO:");
     expect(system).not.toContain("DO NOT:");
-    expect(system).not.toContain(
-      "Additional instructions from the blog owner",
-    );
+    expect(system).not.toContain("Additional instructions from the blog owner");
     expect(prompt).not.toContain("Topics the blog wants covered");
     expect(prompt).not.toContain("Topics to avoid");
   });
@@ -477,7 +477,7 @@ describe("buildIdeasPromptParts", () => {
     });
 
     expect(prompt).toContain("Generate exactly 7 distinct article ideas");
-    expect(prompt).toContain('exactly 7 entries');
+    expect(prompt).toContain("exactly 7 entries");
   });
 
   it("incorporates the blog identity, tone, goals, and preferred article types", () => {

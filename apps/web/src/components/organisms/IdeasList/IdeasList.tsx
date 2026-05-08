@@ -1,10 +1,7 @@
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/atoms/Button";
 import { Card } from "@/components/atoms/Card";
-import {
-  IdeaCard,
-  type IdeaCardIdea,
-} from "@/components/molecules/IdeaCard";
+import { IdeaCard, type IdeaCardIdea } from "@/components/molecules/IdeaCard";
 
 /**
  * Dumb organism that renders the Ideas tab. Owns no state — the
@@ -66,16 +63,12 @@ export function IdeasList({
             Article ideas
           </h2>
           <p className="text-sm text-muted">
-            Brainstormed topics waiting to become articles. Approve the
-            ones you like and convert them into drafts.
+            Brainstormed topics waiting to become articles. Approve the ones you
+            like and convert them into drafts.
           </p>
         </div>
         {ideas.length > 0 ? (
-          <Button
-            size="md"
-            onClick={onGenerateClick}
-            loading={isGenerating}
-          >
+          <Button size="md" onClick={onGenerateClick} loading={isGenerating}>
             Generate ideas
           </Button>
         ) : null}
@@ -100,8 +93,7 @@ export function IdeasList({
                 : pendingIdeaId === idea.id
                   ? pendingIdeaAction
                   : "other";
-            const cardError =
-              errorIdeaId === idea.id ? errorMessage : null;
+            const cardError = errorIdeaId === idea.id ? errorMessage : null;
 
             return (
               <li key={idea.id}>
@@ -155,8 +147,8 @@ function EmptyState({ onGenerateClick, isGenerating }: EmptyStateProps) {
       </Button>
       <p className="text-xs text-muted">
         Tip: review and tune your blog&apos;s{" "}
-        <span className="font-medium text-foreground">Settings</span> first
-        for sharper output.
+        <span className="font-medium text-foreground">Settings</span> first for
+        sharper output.
       </p>
     </Card>
   );

@@ -30,6 +30,22 @@ describe("BlogHeader", () => {
     expect(screen.getByText("Autopilot on")).toBeInTheDocument();
   });
 
+  it("renders 'Autopilot paused' when mode is autopilot but enabled is false", () => {
+    render(
+      <BlogHeader
+        name="X"
+        automationMode="autopilot"
+        automationEnabled={false}
+      />,
+    );
+    expect(screen.getByText("Autopilot paused")).toBeInTheDocument();
+  });
+
+  it("does not render any badge when automationMode is undefined", () => {
+    render(<BlogHeader name="X" />);
+    expect(screen.queryByText(/Autopilot|Manual mode/)).not.toBeInTheDocument();
+  });
+
   it("renders actions slot", () => {
     render(
       <BlogHeader name="X" actions={<button type="button">Generate</button>} />,

@@ -47,6 +47,17 @@ export const Autopilot: Story = {
     name: "Daily AI News",
     description: "Daily roundup of the latest AI announcements.",
     automationMode: "autopilot",
+    automationEnabled: true,
+    actions,
+  },
+};
+
+export const AutopilotPaused: Story = {
+  args: {
+    name: "Daily AI News",
+    description: "Daily roundup of the latest AI announcements.",
+    automationMode: "autopilot",
+    automationEnabled: false,
     actions,
   },
 };

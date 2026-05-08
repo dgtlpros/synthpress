@@ -25,7 +25,6 @@ const initial: BlogSettingsTabsValue = {
     keywordsText: "ai, dev",
     aiPromptTemplate: "",
   },
-  cadence: { isActive: true, articlesPerDay: 1, scheduleCron: "0 9 * * *" },
   settings: DEFAULT_BLOG_SETTINGS,
 };
 
@@ -200,7 +199,7 @@ describe("useBlogSettingsForm", () => {
     });
   });
 
-  it("includes every cadence field that changed", async () => {
+  it("ships automation settings as a settings.automation patch", async () => {
     mockedUpdate.mockResolvedValue({ data: null, error: null });
     const { result } = renderHook(() =>
       useBlogSettingsForm({
@@ -214,19 +213,28 @@ describe("useBlogSettingsForm", () => {
     act(() => {
       result.current.save({
         ...initial,
-        cadence: {
-          isActive: false,
-          articlesPerDay: 5,
-          scheduleCron: "0 8 * * *",
+        settings: {
+          ...initial.settings,
+          automation: {
+            ...initial.settings.automation,
+            enabled: true,
+            mode: "autopilot",
+            generatePerWeek: 14,
+            backlogThreshold: 25,
+            dailyTokenBudget: 500,
+          },
         },
       });
     });
 
     await waitFor(() => {
-      expect(mockedUpdate).toHaveBeenCalledWith("t1", "p1", "b1", {
-        isActive: false,
-        articlesPerDay: 5,
-        scheduleCron: "0 8 * * *",
+      const payload = mockedUpdate.mock.calls[0]?.[3];
+      expect(payload?.settings?.automation).toMatchObject({
+        enabled: true,
+        mode: "autopilot",
+        generatePerWeek: 14,
+        backlogThreshold: 25,
+        dailyTokenBudget: 500,
       });
     });
   });

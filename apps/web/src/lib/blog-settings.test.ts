@@ -137,6 +137,7 @@ describe("loadBlogSettings", () => {
       },
       automation: {
         mode: "autopilot",
+        enabled: true,
         generatePerWeek: 14,
         requireReview: false,
         autoSchedule: true,
@@ -146,6 +147,8 @@ describe("loadBlogSettings", () => {
         timezone: "UTC",
         maxPostsPerDay: 4,
         regenerateOnFail: false,
+        backlogThreshold: 25,
+        dailyTokenBudget: 1000,
       },
       publishing: {
         defaultDestination: "wordpress",
@@ -179,9 +182,43 @@ describe("loadBlogSettings", () => {
     expect(out.ai.preferredCta).toBe("cta");
     expect(out.seo.featuredImagePreference).toBe("always");
     expect(out.automation.mode).toBe("autopilot");
+    expect(out.automation.enabled).toBe(true);
+    expect(out.automation.backlogThreshold).toBe(25);
+    expect(out.automation.dailyTokenBudget).toBe(1000);
     expect(out.publishing.defaultDestination).toBe("wordpress");
     expect(out.media.imageSource).toBe("manual_upload");
     expect(out.advanced.competitorsToAvoid).toBe("y");
+  });
+
+  it("defaults autopilot kill-switch / backlog / budget to safe values", () => {
+    expect(DEFAULT_BLOG_SETTINGS.automation.enabled).toBe(false);
+    expect(DEFAULT_BLOG_SETTINGS.automation.backlogThreshold).toBe(10);
+    expect(DEFAULT_BLOG_SETTINGS.automation.dailyTokenBudget).toBeNull();
+  });
+
+  it("preserves an explicit null dailyTokenBudget (means: no per-blog cap)", () => {
+    const out = loadBlogSettings({
+      automation: { dailyTokenBudget: null },
+    } as never);
+    expect(out.automation.dailyTokenBudget).toBeNull();
+  });
+
+  it("falls back to default when dailyTokenBudget is a non-number, non-null", () => {
+    const out = loadBlogSettings({
+      automation: { dailyTokenBudget: "lots" },
+    } as never);
+    expect(out.automation.dailyTokenBudget).toBe(
+      DEFAULT_BLOG_SETTINGS.automation.dailyTokenBudget,
+    );
+  });
+
+  it("falls back to default when dailyTokenBudget is a non-finite number", () => {
+    const out = loadBlogSettings({
+      automation: { dailyTokenBudget: Number.NaN },
+    } as never);
+    expect(out.automation.dailyTokenBudget).toBe(
+      DEFAULT_BLOG_SETTINGS.automation.dailyTokenBudget,
+    );
   });
 
   it("falls back when whole sections are non-objects", () => {

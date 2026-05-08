@@ -19,7 +19,10 @@
  *   imports into the client bundle.
  */
 
-export type AiTask = "ideaGeneration" | "outlineGeneration" | "articleGeneration";
+export type AiTask =
+  | "ideaGeneration"
+  | "outlineGeneration"
+  | "articleGeneration";
 
 /**
  * The default model for each task. Strings, not template literals,

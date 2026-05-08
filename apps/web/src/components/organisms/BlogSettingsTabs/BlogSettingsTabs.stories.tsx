@@ -22,12 +22,34 @@ export const Default: Story = {
         keywordsText: "indie, micro-saas, bootstrapping",
         aiPromptTemplate: "",
       },
-      cadence: {
-        isActive: true,
-        articlesPerDay: 1,
-        scheduleCron: "0 9 * * *",
-      },
       settings: DEFAULT_BLOG_SETTINGS,
+    },
+    onSave: () => {},
+  },
+};
+
+export const AutopilotConfigured: Story = {
+  args: {
+    initialValue: {
+      general: {
+        name: "Indie Hacker Stories",
+        description: "Stories about building bootstrapped products.",
+        niche: "Indie hackers",
+        keywordsText: "indie, micro-saas, bootstrapping",
+        aiPromptTemplate: "",
+      },
+      settings: {
+        ...DEFAULT_BLOG_SETTINGS,
+        automation: {
+          ...DEFAULT_BLOG_SETTINGS.automation,
+          enabled: true,
+          mode: "autopilot",
+          generatePerWeek: 14,
+          backlogThreshold: 25,
+          dailyTokenBudget: 1000,
+          timezone: "America/New_York",
+        },
+      },
     },
     onSave: () => {},
   },

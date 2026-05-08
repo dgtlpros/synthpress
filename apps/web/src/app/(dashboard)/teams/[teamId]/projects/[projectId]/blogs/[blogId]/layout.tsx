@@ -43,38 +43,30 @@ export default async function BlogLayout({
 
   const { data: blog } = await supabase
     .from("blogs")
-    .select("id, name, description, settings, is_active, project_id")
+    .select("id, name, description, settings, project_id")
     .eq("id", blogId)
     .eq("project_id", projectId)
     .maybeSingle();
 
   if (!blog) notFound();
 
-  const [
-    { count: postCount },
-    { count: queueCount },
-    { count: ideasCount },
-  ] = await Promise.all([
-    supabase
-      .from("articles")
-      .select("id", { count: "exact", head: true })
-      .eq("blog_id", blogId),
-    supabase
-      .from("articles")
-      .select("id", { count: "exact", head: true })
-      .eq("blog_id", blogId)
-      .in("status", [
-        "generating",
-        "ready",
-        "ready_for_review",
-        "scheduled",
-      ]),
-    supabase
-      .from("article_ideas")
-      .select("id", { count: "exact", head: true })
-      .eq("blog_id", blogId)
-      .in("status", ["generated", "approved"]),
-  ]);
+  const [{ count: postCount }, { count: queueCount }, { count: ideasCount }] =
+    await Promise.all([
+      supabase
+        .from("articles")
+        .select("id", { count: "exact", head: true })
+        .eq("blog_id", blogId),
+      supabase
+        .from("articles")
+        .select("id", { count: "exact", head: true })
+        .eq("blog_id", blogId)
+        .in("status", ["generating", "ready", "ready_for_review", "scheduled"]),
+      supabase
+        .from("article_ideas")
+        .select("id", { count: "exact", head: true })
+        .eq("blog_id", blogId)
+        .in("status", ["generated", "approved"]),
+    ]);
 
   const settings = loadBlogSettings(blog.settings);
   const blogBase = `/teams/${teamId}/projects/${projectId}/blogs/${blogId}`;
@@ -114,6 +106,7 @@ export default async function BlogLayout({
         name={blog.name}
         description={blog.description || undefined}
         automationMode={settings.automation.mode}
+        automationEnabled={settings.automation.enabled}
         actions={
           <>
             <Button

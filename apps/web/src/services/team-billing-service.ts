@@ -74,6 +74,73 @@ export async function consumeTeamTokens(
   return data ?? 0;
 }
 
+export interface RefundTeamTokensInput {
+  teamId: string;
+  amount: number;
+  /** The team member whose action triggered the refund (orchestrator user). */
+  actingUserId: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  /**
+   * Idempotency key for the refund. The orchestration layer uses
+   * `refund::article_job::{jobId}` so a retried failure handler is a
+   * no-op on the ledger.
+   */
+  idempotencyKey?: string;
+  client?: Client;
+}
+
+/**
+ * Atomically credits the team owner's token balance back and writes a
+ * positive-amount audit row in `token_transactions` with
+ * `type='usage_refund'`. Inverse of {@link consumeTeamTokens}.
+ *
+ * Used when a job consumed credits but failed before delivering value
+ * to the user (AI provider errored, DB write failed, etc.). Stripe
+ * chargebacks have a separate flow (`recordTokenRefund` in
+ * `token-service.ts`).
+ *
+ * Errors raised:
+ *   - "amount_must_be_positive"  - amount <= 0
+ *   - "team_has_no_billing_user" - teams.billing_user_id is null
+ *
+ * Idempotent on `idempotencyKey`: a duplicate key short-circuits in
+ * the RPC and the unique partial index on
+ * `token_transactions.idempotency_key` catches concurrent retries.
+ *
+ * Returns the team owner's new balance.
+ */
+export async function refundTeamTokens(
+  input: RefundTeamTokensInput,
+): Promise<number> {
+  if (input.amount <= 0) {
+    throw new Error("refundTeamTokens: amount must be positive");
+  }
+
+  const supabase = input.client ?? createAdminClient();
+
+  const { data, error } = await supabase.rpc("refund_team_tokens", {
+    p_team_id: input.teamId,
+    p_amount: input.amount,
+    p_acting_user_id: input.actingUserId,
+    p_description: input.description ?? undefined,
+    p_metadata: (input.metadata ?? {}) as Json,
+    p_idempotency_key: input.idempotencyKey ?? undefined,
+  });
+
+  if (error) {
+    if (error.message?.includes("team_has_no_billing_user")) {
+      throw new Error("team_has_no_billing_user");
+    }
+    if (error.message?.includes("amount_must_be_positive")) {
+      throw new Error("amount_must_be_positive");
+    }
+    throw error;
+  }
+
+  return data ?? 0;
+}
+
 export interface TeamBillingContext {
   ownerId: string;
   planKey: string | null;

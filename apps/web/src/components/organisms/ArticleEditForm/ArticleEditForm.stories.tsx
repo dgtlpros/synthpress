@@ -1,9 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
-import {
-  ArticleEditForm,
-  type ArticleEditFormValue,
-} from "./ArticleEditForm";
+import { ArticleEditForm, type ArticleEditFormValue } from "./ArticleEditForm";
 
 const meta = {
   title: "Organisms/ArticleEditForm",

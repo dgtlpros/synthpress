@@ -435,8 +435,8 @@ function EmptyState({ onCreate, ideasHref }: EmptyStateProps) {
       <div className="space-y-1">
         <p className="text-lg font-semibold text-foreground">No posts yet</p>
         <p className="max-w-md text-sm text-muted">
-          Generate ideas, approve one, then generate an article draft. Posts
-          you publish will land here for review and editing.
+          Generate ideas, approve one, then generate an article draft. Posts you
+          publish will land here for review and editing.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">

@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import {
-  ArticleEditForm,
-  type ArticleEditFormValue,
-} from "./ArticleEditForm";
+import { ArticleEditForm, type ArticleEditFormValue } from "./ArticleEditForm";
 
 afterEach(cleanup);
 
@@ -27,12 +24,12 @@ describe("ArticleEditForm", () => {
       />,
     );
 
-    expect(
-      (screen.getByLabelText(/title/i) as HTMLInputElement).value,
-    ).toBe(baseValue.title);
-    expect(
-      (screen.getByLabelText(/^slug/i) as HTMLInputElement).value,
-    ).toBe(baseValue.slug);
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe(
+      baseValue.title,
+    );
+    expect((screen.getByLabelText(/^slug/i) as HTMLInputElement).value).toBe(
+      baseValue.slug,
+    );
     expect(
       (screen.getByLabelText(/target keyword/i) as HTMLInputElement).value,
     ).toBe(baseValue.targetKeyword);

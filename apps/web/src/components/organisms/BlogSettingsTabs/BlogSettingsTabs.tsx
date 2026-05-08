@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/cn";
+import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Card } from "@/components/atoms/Card";
 import { Input } from "@/components/atoms/Input";
@@ -20,7 +21,6 @@ import {
   type BlogContentGoal,
   type BlogSettings,
   CONTENT_GOAL_OPTIONS,
-  PREFERRED_DAY_OPTIONS,
 } from "@/lib/blog-settings";
 
 export interface BlogSettingsTabsValue {
@@ -31,12 +31,6 @@ export interface BlogSettingsTabsValue {
     niche: string;
     keywordsText: string;
     aiPromptTemplate: string;
-  };
-  /** Automation fields stored as columns on `blogs`. */
-  cadence: {
-    isActive: boolean;
-    articlesPerDay: number;
-    scheduleCron: string;
   };
   /** Everything that lives in `blogs.settings` jsonb. */
   settings: BlogSettings;
@@ -93,9 +87,6 @@ export function BlogSettingsTabs({
 
   function patchGeneral(patch: Partial<BlogSettingsTabsValue["general"]>) {
     setValue((v) => ({ ...v, general: { ...v.general, ...patch } }));
-  }
-  function patchCadence(patch: Partial<BlogSettingsTabsValue["cadence"]>) {
-    setValue((v) => ({ ...v, cadence: { ...v.cadence, ...patch } }));
   }
   function patchSettings<K extends keyof BlogSettings>(
     section: K,
@@ -165,8 +156,6 @@ export function BlogSettingsTabs({
 
           <TabsContent value="automation" className="space-y-6">
             <AutomationTab
-              cadence={value.cadence}
-              onCadence={patchCadence}
               value={value.settings.automation}
               onChange={(p) => patchSettings("automation", p)}
             />
@@ -969,22 +958,24 @@ function SeoTab({
 // ─── Automation ─────────────────────────────────────────────────────────────
 
 function AutomationTab({
-  cadence,
-  onCadence,
   value,
   onChange,
 }: {
-  cadence: BlogSettingsTabsValue["cadence"];
-  onCadence: (p: Partial<BlogSettingsTabsValue["cadence"]>) => void;
   value: BlogSettings["automation"];
   onChange: (p: Partial<BlogSettings["automation"]>) => void;
 }) {
   return (
     <>
       <Section
-        title="Auto generation"
-        description="How aggressively should the AI fill the queue?"
+        title="Autopilot"
+        description="The kill switch and content-generation cadence for AI-driven drafts."
       >
+        <ToggleField
+          label="Autopilot enabled"
+          description="When on, the scheduler may generate ideas and drafts on its own. Turn off to pause without losing your configuration."
+          checked={value.enabled}
+          onChange={(enabled) => onChange({ enabled })}
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Mode" htmlFor="automation-mode">
             <Select
@@ -1007,7 +998,7 @@ function AutomationTab({
           <Field
             label="Generate per week"
             htmlFor="automation-per-week"
-            hint="How many drafts the AI tries to produce each week."
+            hint="Target draft count per week. Autopilot won't exceed this."
           >
             <Input
               id="automation-per-week"
@@ -1021,28 +1012,11 @@ function AutomationTab({
             />
           </Field>
         </div>
-        <ToggleField
-          label="Require human review before publishing"
-          description="Generated drafts wait in 'Ready for review' until approved."
-          checked={value.requireReview}
-          onChange={(requireReview) => onChange({ requireReview })}
-        />
-        <ToggleField
-          label="Auto-regenerate failed posts"
-          description="If generation fails, the system retries up to three times."
-          checked={value.regenerateOnFail}
-          onChange={(regenerateOnFail) => onChange({ regenerateOnFail })}
-        />
-      </Section>
-
-      <Section
-        title="Auto publishing"
-        description="When approved drafts should hit your CMS."
-      >
         <div className="grid gap-4 md:grid-cols-2">
           <Field
-            label="Max posts published / day"
+            label="Max drafts / day"
             htmlFor="automation-max-per-day"
+            hint="Hard upper bound for a single day. Stops a backlog burst."
           >
             <Input
               id="automation-max-per-day"
@@ -1055,118 +1029,92 @@ function AutomationTab({
               }
             />
           </Field>
-          <Field label="Timezone" htmlFor="automation-timezone">
+          <Field
+            label="Timezone"
+            htmlFor="automation-timezone"
+            hint="IANA timezone name, e.g. Etc/UTC, America/New_York."
+          >
             <Input
               id="automation-timezone"
               value={value.timezone}
               onChange={(e) => onChange({ timezone: e.target.value })}
-              placeholder="America/Boise"
-            />
-          </Field>
-          <Field
-            label="Publish window (start)"
-            htmlFor="automation-window-start"
-          >
-            <Input
-              id="automation-window-start"
-              type="time"
-              value={value.publishWindowStart}
-              onChange={(e) => onChange({ publishWindowStart: e.target.value })}
-            />
-          </Field>
-          <Field label="Publish window (end)" htmlFor="automation-window-end">
-            <Input
-              id="automation-window-end"
-              type="time"
-              value={value.publishWindowEnd}
-              onChange={(e) => onChange({ publishWindowEnd: e.target.value })}
+              placeholder="Etc/UTC"
             />
           </Field>
         </div>
-        <Field
-          label="Preferred publishing days"
-          htmlFor="automation-days"
-          hint="Click to toggle days the AI is allowed to schedule on."
-        >
-          <div
-            id="automation-days"
-            className="flex flex-wrap gap-2"
-            role="group"
-            aria-label="Preferred publishing days"
-          >
-            {PREFERRED_DAY_OPTIONS.map((d) => {
-              const isActive = value.preferredDays.includes(d);
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() =>
-                    onChange({
-                      preferredDays: isActive
-                        ? value.preferredDays.filter((x) => x !== d)
-                        : [...value.preferredDays, d],
-                    })
-                  }
-                  aria-pressed={isActive}
-                  className={cn(
-                    "rounded-[var(--sp-radius-full)] border px-3 py-1.5 text-xs font-medium transition-colors",
-                    isActive
-                      ? "border-brand-blue bg-brand-blue/10 text-foreground"
-                      : "border-border bg-surface text-muted hover:border-border-hover hover:text-foreground",
-                  )}
-                >
-                  {d}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
         <ToggleField
-          label="Auto-schedule new drafts"
-          description="When AI generates a draft, it picks the next slot in the publish window."
-          checked={value.autoSchedule}
-          onChange={(autoSchedule) => onChange({ autoSchedule })}
+          label="Require human review before publishing"
+          description="Generated drafts wait in 'Ready for review' until approved."
+          checked={value.requireReview}
+          onChange={(requireReview) => onChange({ requireReview })}
+        />
+        <ToggleField
+          label="Auto-regenerate failed drafts"
+          description="When autopilot picks up a failed job, retry instead of skipping. (No effect today — autopilot ships in a later release.)"
+          checked={value.regenerateOnFail}
+          onChange={(regenerateOnFail) => onChange({ regenerateOnFail })}
         />
       </Section>
 
       <Section
-        title="Cadence"
-        description="Legacy controls — these still drive the cron-based scheduler."
+        title="Backlog & spend"
+        description="Keep an idea pool ready and put a per-blog cap on token spend."
       >
-        <ToggleField
-          label="Blog is active"
-          description="Pauses or resumes generation across the whole blog."
-          checked={cadence.isActive}
-          onChange={(isActive) => onCadence({ isActive })}
-        />
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Articles per day" htmlFor="cadence-articles-per-day">
+          <Field
+            label="Approved-idea backlog target"
+            htmlFor="automation-backlog-threshold"
+            hint="Autopilot tops the idea pool back up when approved-but-unconverted ideas drop below this."
+          >
             <Input
-              id="cadence-articles-per-day"
+              id="automation-backlog-threshold"
               type="number"
               min={0}
-              max={100}
-              value={cadence.articlesPerDay}
+              max={1000}
+              value={value.backlogThreshold}
               onChange={(e) =>
-                onCadence({
-                  articlesPerDay: Number(e.target.value) || 0,
-                })
+                onChange({ backlogThreshold: Number(e.target.value) || 0 })
               }
             />
           </Field>
           <Field
-            label="Schedule (cron)"
-            htmlFor="cadence-cron"
-            hint="Standard 5-field cron syntax. Default = 9 AM daily."
+            label="Daily Synth-token budget"
+            htmlFor="automation-daily-token-budget"
+            hint="Autopilot won't spend more Synth tokens than this in a day. Leave blank for no per-blog cap."
           >
             <Input
-              id="cadence-cron"
-              value={cadence.scheduleCron}
-              onChange={(e) => onCadence({ scheduleCron: e.target.value })}
-              placeholder="0 9 * * *"
-              className="font-mono"
+              id="automation-daily-token-budget"
+              type="number"
+              min={0}
+              max={1_000_000}
+              value={value.dailyTokenBudget ?? ""}
+              placeholder="No cap"
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") {
+                  onChange({ dailyTokenBudget: null });
+                  return;
+                }
+                const n = Number(raw);
+                onChange({
+                  dailyTokenBudget: Number.isFinite(n) && n >= 0 ? n : null,
+                });
+              }}
             />
           </Field>
+        </div>
+      </Section>
+
+      <Section
+        title="Auto publishing"
+        description="Schedule windows and preferred days. Hidden until WordPress publishing is shipped."
+      >
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Badge variant="brand">Coming soon</Badge>
+          <span>
+            Auto-publishing controls light up when the WordPress connection is
+            live. Generation settings above stay in effect today.
+          </span>
         </div>
       </Section>
     </>

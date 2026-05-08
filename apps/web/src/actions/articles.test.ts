@@ -41,10 +41,7 @@ vi.mock("next/cache", () => ({
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import { updateArticleFields } from "@/services/article-service";
 import { updateArticle } from "./articles";
 
@@ -202,7 +199,10 @@ describe("updateArticle", () => {
       { code: "slug_invalid", expected: /lowercase letters/i },
       { code: "excerpt_too_long", expected: /excerpt is too long/i },
       { code: "meta_description_too_long", expected: /meta description/i },
-      { code: "target_keyword_too_long", expected: /target keyword is too long/i },
+      {
+        code: "target_keyword_too_long",
+        expected: /target keyword is too long/i,
+      },
       { code: "content_too_long", expected: /article body is too long/i },
     ];
 
@@ -217,11 +217,7 @@ describe("updateArticle", () => {
 
   it("returns the TeamPermissionError code when the caller can't manage the blog", async () => {
     mockedAssertCan.mockRejectedValueOnce(
-      new TeamPermissionError(
-        "forbidden",
-        "manage_blog",
-        "member" as never,
-      ),
+      new TeamPermissionError("forbidden", "manage_blog", "member" as never),
     );
 
     const result = await updateArticle("t1", "p1", "b1", "a1", baseFields);

@@ -87,9 +87,7 @@ export function IdeasListConnector({
   // clicked Approve/Reject) but generation errors fall through.
   const errorIdeaId = actionsErrorIdeaId ?? generationErrorIdeaId;
   const errorMessage =
-    actionsErrorIdeaId !== null
-      ? actionsErrorMessage
-      : generationErrorMessage;
+    actionsErrorIdeaId !== null ? actionsErrorMessage : generationErrorMessage;
 
   const handleClose: GenerateIdeasModalProps["onClose"] = () => {
     /* v8 ignore next 1 -- defensive: the Cancel button is disabled while

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  AI_CREDIT_COSTS,
-  type AiAction,
-  getCreditCost,
-} from "./config";
+import { AI_CREDIT_COSTS, type AiAction, getCreditCost } from "./config";
 
 describe("AI_CREDIT_COSTS", () => {
   it("defines a positive integer cost for every action", () => {

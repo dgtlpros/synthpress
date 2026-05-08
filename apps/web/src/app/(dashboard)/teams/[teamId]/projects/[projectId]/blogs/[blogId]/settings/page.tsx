@@ -28,7 +28,7 @@ export default async function BlogSettingsPage({
   const { data: blog } = await supabase
     .from("blogs")
     .select(
-      "id, name, description, niche, keywords, ai_prompt_template, articles_per_day, schedule_cron, is_active, settings",
+      "id, name, description, niche, keywords, ai_prompt_template, settings",
     )
     .eq("id", blogId)
     .eq("project_id", projectId)
@@ -45,11 +45,6 @@ export default async function BlogSettingsPage({
       niche: blog.niche ?? "",
       keywordsText: (blog.keywords ?? []).join(", "),
       aiPromptTemplate: blog.ai_prompt_template ?? "",
-    },
-    cadence: {
-      isActive: Boolean(blog.is_active),
-      articlesPerDay: blog.articles_per_day ?? 1,
-      scheduleCron: blog.schedule_cron ?? "0 9 * * *",
     },
     settings,
   };

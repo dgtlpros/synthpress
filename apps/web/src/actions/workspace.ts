@@ -477,6 +477,10 @@ export type BlogConnectionInput = {
  * Full payload for the redesigned blog settings UI. Everything is optional;
  * callers send only the fields they want to update. `settings` is a section
  * patch that's merged into the existing jsonb (see {@link mergeBlogSettings}).
+ *
+ * Note: legacy `articlesPerDay`, `scheduleCron`, and `isActive` fields were
+ * removed in migration 00018. The new equivalents live under
+ * `settings.automation` (`generatePerWeek`, `enabled`, etc.).
  */
 export type UpdateBlogInput = {
   name?: string;
@@ -484,9 +488,6 @@ export type UpdateBlogInput = {
   niche?: string;
   keywords?: string[];
   aiPromptTemplate?: string;
-  articlesPerDay?: number;
-  scheduleCron?: string;
-  isActive?: boolean;
   /** Shallow-merged into `blogs.settings`. */
   settings?: Partial<{
     [K in keyof BlogSettings]: Partial<BlogSettings[K]>;
@@ -494,6 +495,20 @@ export type UpdateBlogInput = {
   /** Pass to update WordPress connection (or pass nulls to disconnect). */
   connection?: BlogConnectionInput;
 };
+
+/**
+ * Validate an IANA timezone string by asking the platform to parse it.
+ * `Intl.DateTimeFormat` throws `RangeError` for unknown zones — the cheapest
+ * cross-runtime way to validate without bundling a tz database.
+ */
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function normalizeKeywords(input: string[]): string[] {
   const seen = new Set<string>();
@@ -542,16 +557,51 @@ export async function updateBlog(
     };
   }
 
-  if (
-    typeof input.articlesPerDay === "number" &&
-    (!Number.isFinite(input.articlesPerDay) ||
-      input.articlesPerDay < 0 ||
-      input.articlesPerDay > 100)
-  ) {
-    return {
-      data: null,
-      error: "Articles per day must be between 0 and 100.",
-    };
+  if (input.settings?.automation) {
+    const auto = input.settings.automation;
+    if (typeof auto.timezone === "string" && auto.timezone.trim()) {
+      if (!isValidIanaTimezone(auto.timezone.trim())) {
+        return {
+          data: null,
+          error: `Unknown timezone "${auto.timezone}". Use an IANA timezone name (e.g. Etc/UTC, America/New_York).`,
+        };
+      }
+    }
+    if (
+      typeof auto.generatePerWeek === "number" &&
+      (!Number.isFinite(auto.generatePerWeek) ||
+        auto.generatePerWeek < 0 ||
+        auto.generatePerWeek > 100)
+    ) {
+      return {
+        data: null,
+        error: "Generate per week must be between 0 and 100.",
+      };
+    }
+    if (
+      typeof auto.backlogThreshold === "number" &&
+      (!Number.isFinite(auto.backlogThreshold) ||
+        auto.backlogThreshold < 0 ||
+        auto.backlogThreshold > 1000)
+    ) {
+      return {
+        data: null,
+        error: "Backlog threshold must be between 0 and 1000.",
+      };
+    }
+    if (
+      auto.dailyTokenBudget !== undefined &&
+      auto.dailyTokenBudget !== null &&
+      (typeof auto.dailyTokenBudget !== "number" ||
+        !Number.isFinite(auto.dailyTokenBudget) ||
+        auto.dailyTokenBudget < 0)
+    ) {
+      return {
+        data: null,
+        error:
+          "Daily token budget must be 0 or higher, or blank for no per-blog cap.",
+      };
+    }
   }
 
   if (input.connection) {
@@ -623,15 +673,6 @@ export async function updateBlog(
     if (typeof input.aiPromptTemplate === "string") {
       update.ai_prompt_template = input.aiPromptTemplate;
     }
-    if (typeof input.articlesPerDay === "number") {
-      update.articles_per_day = Math.floor(input.articlesPerDay);
-    }
-    if (typeof input.scheduleCron === "string") {
-      update.schedule_cron = input.scheduleCron.trim();
-    }
-    if (typeof input.isActive === "boolean") {
-      update.is_active = input.isActive;
-    }
 
     if (input.settings) {
       const current = loadBlogSettings(existing.settings as Json);
@@ -687,15 +728,6 @@ export async function updateBlog(
       error: err instanceof Error ? err.message : "Could not update blog.",
     };
   }
-}
-
-export async function setBlogActive(
-  teamId: string,
-  projectId: string,
-  blogId: string,
-  isActive: boolean,
-): Promise<ActionResult<null>> {
-  return updateBlog(teamId, projectId, blogId, { isActive });
 }
 
 export async function getPostsForBlog(

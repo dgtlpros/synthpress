@@ -2,10 +2,7 @@
 
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  updateArticle,
-  type UpdateArticleResult,
-} from "@/actions/articles";
+import { updateArticle, type UpdateArticleResult } from "@/actions/articles";
 import type { ArticleEditableFields } from "@/services/article-service";
 
 /**

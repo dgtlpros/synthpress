@@ -22,10 +22,7 @@
  *     this static map.
  */
 
-export type AiAction =
-  | "generateIdeas"
-  | "generateOutline"
-  | "generateArticle";
+export type AiAction = "generateIdeas" | "generateOutline" | "generateArticle";
 
 /**
  * Temporary v1 costs. Tuned later when subscription / pricing details

@@ -67,7 +67,6 @@ import {
   deleteProject,
   updateBlog,
   deleteBlog,
-  setBlogActive,
 } from "./workspace";
 
 const mockedRevalidatePath = vi.mocked(revalidatePath);
@@ -1452,11 +1451,148 @@ describe("updateBlog — catch branches", () => {
     expect(result.error).toMatch(/AI prompt template must be at most/);
   });
 
-  it("validates articles per day range", async () => {
+  it("validates settings.automation.generatePerWeek range", async () => {
     const result = await updateBlog("t1", "p1", "b1", {
-      articlesPerDay: -1,
+      settings: { automation: { generatePerWeek: -1 } },
     });
-    expect(result.error).toMatch(/between 0 and 100/);
+    expect(result.error).toMatch(/Generate per week.*between 0 and 100/);
+  });
+
+  it("validates settings.automation.generatePerWeek upper bound", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { generatePerWeek: 1000 } },
+    });
+    expect(result.error).toMatch(/Generate per week.*between 0 and 100/);
+  });
+
+  it("rejects unknown timezone strings", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { timezone: "Atlantis/Lost" } },
+    });
+    expect(result.error).toMatch(/Unknown timezone/);
+  });
+
+  it("accepts a valid IANA timezone", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "Blog", slug: "blog", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { timezone: "America/New_York" } },
+    });
+    expect(result.error).toBeNull();
+  });
+
+  it("ignores blank timezone strings", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "Blog", slug: "blog", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update: () => ({
+          eq: () => ({ eq: () => Promise.resolve({ error: null }) }),
+        }),
+      }),
+    } as never);
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { timezone: "   " } },
+    });
+    expect(result.error).toBeNull();
+  });
+
+  it("validates backlogThreshold range", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { backlogThreshold: -5 } },
+    });
+    expect(result.error).toMatch(/Backlog threshold/);
+  });
+
+  it("validates backlogThreshold upper bound", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { backlogThreshold: 5000 } },
+    });
+    expect(result.error).toMatch(/Backlog threshold/);
+  });
+
+  it("rejects negative dailyTokenBudget", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { dailyTokenBudget: -1 } },
+    });
+    expect(result.error).toMatch(/Daily token budget/);
+  });
+
+  it("rejects non-numeric dailyTokenBudget (other than null)", async () => {
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { dailyTokenBudget: Number.NaN } },
+    });
+    expect(result.error).toMatch(/Daily token budget/);
+  });
+
+  it("accepts null dailyTokenBudget (no per-blog cap)", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { name: "Blog", slug: "blog", settings: {} },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { dailyTokenBudget: null } },
+    });
+    expect(result.error).toBeNull();
   });
 
   it("rejects partial WordPress connection", async () => {
@@ -1659,7 +1795,7 @@ describe("updateBlog — catch branches", () => {
     expect(arg.keywords[49]).toBe("kw49");
   });
 
-  it("updates description / niche / aiPromptTemplate / articlesPerDay columns when provided", async () => {
+  it("updates description / niche / aiPromptTemplate columns when provided", async () => {
     mockAuth({ id: "u1" });
     mockedAssertCan.mockResolvedValue("member");
     mockAdmin({});
@@ -1692,51 +1828,13 @@ describe("updateBlog — catch branches", () => {
       description: "  desc  ",
       niche: "  ai  ",
       aiPromptTemplate: "{{topic}}",
-      articlesPerDay: 2.7,
     });
     expect(result.error).toBeNull();
     expect(update).toHaveBeenCalledWith({
       description: "desc",
       niche: "ai",
       ai_prompt_template: "{{topic}}",
-      articles_per_day: 2,
     });
-  });
-
-  it("updates the schedule_cron column when scheduleCron is provided", async () => {
-    mockAuth({ id: "u1" });
-    mockedAssertCan.mockResolvedValue("member");
-    mockAdmin({});
-
-    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
-    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
-    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
-
-    mockedCreateClient.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
-      },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: { name: "B", slug: "b", settings: {} },
-                  error: null,
-                }),
-            }),
-          }),
-        }),
-        update,
-      }),
-    } as never);
-
-    const result = await updateBlog("t1", "p1", "b1", {
-      scheduleCron: "  0 8 * * *  ",
-    });
-    expect(result.error).toBeNull();
-    expect(update).toHaveBeenCalledWith({ schedule_cron: "0 8 * * *" });
   });
 
   it("rejects preserve-password when no stored password exists", async () => {
@@ -1823,44 +1921,6 @@ describe("updateBlog — catch branches", () => {
     const arg = update.mock.calls[0][0];
     expect(arg).toMatchObject({ wp_url: "https://x.com", wp_username: "u" });
     expect(arg).not.toHaveProperty("wp_app_password");
-  });
-});
-
-// ── setBlogActive ─────────────────────────────────────────────────────────────
-
-describe("setBlogActive", () => {
-  it("delegates to updateBlog with the boolean", async () => {
-    mockAuth({ id: "u1" });
-    mockedAssertCan.mockResolvedValue("member");
-    mockAdmin({});
-
-    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
-    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
-    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
-
-    mockedCreateClient.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
-      },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: { name: "B", slug: "b", settings: {} },
-                  error: null,
-                }),
-            }),
-          }),
-        }),
-        update,
-      }),
-    } as never);
-
-    const result = await setBlogActive("t1", "p1", "b1", true);
-    expect(result.error).toBeNull();
-    expect(update).toHaveBeenCalledWith({ is_active: true });
   });
 });
 

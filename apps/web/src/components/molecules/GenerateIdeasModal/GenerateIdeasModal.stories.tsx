@@ -20,18 +20,12 @@ type Story = StoryObj<typeof meta>;
 function InteractiveModal({
   initialBrief = "",
   ...args
-}: Omit<
-  Parameters<typeof GenerateIdeasModal>[0],
-  "brief" | "onBriefChange"
-> & { initialBrief?: string }) {
+}: Omit<Parameters<typeof GenerateIdeasModal>[0], "brief" | "onBriefChange"> & {
+  initialBrief?: string;
+}) {
   const [brief, setBrief] = useState(initialBrief);
   return (
-    <GenerateIdeasModal
-      {...args}
-      brief={brief}
-      onBriefChange={setBrief}
-      open
-    />
+    <GenerateIdeasModal {...args} brief={brief} onBriefChange={setBrief} open />
   );
 }
 

@@ -7,24 +7,44 @@ export interface BlogHeaderProps extends HTMLAttributes<HTMLDivElement> {
   description?: string;
   /** Renders an "Autopilot" / "Manual" pill before the actions. */
   automationMode?: "manual" | "autopilot";
+  /**
+   * The kill switch on the autopilot config. Only meaningful when
+   * `automationMode === "autopilot"`: `false` renders a "paused" badge
+   * so users see at a glance that the scheduler won't fire even though
+   * autopilot is configured. Defaults to `true` so existing callers
+   * keep the old "Autopilot on" label.
+   */
+  automationEnabled?: boolean;
   /** Slot for primary actions (e.g. Generate, Create post, Settings menu). */
   actions?: ReactNode;
 }
 
-const modeLabels = {
-  manual: "Manual mode",
-  autopilot: "Autopilot on",
-} as const;
+function badgeFor(
+  mode: "manual" | "autopilot",
+  enabled: boolean,
+): { label: string; variant: "default" | "brand" } {
+  if (mode === "manual") {
+    return { label: "Manual mode", variant: "default" };
+  }
+  if (enabled) {
+    return { label: "Autopilot on", variant: "brand" };
+  }
+  return { label: "Autopilot paused", variant: "default" };
+}
 
 export function BlogHeader({
   name,
   description,
   automationMode,
+  automationEnabled = true,
   actions,
   className,
   children,
   ...props
 }: BlogHeaderProps) {
+  const badge = automationMode
+    ? badgeFor(automationMode, automationEnabled)
+    : null;
   return (
     <header
       className={cn(
@@ -38,13 +58,7 @@ export function BlogHeader({
           <h1 className="truncate text-2xl font-bold text-foreground sm:text-3xl">
             {name}
           </h1>
-          {automationMode ? (
-            <Badge
-              variant={automationMode === "autopilot" ? "brand" : "default"}
-            >
-              {modeLabels[automationMode]}
-            </Badge>
-          ) : null}
+          {badge ? <Badge variant={badge.variant}>{badge.label}</Badge> : null}
         </div>
         {description ? (
           <p className="mt-2 max-w-2xl text-sm text-muted">{description}</p>

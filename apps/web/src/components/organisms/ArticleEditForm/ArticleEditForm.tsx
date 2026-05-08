@@ -66,8 +66,7 @@ export function ArticleEditForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="article-edit-slug">
-              Slug{" "}
-              <span className="font-normal text-muted">(optional)</span>
+              Slug <span className="font-normal text-muted">(optional)</span>
             </Label>
             <Input
               id="article-edit-slug"
@@ -95,8 +94,7 @@ export function ArticleEditForm({
 
         <div>
           <Label htmlFor="article-edit-excerpt">
-            Excerpt{" "}
-            <span className="font-normal text-muted">(optional)</span>
+            Excerpt <span className="font-normal text-muted">(optional)</span>
           </Label>
           <Textarea
             id="article-edit-excerpt"

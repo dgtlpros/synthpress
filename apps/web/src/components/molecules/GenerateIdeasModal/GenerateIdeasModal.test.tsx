@@ -8,12 +8,16 @@ beforeAll(() => {
   // jsdom doesn't implement <dialog>'s showModal/close. Stub them so the
   // Modal atom's open/close effect works inside tests.
   if (!HTMLDialogElement.prototype.showModal) {
-    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    HTMLDialogElement.prototype.showModal = function showModal(
+      this: HTMLDialogElement,
+    ) {
       this.setAttribute("open", "");
     };
   }
   if (!HTMLDialogElement.prototype.close) {
-    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    HTMLDialogElement.prototype.close = function close(
+      this: HTMLDialogElement,
+    ) {
       this.removeAttribute("open");
     };
   }
@@ -36,9 +40,7 @@ describe("GenerateIdeasModal", () => {
 
   it("calls onBriefChange as the user types", () => {
     const onBriefChange = vi.fn();
-    render(
-      <GenerateIdeasModal {...baseProps} onBriefChange={onBriefChange} />,
-    );
+    render(<GenerateIdeasModal {...baseProps} onBriefChange={onBriefChange} />);
     const textarea = screen.getByLabelText(/topic or brief/i);
     fireEvent.change(textarea, { target: { value: "ai agents" } });
     expect(onBriefChange).toHaveBeenCalledWith("ai agents");
@@ -53,9 +55,7 @@ describe("GenerateIdeasModal", () => {
 
   it("does not submit while pending", () => {
     const onSubmit = vi.fn();
-    render(
-      <GenerateIdeasModal {...baseProps} onSubmit={onSubmit} pending />,
-    );
+    render(<GenerateIdeasModal {...baseProps} onSubmit={onSubmit} pending />);
     fireEvent.submit(screen.getByLabelText(/topic or brief/i).closest("form")!);
     expect(onSubmit).not.toHaveBeenCalled();
   });

@@ -119,7 +119,7 @@ export async function listProjectsForTeam(
 }
 
 const BLOG_LIST_COLUMNS =
-  "id, name, slug, description, project_id, wp_url, wp_username, is_active, articles_per_day, niche, keywords, ai_prompt_template, schedule_cron, settings, created_at, updated_at" as const;
+  "id, name, slug, description, project_id, wp_url, wp_username, niche, keywords, ai_prompt_template, settings, created_at, updated_at" as const;
 
 export async function listBlogsForProject(
   projectId: string,

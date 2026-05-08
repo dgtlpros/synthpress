@@ -43,10 +43,7 @@ vi.mock("next/cache", () => ({
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  assertCan,
-  TeamPermissionError,
-} from "@/services/team-policy-service";
+import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   generateArticleDraftFromIdea,
   generateArticleIdeas,
@@ -85,9 +82,10 @@ interface BlogChain {
  * `updateIdeaStatus` action does this lookup before calling the
  * service helper so we need to control what it sees.
  */
-function makeAdminWithBlog(
-  blog: { id: string } | null,
-): { client: { from: ReturnType<typeof vi.fn> }; chain: BlogChain } {
+function makeAdminWithBlog(blog: { id: string } | null): {
+  client: { from: ReturnType<typeof vi.fn> };
+  chain: BlogChain;
+} {
   const chain: BlogChain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
@@ -347,7 +345,9 @@ describe("updateIdeaStatus", () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
     mockedUpdateArticleIdeaStatus.mockRejectedValueOnce(
-      new Error("invalid_idea_status_transition:converted_to_article->approved"),
+      new Error(
+        "invalid_idea_status_transition:converted_to_article->approved",
+      ),
     );
 
     const result = await updateIdeaStatus("t1", "p1", "b1", "i1", "approved");
@@ -358,11 +358,7 @@ describe("updateIdeaStatus", () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
     mockedAssertCan.mockRejectedValueOnce(
-      new TeamPermissionError(
-        "forbidden",
-        "manage_blog",
-        "member" as never,
-      ),
+      new TeamPermissionError("forbidden", "manage_blog", "member" as never),
     );
 
     const result = await updateIdeaStatus("t1", "p1", "b1", "i1", "approved");

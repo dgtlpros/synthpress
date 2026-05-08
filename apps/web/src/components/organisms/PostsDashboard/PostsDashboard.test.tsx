@@ -170,7 +170,10 @@ describe("PostsDashboard", () => {
       />,
     );
     const link = screen.getByRole("link", { name: /generate from an idea/i });
-    expect(link).toHaveAttribute("href", "/teams/t1/projects/p1/blogs/b1/ideas");
+    expect(link).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/p1/blogs/b1/ideas",
+    );
   });
 
   it("renders 'Untitled' when title is empty", () => {
@@ -184,9 +187,7 @@ describe("PostsDashboard", () => {
   });
 
   it("renders the bottom 'New post' button and opens the create form when clicked", () => {
-    render(
-      <PostsDashboard posts={[makePost()]} onCreatePost={vi.fn()} />,
-    );
+    render(<PostsDashboard posts={[makePost()]} onCreatePost={vi.fn()} />);
     const newPostBtns = screen.getAllByRole("button", { name: "New post" });
     expect(newPostBtns.length).toBeGreaterThan(0);
     // Click the bottom one (last in the DOM) to open the inline form.
@@ -199,9 +200,7 @@ describe("PostsDashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "New post" }));
     expect(screen.getByLabelText("New post title")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(
-      screen.queryByLabelText("New post title"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("New post title")).not.toBeInTheDocument();
   });
 
   it("hides the AI Generate button when no callback is provided (posts dashboard)", () => {
@@ -231,9 +230,7 @@ describe("PostsDashboard", () => {
 
   it("disables status filter tabs that have a count of 0", () => {
     render(<PostsDashboard posts={[makePost()]} onCreatePost={vi.fn()} />);
-    expect(
-      screen.getByRole("tab", { name: /Published/ }),
-    ).toBeDisabled();
+    expect(screen.getByRole("tab", { name: /Published/ })).toBeDisabled();
   });
 
   it("renders 'just now' / m / h / d relative times", () => {
@@ -315,7 +312,10 @@ describe("PostsDashboard", () => {
       />,
     );
     const link = screen.getByRole("link", { name: /go to ideas/i });
-    expect(link).toHaveAttribute("href", "/teams/t1/projects/p1/blogs/b1/ideas");
+    expect(link).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/p1/blogs/b1/ideas",
+    );
   });
 
   it("omits the 'Go to Ideas' link on the empty state when ideasHref is not provided", () => {
@@ -339,9 +339,7 @@ describe("PostsDashboard", () => {
   });
 
   it("renders the 'scheduled' hint when scheduled posts exist", () => {
-    const posts = [
-      makePost({ id: "s1", status: "scheduled", title: "Sched" }),
-    ];
+    const posts = [makePost({ id: "s1", status: "scheduled", title: "Sched" })];
     render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
     expect(screen.getByText("1 scheduled")).toBeInTheDocument();
   });
@@ -445,15 +443,11 @@ describe("PostsDashboard", () => {
         generatedByModel: "claude-sonnet-4-6",
       }),
     ];
-    render(
-      <PostsDashboard posts={posts} onCreatePost={vi.fn()} />,
-    );
+    render(<PostsDashboard posts={posts} onCreatePost={vi.fn()} />);
     expect(
       screen.getByText("A 30-day plan to ship your first ten posts."),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("via claude-sonnet-4-6"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("via claude-sonnet-4-6")).toBeInTheDocument();
   });
 
   it("combines author persona + model in the subtitle when both are set", () => {

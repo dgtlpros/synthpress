@@ -34,9 +34,7 @@ describe("BlogConnectionsConnector", () => {
         hasStoredPassword={false}
       />,
     );
-    expect(
-      screen.getByRole("button", { name: "Connect" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 
   it("calls updateBlog with the connection bundle on submit", async () => {

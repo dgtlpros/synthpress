@@ -15,7 +15,11 @@ vi.mock("./token-service", () => ({
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveSubscription } from "./billing-service";
 import { getBalance } from "./token-service";
-import { consumeTeamTokens, getTeamPlan } from "./team-billing-service";
+import {
+  consumeTeamTokens,
+  getTeamPlan,
+  refundTeamTokens,
+} from "./team-billing-service";
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedGetActiveSubscription = vi.mocked(getActiveSubscription);
@@ -244,6 +248,134 @@ describe("getTeamPlan", () => {
     mockedGetBalance.mockResolvedValue(0);
 
     await getTeamPlan("t3", client as never);
+    expect(mockedCreateAdmin).not.toHaveBeenCalled();
+  });
+});
+
+describe("refundTeamTokens", () => {
+  it("rejects non-positive amounts before calling supabase", async () => {
+    await expect(
+      refundTeamTokens({ teamId: "t1", amount: 0, actingUserId: "u1" }),
+    ).rejects.toThrow(/positive/);
+    expect(mockedCreateAdmin).not.toHaveBeenCalled();
+  });
+
+  it("calls refund_team_tokens with all parameters and returns the new balance", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({ data: 105, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const balance = await refundTeamTokens({
+      teamId: "t1",
+      amount: 5,
+      actingUserId: "u-acting",
+      description: "Refund for failed article generation",
+      metadata: {
+        refunded_for_job_id: "job-1",
+        reason: "anthropic timeout",
+      },
+      idempotencyKey: "refund::article_job::job-1",
+    });
+
+    expect(balance).toBe(105);
+    expect(client.rpc).toHaveBeenCalledWith("refund_team_tokens", {
+      p_team_id: "t1",
+      p_amount: 5,
+      p_acting_user_id: "u-acting",
+      p_description: "Refund for failed article generation",
+      p_metadata: {
+        refunded_for_job_id: "job-1",
+        reason: "anthropic timeout",
+      },
+      p_idempotency_key: "refund::article_job::job-1",
+    });
+  });
+
+  it("omits optional args when not provided", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({ data: 200, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await refundTeamTokens({
+      teamId: "t1",
+      amount: 5,
+      actingUserId: "u-acting",
+    });
+
+    expect(client.rpc).toHaveBeenCalledWith("refund_team_tokens", {
+      p_team_id: "t1",
+      p_amount: 5,
+      p_acting_user_id: "u-acting",
+      p_description: undefined,
+      p_metadata: {},
+      p_idempotency_key: undefined,
+    });
+  });
+
+  it("returns 0 when the RPC reports null data (idempotent skip with no balance row)", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const balance = await refundTeamTokens({
+      teamId: "t1",
+      amount: 5,
+      actingUserId: "u-acting",
+    });
+
+    expect(balance).toBe(0);
+  });
+
+  it("translates team_has_no_billing_user errors", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "team_has_no_billing_user" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      refundTeamTokens({ teamId: "t1", amount: 5, actingUserId: "u" }),
+    ).rejects.toThrow("team_has_no_billing_user");
+  });
+
+  it("translates amount_must_be_positive errors raised inside the RPC", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "amount_must_be_positive" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      refundTeamTokens({ teamId: "t1", amount: 5, actingUserId: "u" }),
+    ).rejects.toThrow("amount_must_be_positive");
+  });
+
+  it("propagates other RPC errors", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "network down" },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await expect(
+      refundTeamTokens({ teamId: "t1", amount: 5, actingUserId: "u" }),
+    ).rejects.toEqual({ message: "network down" });
+  });
+
+  it("uses an injected client when provided", async () => {
+    const client = makeClient();
+    client.rpc.mockResolvedValue({ data: 50, error: null });
+
+    await refundTeamTokens({
+      teamId: "t1",
+      amount: 5,
+      actingUserId: "u-acting",
+      client: client as never,
+    });
+
     expect(mockedCreateAdmin).not.toHaveBeenCalled();
   });
 });

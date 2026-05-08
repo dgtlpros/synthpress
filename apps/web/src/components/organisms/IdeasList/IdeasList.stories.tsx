@@ -28,7 +28,8 @@ const sample = [
     title: "5 mistakes teams make when adopting AI agents",
     status: "approved" as const,
     targetKeyword: "AI agents adoption",
-    executiveSummary: "Common pitfalls to avoid when rolling out AI agents internally.",
+    executiveSummary:
+      "Common pitfalls to avoid when rolling out AI agents internally.",
     articleType: "listicle",
     estimatedWordCount: 1200,
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),

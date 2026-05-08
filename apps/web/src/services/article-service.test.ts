@@ -46,9 +46,7 @@ interface MockClient {
   __chains: Record<string, ReturnType<typeof makeChain>>;
 }
 
-function makeClient(
-  table: Record<string, ChainResult<unknown>>,
-): MockClient {
+function makeClient(table: Record<string, ChainResult<unknown>>): MockClient {
   const chains: Record<string, ReturnType<typeof makeChain>> = {};
   for (const [name, result] of Object.entries(table)) {
     chains[name] = makeChain(result);
@@ -110,9 +108,9 @@ describe("validateArticleEdit", () => {
   });
 
   it("rejects a malformed slug", () => {
-    expect(
-      validateArticleEdit({ ...baseFields, slug: "Has Spaces" }),
-    ).toBe("slug_invalid");
+    expect(validateArticleEdit({ ...baseFields, slug: "Has Spaces" })).toBe(
+      "slug_invalid",
+    );
   });
 
   it("allows an empty / null slug", () => {
@@ -176,15 +174,11 @@ describe("transitionArticleStatusOnEdit", () => {
     expect(transitionArticleStatusOnEdit("ready_for_review")).toBe(
       "ready_for_review",
     );
-    expect(transitionArticleStatusOnEdit("scheduled")).toBe(
-      "ready_for_review",
-    );
+    expect(transitionArticleStatusOnEdit("scheduled")).toBe("ready_for_review");
     expect(transitionArticleStatusOnEdit("publishing")).toBe(
       "ready_for_review",
     );
-    expect(transitionArticleStatusOnEdit("published")).toBe(
-      "ready_for_review",
-    );
+    expect(transitionArticleStatusOnEdit("published")).toBe("ready_for_review");
   });
 });
 
@@ -199,18 +193,11 @@ describe("getArticleByIdForBlog", () => {
       articles: { data: row, error: null },
     });
 
-    const result = await getArticleByIdForBlog(
-      "a1",
-      "b1",
-      client as never,
-    );
+    const result = await getArticleByIdForBlog("a1", "b1", client as never);
 
     expect(result).toEqual(row);
     expect(client.__chains.articles!.eq).toHaveBeenCalledWith("id", "a1");
-    expect(client.__chains.articles!.eq).toHaveBeenCalledWith(
-      "blog_id",
-      "b1",
-    );
+    expect(client.__chains.articles!.eq).toHaveBeenCalledWith("blog_id", "b1");
   });
 
   it("returns null when no row matches", async () => {
@@ -636,10 +623,9 @@ describe("getArticleIdsByIdeaIds", () => {
       "article_idea_id",
       ["idea-A", "idea-B"],
     );
-    expect(client.__chains.articles!.order).toHaveBeenCalledWith(
-      "created_at",
-      { ascending: false },
-    );
+    expect(client.__chains.articles!.order).toHaveBeenCalledWith("created_at", {
+      ascending: false,
+    });
   });
 
   it("ignores rows whose article_idea_id is null (defensive — shouldn't happen)", async () => {
@@ -651,10 +637,7 @@ describe("getArticleIdsByIdeaIds", () => {
       articles: { data: rows, error: null },
     });
 
-    const result = await getArticleIdsByIdeaIds(
-      ["idea-A"],
-      client as never,
-    );
+    const result = await getArticleIdsByIdeaIds(["idea-A"], client as never);
     expect(result.size).toBe(1);
     expect(result.get("idea-A")).toBe("art-1");
   });
@@ -664,10 +647,7 @@ describe("getArticleIdsByIdeaIds", () => {
       articles: { data: null, error: null },
     });
 
-    const result = await getArticleIdsByIdeaIds(
-      ["idea-A"],
-      client as never,
-    );
+    const result = await getArticleIdsByIdeaIds(["idea-A"], client as never);
     expect(result.size).toBe(0);
   });
 
