@@ -131,4 +131,46 @@ describe("useGenerateArticleFromIdea", () => {
     expect(result.current.errorMessage).toBeNull();
     expect(result.current.errorIdeaId).toBeNull();
   });
+
+  it("dispatches the JOB_QUEUED window event on success so the global tray refreshes immediately", async () => {
+    mockedGenerate.mockResolvedValue({
+      data: {
+        jobId: "job-9",
+        articleId: "article-9",
+        ideaId: "i1",
+        status: "pending",
+        alreadyQueued: false,
+        workflowRunId: "run-9",
+      },
+      error: null,
+    });
+    const listener = vi.fn();
+    window.addEventListener("synthpress:active-jobs:queued", listener);
+
+    const { result } = renderHook(() => useGenerateArticleFromIdea(baseProps));
+    act(() => result.current.generate("i1"));
+
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalledOnce();
+    });
+    const event = listener.mock.calls[0]![0] as CustomEvent;
+    expect(event.detail).toEqual({ jobId: "job-9", articleId: "article-9" });
+
+    window.removeEventListener("synthpress:active-jobs:queued", listener);
+  });
+
+  it("does NOT dispatch the JOB_QUEUED event when the action errors", async () => {
+    mockedGenerate.mockResolvedValue({ data: null, error: "boom" });
+    const listener = vi.fn();
+    window.addEventListener("synthpress:active-jobs:queued", listener);
+
+    const { result } = renderHook(() => useGenerateArticleFromIdea(baseProps));
+    act(() => result.current.generate("i1"));
+    await waitFor(() => {
+      expect(result.current.errorMessage).toBe("boom");
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+    window.removeEventListener("synthpress:active-jobs:queued", listener);
+  });
 });

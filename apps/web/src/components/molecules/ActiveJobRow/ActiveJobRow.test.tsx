@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import type { ActiveArticleJobRow } from "@/lib/active-jobs";
 import { ActiveJobRow } from "./ActiveJobRow";
 
 afterEach(cleanup);
@@ -216,5 +216,119 @@ describe("ActiveJobRow", () => {
     );
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+  });
+
+  describe("progress bar", () => {
+    it("renders the progress bar + percentage for active jobs", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({
+            status: "processing",
+            currentStep: "writing_article",
+          })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      const bar = screen.getByRole("progressbar");
+      expect(bar).toHaveAttribute("aria-valuenow", "45");
+      expect(screen.getByText("45%")).toBeInTheDocument();
+    });
+
+    it("starts the bar at 5% for queued (pending) jobs", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({ status: "pending", currentStep: null })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.getByRole("progressbar")).toHaveAttribute(
+        "aria-valuenow",
+        "5",
+      );
+      expect(screen.getByText("5%")).toBeInTheDocument();
+    });
+
+    it("uses idea-flow progress mapping for generate_ideas jobs", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({
+            type: "generate_ideas",
+            status: "processing",
+            currentStep: "generating_ideas",
+          })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("Generating ideas…")).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toHaveAttribute(
+        "aria-valuenow",
+        "50",
+      );
+    });
+
+    it("hides the progress bar for completed jobs (badge conveys the state)", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({
+            status: "completed",
+            currentStep: "completed",
+            completedAt: "2026-05-11T00:01:00Z",
+            article: {
+              id: "article-1",
+              title: "Done",
+              status: "ready_for_review",
+            },
+          })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByText("100%")).not.toBeInTheDocument();
+    });
+
+    it("hides the progress bar for failed jobs", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({
+            status: "failed",
+            currentStep: "writing_article",
+            errorMessage: "model timed out",
+            completedAt: "2026-05-11T00:01:00Z",
+          })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+
+    it("hides the progress bar for unknown statuses (null progressPercent)", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({
+            status: "needs_human",
+            currentStep: null,
+            completedAt: "2026-05-11T00:01:00Z",
+          })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+
+    it("uses a 'default' progress variant when the label variant is default", () => {
+      render(
+        <ActiveJobRow
+          job={makeJob({ status: "pending", currentStep: null })}
+          onDismiss={vi.fn()}
+        />,
+      );
+      // Pending uses variant=default, so the bar should NOT use the
+      // brand gradient. The fill div is the first child of the
+      // progressbar.
+      const fill = screen.getByRole("progressbar")
+        .firstElementChild as HTMLElement;
+      expect(fill.className).toContain("bg-muted");
+      expect(fill.className).not.toContain("bg-gradient-accent");
+    });
   });
 });

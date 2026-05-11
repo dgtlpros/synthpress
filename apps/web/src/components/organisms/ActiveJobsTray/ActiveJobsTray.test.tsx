@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import type { ActiveArticleJobRow } from "@/lib/active-jobs";
 import { ActiveJobsTray } from "./ActiveJobsTray";
 
 afterEach(cleanup);
@@ -219,5 +219,128 @@ describe("ActiveJobsTray", () => {
     fireEvent.click(screen.getByRole("button", { name: /1 update/i }));
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
     expect(onDismiss).toHaveBeenCalledWith("finished-1");
+  });
+
+  describe("multiple concurrent jobs", () => {
+    it("renders one row per active job with INDEPENDENT progress bars + percentages", () => {
+      render(
+        <ActiveJobsTray
+          jobs={[
+            // Three concurrent generate_article jobs, each at a different step.
+            makeJob({
+              id: "a",
+              currentStep: "loading_context",
+              article: { id: "art-a", title: "Alpha post", status: "generating" },
+            }),
+            makeJob({
+              id: "b",
+              currentStep: "writing_article",
+              article: { id: "art-b", title: "Beta post", status: "generating" },
+            }),
+            makeJob({
+              id: "c",
+              currentStep: "saving_article",
+              article: { id: "art-c", title: "Gamma post", status: "generating" },
+            }),
+          ]}
+          activeCount={3}
+          onDismiss={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /3 tasks running/i }),
+      );
+
+      // Three rows, three progress bars, each with its OWN aria-valuenow.
+      const bars = screen.getAllByRole("progressbar");
+      expect(bars).toHaveLength(3);
+      expect(bars.map((b) => b.getAttribute("aria-valuenow"))).toEqual([
+        "15",
+        "45",
+        "75",
+      ]);
+
+      // Three labels, each unique to that step.
+      expect(screen.getByText("Preparing article…")).toBeInTheDocument();
+      expect(screen.getByText("Writing article…")).toBeInTheDocument();
+      expect(screen.getByText("Saving draft…")).toBeInTheDocument();
+      expect(screen.getByText("15%")).toBeInTheDocument();
+      expect(screen.getByText("45%")).toBeInTheDocument();
+      expect(screen.getByText("75%")).toBeInTheDocument();
+    });
+
+    it("renders active + recent finished jobs side by side, with progress bars only on the active rows", () => {
+      render(
+        <ActiveJobsTray
+          jobs={[
+            makeJob({
+              id: "a",
+              currentStep: "writing_article",
+              article: { id: "art-a", title: "Alpha post", status: "generating" },
+            }),
+            makeJob({
+              id: "b",
+              status: "completed",
+              currentStep: "completed",
+              completedAt: "2026-05-11T00:01:00Z",
+              article: {
+                id: "art-b",
+                title: "Beta post",
+                status: "ready_for_review",
+              },
+            }),
+            makeJob({
+              id: "c",
+              status: "failed",
+              currentStep: "writing_article",
+              errorMessage: "schema mismatch",
+              completedAt: "2026-05-11T00:01:00Z",
+              output: { refunded: true, refundedCredits: 5 },
+            }),
+          ]}
+          activeCount={1}
+          onDismiss={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /1 task running/i }));
+
+      // Only the active row gets a progress bar.
+      expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+      expect(screen.getByText("Article ready for review")).toBeInTheDocument();
+      expect(
+        screen.getByText("Generation failed · Refunded"),
+      ).toBeInTheDocument();
+    });
+
+    it("caps the panel height and lets the row list scroll when there are many jobs", () => {
+      const jobs = Array.from({ length: 20 }, (_, i) =>
+        makeJob({
+          id: `j-${i}`,
+          currentStep: "writing_article",
+          article: {
+            id: `art-${i}`,
+            title: `Post ${i}`,
+            status: "generating",
+          },
+        }),
+      );
+      render(
+        <ActiveJobsTray jobs={jobs} activeCount={20} onDismiss={vi.fn()} />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: /20 tasks running/i }),
+      );
+
+      const list = screen.getByRole("list", { name: /background task list/i });
+      // The list itself is the scroll container.
+      expect(list.className).toContain("overflow-y-auto");
+      // Panel container has a max-height so it can't blow past the
+      // viewport.
+      const dialog = screen.getByRole("dialog", { name: /background tasks/i });
+      expect(dialog.className).toMatch(/max-h-\[\d+vh\]/);
+      // All 20 rows render — confirms we don't silently drop any.
+      expect(screen.getAllByRole("progressbar")).toHaveLength(20);
+    });
   });
 });

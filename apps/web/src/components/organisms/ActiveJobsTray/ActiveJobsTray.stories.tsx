@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { ActiveJobsTray } from "./ActiveJobsTray";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import type { ActiveArticleJobRow } from "@/lib/active-jobs";
 
 const baseJob: ActiveArticleJobRow = {
   id: "job-1",

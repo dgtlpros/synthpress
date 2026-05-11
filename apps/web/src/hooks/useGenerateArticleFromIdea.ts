@@ -6,6 +6,7 @@ import {
   generateArticleFromIdea,
   type GenerateArticleFromIdeaResult,
 } from "@/actions/article-generation";
+import { dispatchJobQueuedEvent } from "@/lib/active-jobs";
 
 export interface UseGenerateArticleFromIdeaOptions {
   teamId: string;
@@ -72,6 +73,14 @@ export function useGenerateArticleFromIdea({
           return;
         }
         setLastResult(result.data);
+        // Nudge the global active-jobs tray to refetch right now so
+        // the new "Generating…" row appears immediately instead of
+        // waiting up to one polling interval. Idempotent — dispatching
+        // is cheap and only fires the tray's listener.
+        dispatchJobQueuedEvent({
+          jobId: result.data.jobId,
+          articleId: result.data.articleId,
+        });
         router.refresh();
         setPendingIdeaId(null);
         onSuccess?.(result.data);

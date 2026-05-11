@@ -10,6 +10,10 @@ import type {
 } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { type BlogSettings, loadBlogSettings } from "@/lib/blog-settings";
+import {
+  ACTIVE_JOB_RECENT_WINDOW_MS,
+  type ActiveArticleJobRow,
+} from "@/lib/active-jobs";
 import { getCreditCost } from "@/lib/ai/config";
 import {
   type AnthropicLike,
@@ -491,35 +495,14 @@ export async function getActiveGenerateArticleIdeaIds(
 }
 
 /**
- * Recently-finished window for the global jobs widget. Completed /
- * failed jobs appear in the tray for ~5 minutes after they finish so
- * users notice them when they return to the app, then drop off.
- *
- * Exported so the hook layer can compute the same cutoff client-side
- * if it ever wants to evict rows in memory before the next poll.
+ * Re-exported from `lib/active-jobs` so server callers (this service
+ * layer + the action) can keep using the same import paths as before.
+ * The actual definitions live in `lib/` so client modules (the global
+ * tray hook + components) can import them WITHOUT pulling this
+ * `server-only` module into the client bundle.
  */
-export const ACTIVE_JOB_RECENT_WINDOW_MS = 5 * 60_000;
-
-/**
- * Display row for the global active-jobs widget. Wraps the raw
- * `article_jobs` row with the small slice of related blog + article
- * data the tray needs to render a "View article" link with a friendly
- * label.
- */
-export interface ActiveArticleJobRow {
-  id: string;
-  type: string;
-  status: string;
-  currentStep: string | null;
-  errorMessage: string | null;
-  output: Json | null;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  blog: { id: string; name: string; projectId: string; teamId: string };
-  article: { id: string; title: string; status: string } | null;
-  ideaId: string | null;
-}
+export { ACTIVE_JOB_RECENT_WINDOW_MS };
+export type { ActiveArticleJobRow };
 
 /**
  * Returns the `article_jobs` rows the global widget should display:
@@ -1698,4 +1681,285 @@ async function markJobRefunded(
     .eq("id", jobId);
   /* v8 ignore next -- defensive throw; swallowed by caller's refund try/catch */
   if (updateErr) throw updateErr;
+}
+
+// ============================================================================
+// Stuck-job reconciler — protected cron entry point
+//
+// Why we need this:
+//
+//   The Vercel Workflow runner can die between steps for reasons we
+//   don't control (deployment swap, runtime crash, infra incident).
+//   When that happens, the `article_jobs` row stays in `pending` /
+//   `processing` forever and the global tray spins on it indefinitely.
+//
+//   This reconciler is the safety net. Cron pings it every few
+//   minutes; it finds rows that haven't moved in N minutes, marks
+//   them failed, marks the in-flight article failed too, and refunds
+//   any credits that were consumed but never refunded.
+//
+//   Refund detection goes through the token ledger (NOT the job's
+//   own state) so a previous failure that already refunded doesn't
+//   get double-refunded. Since `refundTeamTokens` is itself
+//   idempotent on the refund key, even a slip wouldn't actually
+//   double-credit — but skipping the call when we know we already
+//   paid up keeps the audit log clean.
+// ============================================================================
+
+/**
+ * Default "how stale must a job be before we treat it as stuck" by
+ * job type. Generate-article workflows can legitimately take ~60 s of
+ * Claude time; we wait 10 min before assuming the runner died.
+ * Generate-ideas is faster (~10 s typical), so 5 min is plenty.
+ */
+export const DEFAULT_RECONCILE_THRESHOLDS_MINUTES: Record<string, number> = {
+  generate_article: 10,
+  generate_ideas: 5,
+};
+
+const RECONCILE_DEFAULT_LIMIT = 50;
+
+const STUCK_ERROR_MESSAGE =
+  "Generation timed out or the workflow stopped before completion.";
+
+export interface ReconcileStuckArticleJobsInput {
+  /**
+   * Override the threshold for ALL job types in this run. When omitted,
+   * each type uses its own value from {@link DEFAULT_RECONCILE_THRESHOLDS_MINUTES}.
+   */
+  olderThanMinutes?: number;
+  /**
+   * Restrict to one job type. When omitted, both `generate_article`
+   * and `generate_ideas` are reconciled in the same run.
+   */
+  jobType?: ArticleJobType;
+  /** Cap rows scanned per run. Defaults to 50 — generous for v1. */
+  limit?: number;
+  client?: Client;
+}
+
+export interface ReconcileStuckArticleJobsResult {
+  jobsChecked: number;
+  jobsFailed: number;
+  articlesFailed: number;
+  tokensRefunded: number;
+  errors: string[];
+}
+
+/**
+ * Finds article_jobs that have been stuck in pending/processing past
+ * their type's stale threshold, marks them failed, marks the
+ * in-flight article failed (when one was already created), and
+ * refunds any consumed-but-not-yet-refunded credits.
+ *
+ * Idempotent across runs:
+ *   * The job-fail update is a no-op for rows already marked failed
+ *     (the WHERE clause filters them out).
+ *   * The refund goes through `refundTeamTokens`, which uses
+ *     `refund::article_job::{jobId}` as its idempotency key.
+ *   * We also check the token ledger before calling refundTeamTokens,
+ *     so an already-refunded job doesn't even cause a write attempt.
+ */
+export async function reconcileStuckArticleJobs(
+  input: ReconcileStuckArticleJobsInput = {},
+): Promise<ReconcileStuckArticleJobsResult> {
+  const supabase = input.client ?? createAdminClient();
+  const limit = input.limit ?? RECONCILE_DEFAULT_LIMIT;
+  const result: ReconcileStuckArticleJobsResult = {
+    jobsChecked: 0,
+    jobsFailed: 0,
+    articlesFailed: 0,
+    tokensRefunded: 0,
+    errors: [],
+  };
+
+  // Build the cutoff per job type. When `olderThanMinutes` is passed,
+  // use it for everything in this run.
+  const typesToScan: ArticleJobType[] = input.jobType
+    ? [input.jobType]
+    : ["generate_article", "generate_ideas"];
+
+  for (const type of typesToScan) {
+    // Every supported job type has a default in
+    // DEFAULT_RECONCILE_THRESHOLDS_MINUTES — adding a new type to
+    // `typesToScan` MUST also add a default to that map. Falling
+    // back to a hardcoded N here would silently mask a missing
+    // entry, so we don't.
+    const minutes =
+      input.olderThanMinutes ?? DEFAULT_RECONCILE_THRESHOLDS_MINUTES[type];
+    const cutoffIso = new Date(Date.now() - minutes * 60_000).toISOString();
+
+    const { data: stuckJobs, error: fetchErr } = await supabase
+      .from("article_jobs")
+      .select("id, type, blog_id, article_id, article_idea_id, input, output, started_at, created_at")
+      .eq("type", type)
+      .in("status", ["pending", "processing"])
+      .lt("created_at", cutoffIso)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+
+    if (fetchErr) {
+      result.errors.push(`fetch_${type}: ${fetchErr.message}`);
+      continue;
+    }
+    /* v8 ignore next 1 -- defensive: supabase returns data when error is null */
+    const rows = stuckJobs ?? [];
+
+    for (const job of rows) {
+      result.jobsChecked += 1;
+      try {
+        await reconcileSingleStuckJob(supabase, job, result);
+      } catch (err) {
+        result.errors.push(`job_${job.id}: ${describeErr(err)}`);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Supabase / PostgREST errors are plain `{ message, ... }` objects,
+ * NOT `Error` instances. `String({})` returns `"[object Object]"`,
+ * which is useless in the result's `errors[]`. Pull the `.message`
+ * field when it's present on a non-Error throw.
+ */
+function describeErr(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (
+    err &&
+    typeof err === "object" &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
+interface StuckJobRow {
+  id: string;
+  type: string;
+  blog_id: string;
+  article_id: string | null;
+  article_idea_id: string | null;
+  input: Json;
+  output: Json;
+  started_at: string | null;
+  created_at: string;
+}
+
+async function reconcileSingleStuckJob(
+  client: Client,
+  job: StuckJobRow,
+  result: ReconcileStuckArticleJobsResult,
+): Promise<void> {
+  // 1. Mark the job failed. failArticleJob bumps `error_message` and
+  //    `completed_at`; we use it directly so the same audit copy
+  //    appears as on a normal-path failure.
+  await failArticleJob({
+    jobId: job.id,
+    errorMessage: STUCK_ERROR_MESSAGE,
+    client,
+  });
+  result.jobsFailed += 1;
+
+  // 2. If the job had a placeholder article in `generating`, flip it
+  //    to `failed`. Read first so we don't trample a successful write
+  //    that landed a millisecond before the cron tick.
+  if (job.article_id) {
+    const { data: article, error: articleReadErr } = await client
+      .from("articles")
+      .select("status")
+      .eq("id", job.article_id)
+      .maybeSingle();
+    if (articleReadErr) throw articleReadErr;
+
+    if (article && article.status === "generating") {
+      const { error: updateErr } = await client
+        .from("articles")
+        .update({ status: "failed", error_message: STUCK_ERROR_MESSAGE })
+        .eq("id", job.article_id);
+      /* v8 ignore next 3 -- defensive: caller-side error path */
+      if (updateErr) {
+        throw updateErr;
+      }
+      result.articlesFailed += 1;
+    }
+  }
+
+  // 3. Refund any consumed-but-not-yet-refunded credits. The token
+  //    ledger is the source of truth — checking the job's own state
+  //    would risk double-refunding rows whose `output.refunded` flag
+  //    failed to write earlier.
+  const usageKey = `article_job::${job.id}`;
+  const refundKey = `refund::article_job::${job.id}`;
+  const { data: ledger, error: ledgerErr } = await client
+    .from("token_transactions")
+    .select("idempotency_key, amount, user_id")
+    .in("idempotency_key", [usageKey, refundKey]);
+  if (ledgerErr) throw ledgerErr;
+  const ledgerRows = ledger ?? [];
+
+  const usageRow = ledgerRows.find((r) => r.idempotency_key === usageKey);
+  const alreadyRefunded = ledgerRows.some(
+    (r) => r.idempotency_key === refundKey,
+  );
+  /* v8 ignore next 3 -- defensive: nothing to refund / already refunded */
+  if (!usageRow || alreadyRefunded) {
+    return;
+  }
+
+  // The usage row was a debit, so its amount is negative. The refund
+  // amount is the absolute value.
+  const refundAmount = Math.abs(usageRow.amount);
+  /* v8 ignore next 3 -- defensive: a 0-amount usage row is unreachable today */
+  if (refundAmount <= 0) {
+    return;
+  }
+
+  // We need the team_id to call refundTeamTokens. The orchestration
+  // snapshots it onto `article_jobs.input.teamId` at queue time.
+  const teamId = readTeamIdFromJobInput(job.input);
+  if (!teamId) {
+    result.errors.push(
+      `job_${job.id}: cannot refund — missing teamId on job.input snapshot`,
+    );
+    return;
+  }
+
+  await refundTeamTokens({
+    teamId,
+    amount: refundAmount,
+    actingUserId: usageRow.user_id,
+    description: `Refund for stuck article job ${job.id}: ${STUCK_ERROR_MESSAGE}`,
+    metadata: {
+      refunded_for_job_id: job.id,
+      refunded_for_blog_id: job.blog_id,
+      refunded_for_idea_id: job.article_idea_id,
+      reason: STUCK_ERROR_MESSAGE,
+      reconciler: true,
+    },
+    idempotencyKey: refundKey,
+    client,
+  });
+
+  // Stamp output.refunded so the global tray badge flips to
+  // "Failed · Refunded" without joining the token ledger.
+  try {
+    await markJobRefunded(client, job.id, refundAmount);
+    /* v8 ignore start -- defensive: output stamping is best-effort */
+  } catch {
+    // Refund itself succeeded; operators reconcile via
+    // token_transactions if the secondary stamp didn't land.
+  }
+  /* v8 ignore stop */
+
+  result.tokensRefunded += refundAmount;
+}
+
+function readTeamIdFromJobInput(input: Json): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const obj = input as Record<string, unknown>;
+  return typeof obj.teamId === "string" ? obj.teamId : null;
 }

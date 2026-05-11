@@ -3,7 +3,10 @@ import { updateSession } from "@/lib/supabase/middleware";
 
 const protectedRoutes = ["/dashboard", "/teams", "/account", "/checkout"];
 const authRoutes = ["/login", "/signup"];
-const middlewareSkipPrefixes = ["/api/webhooks"];
+// Routes that authenticate via their own header check (Stripe webhook
+// signature, CRON_SECRET, etc.) instead of the user-session cookie
+// flow this middleware enforces.
+const middlewareSkipPrefixes = ["/api/webhooks", "/api/cron"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

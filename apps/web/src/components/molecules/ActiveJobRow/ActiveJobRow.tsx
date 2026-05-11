@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/atoms/Badge";
+import { ProgressBar } from "@/components/atoms/ProgressBar";
 import { Spinner } from "@/components/atoms/Spinner";
 import {
   type ActiveJobLabel,
   getActiveJobLabel,
 } from "@/lib/active-job-labels";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import type { ActiveArticleJobRow } from "@/lib/active-jobs";
 
 /**
  * One row in the global active-jobs tray. Dumb — receives a job row,
@@ -32,6 +33,7 @@ export function ActiveJobRow({
   className,
 }: ActiveJobRowProps) {
   const label = getActiveJobLabel({
+    type: job.type,
     status: job.status,
     currentStep: job.currentStep,
     errorMessage: job.errorMessage,
@@ -49,6 +51,11 @@ export function ActiveJobRow({
     (job.article?.status === "ready_for_review" ||
       job.article?.status === "failed" ||
       job.article?.status === "ready");
+
+  // Show the progress bar for any job we have a percentage for that's
+  // still in flight. Finished rows convey their state via the badge +
+  // colored dot — drawing a "100%" bar there would be visual noise.
+  const showProgress = label.isActive && label.progressPercent !== null;
 
   return (
     <li
@@ -75,6 +82,26 @@ export function ActiveJobRow({
           {label.isActive ? "Active" : statusBadgeLabel(label)}
         </Badge>
       </div>
+
+      {showProgress ? (
+        <div className="flex items-center gap-2 pl-6">
+          <ProgressBar
+            value={label.progressPercent!}
+            variant={label.variant === "default" ? "default" : "brand"}
+            size="sm"
+            label={`${label.label} for ${
+              job.article?.title ?? job.blog.name
+            }`}
+            className="flex-1"
+          />
+          <span
+            className="shrink-0 text-xs tabular-nums text-muted"
+            aria-hidden="true"
+          >
+            {label.progressPercent}%
+          </span>
+        </div>
+      ) : null}
 
       {label.detail ? (
         <p className="line-clamp-2 pl-6 text-xs text-muted">{label.detail}</p>

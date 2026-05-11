@@ -4,7 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { Spinner } from "@/components/atoms/Spinner";
 import { ActiveJobRow } from "@/components/molecules/ActiveJobRow";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import type { ActiveArticleJobRow } from "@/lib/active-jobs";
 
 /**
  * Floating "active jobs" tray — the dumb half. State for whether

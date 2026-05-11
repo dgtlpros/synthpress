@@ -13,6 +13,13 @@ export type { BadgeProps, BadgeVariant, BadgeSize } from "./Badge";
 export { Spinner } from "./Spinner";
 export type { SpinnerProps, SpinnerSize } from "./Spinner";
 
+export { ProgressBar } from "./ProgressBar";
+export type {
+  ProgressBarProps,
+  ProgressBarVariant,
+  ProgressBarSize,
+} from "./ProgressBar";
+
 export {
   Card,
   CardHeader,

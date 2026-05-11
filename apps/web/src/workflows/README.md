@@ -88,8 +88,105 @@ the project.
 
 Workflows inherit the same env vars as the rest of the app
 (`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`ANTHROPIC_API_KEY`, etc.). No workflow-specific env vars are
-required for v1.
+`ANTHROPIC_API_KEY`, etc.).
+
+The **workflow safety-net reconciler** (see below) requires one
+additional secret:
+
+- `CRON_SECRET` — long random string. Vercel Cron sends this as
+  `Authorization: Bearer ${CRON_SECRET}` against
+  `/api/cron/reconcile-article-jobs`; the route rejects anything
+  else with 401. Set it in `.env.local` for local testing and as a
+  Vercel project env var for prod / preview.
+
+## Workflow safety-net reconciler
+
+The Vercel Workflow runner can die between steps for reasons we
+don't control (deployment swap, runtime crash, infra incident).
+When that happens, the `article_jobs` row stays in `pending` /
+`processing` forever and the global tray spins on it indefinitely.
+
+The reconciler at
+`apps/web/src/app/api/cron/reconcile-article-jobs/route.ts` is the
+safety net. Vercel Cron pings it every few minutes (configure in
+`vercel.json` once we land that PR); it finds rows that haven't
+moved in N minutes, marks them failed, marks the in-flight article
+failed, and refunds any consumed-but-not-yet-refunded credits.
+
+### Stale thresholds
+
+Defaults live in
+`DEFAULT_RECONCILE_THRESHOLDS_MINUTES` in
+`services/article-generation-service.ts`:
+
+| Job type           | Default stale threshold |
+| ------------------ | ----------------------- |
+| `generate_article` | 10 min                  |
+| `generate_ideas`   | 5 min                   |
+
+Override with `?older_than_minutes=` query param (TODO when needed)
+or by calling `reconcileStuckArticleJobs({ olderThanMinutes })`
+directly from a script.
+
+### Refund detection
+
+The reconciler trusts the **token ledger**, not the job's own
+`output.refunded` flag. For each stuck job it queries
+`token_transactions` for both:
+
+- `idempotency_key = article_job::{jobId}` — the original consume
+- `idempotency_key = refund::article_job::{jobId}` — any prior
+  refund
+
+It refunds only when the consume row exists AND the refund row
+doesn't. Because `refundTeamTokens` is itself idempotent on the
+refund key, even a slip in the detection wouldn't actually
+double-credit — but skipping the call when we know we already paid
+up keeps the audit log clean.
+
+### Local testing
+
+```bash
+# .env.local
+CRON_SECRET=dev-secret-not-for-prod
+
+# In one terminal
+pnpm dev
+
+# In another terminal — fabricate a "stuck" job in Supabase Studio:
+#   1. Find a recent article_jobs row.
+#   2. UPDATE article_jobs SET created_at = now() - interval '20 minutes',
+#      status = 'processing' WHERE id = '<id>';
+#   3. Optionally fabricate a usage transaction so the refund path fires:
+#      INSERT INTO token_transactions (user_id, amount, type, idempotency_key,
+#      metadata) VALUES ('<owner-uuid>', -5, 'usage',
+#      'article_job::<jobId>', '{}'::jsonb);
+
+# Trigger the reconciler:
+curl -i \
+  -H "Authorization: Bearer dev-secret-not-for-prod" \
+  http://localhost:3000/api/cron/reconcile-article-jobs
+
+# Verify in Supabase Studio:
+#   - article_jobs.status = 'failed', error_message contains "timed out"
+#   - articles.status = 'failed' (when the job had a generating placeholder)
+#   - token_transactions has a new row with idempotency_key
+#     'refund::article_job::<jobId>' (when there was a usage row)
+#   - Re-running the curl is a no-op: jobsChecked = 0 (the rows are
+#     no longer in pending/processing) and tokensRefunded = 0.
+```
+
+To manually verify progress states in the global tray, edit
+`article_jobs.current_step` in Supabase Studio while a job is in
+`processing` — the next poll (every 8 s) will pick up the new step
+and the bar will jump.
+
+### Deployed cron
+
+When we add `vercel.json` with the schedule, Vercel sends a `GET`
+to the route on the configured cadence with the `Authorization`
+header set to `Bearer ${CRON_SECRET}` automatically. No further
+client setup needed.
 
 ## Why the workflow is one big step (not many small ones)
 

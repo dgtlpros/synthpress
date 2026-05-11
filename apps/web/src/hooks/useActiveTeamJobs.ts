@@ -5,7 +5,8 @@ import { getActiveTeamJobs } from "@/actions/article-generation";
 import {
   type ActiveArticleJobRow,
   ACTIVE_JOB_RECENT_WINDOW_MS,
-} from "@/services/article-generation-service";
+  JOB_QUEUED_EVENT_NAME,
+} from "@/lib/active-jobs";
 import { getActiveJobLabel } from "@/lib/active-job-labels";
 
 /**
@@ -171,10 +172,23 @@ export function useActiveTeamJobs(
      without an effect that eventually triggers setState. The React
      docs endorse this pattern for data sources that don't have a
      separate library wrapper. */
-  // Initial fetch + polling.
+  // Initial fetch + polling + cross-component "job queued" listener.
   useEffect(() => {
     void fetchJobs();
-    if (options.disablePolling) return;
+
+    // Always listen for the JOB_QUEUED event — even when polling is
+    // disabled (tests use `disablePolling`, but a Generate Article
+    // click should still nudge the tray).
+    function handleQueued() {
+      void fetchJobs();
+    }
+    window.addEventListener(JOB_QUEUED_EVENT_NAME, handleQueued);
+
+    if (options.disablePolling) {
+      return () => {
+        window.removeEventListener(JOB_QUEUED_EVENT_NAME, handleQueued);
+      };
+    }
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -214,6 +228,7 @@ export function useActiveTeamJobs(
     return () => {
       stop();
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener(JOB_QUEUED_EVENT_NAME, handleQueued);
     };
   }, [fetchJobs, pollIntervalMs, options.disablePolling]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -227,6 +242,7 @@ export function useActiveTeamJobs(
         const matching = jobs.find((j) => j.id === jobId);
         if (matching) {
           const label = getActiveJobLabel({
+            type: matching.type,
             status: matching.status,
             currentStep: matching.currentStep,
             errorMessage: matching.errorMessage,
@@ -254,6 +270,7 @@ export function useActiveTeamJobs(
     return jobs.filter((job) => {
       if (!dismissedIds.has(job.id)) return true;
       const label = getActiveJobLabel({
+        type: job.type,
         status: job.status,
         currentStep: job.currentStep,
         errorMessage: job.errorMessage,
@@ -268,6 +285,7 @@ export function useActiveTeamJobs(
     () =>
       visibleJobs.filter((job) => {
         const label = getActiveJobLabel({
+          type: job.type,
           status: job.status,
           currentStep: job.currentStep,
           errorMessage: job.errorMessage,

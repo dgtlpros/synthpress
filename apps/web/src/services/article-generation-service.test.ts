@@ -34,6 +34,7 @@ import {
   generateArticleDraftFromIdea,
   generateArticleIdeas,
   ACTIVE_JOB_RECENT_WINDOW_MS,
+  DEFAULT_RECONCILE_THRESHOLDS_MINUTES,
   getActiveGenerateArticleIdeaIds,
   getBlogGenerationContext,
   isAllowedIdeaStatusTransition,
@@ -41,6 +42,7 @@ import {
   listArticleIdeasForBlog,
   logUsageEvent,
   queueGenerateArticleFromIdea,
+  reconcileStuckArticleJobs,
   runGenerateArticleFromIdeaJob,
   updateArticleIdeaStatus,
   updateArticleJobStatus,
@@ -73,6 +75,7 @@ function makeChain<T>(result: ChainResult<T>) {
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
+    lt: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
@@ -3113,5 +3116,608 @@ describe("listActiveArticleJobsForUser", () => {
 
   it("exposes a sane default recent-window constant (5 min)", () => {
     expect(ACTIVE_JOB_RECENT_WINDOW_MS).toBe(5 * 60_000);
+  });
+});
+
+// ============================================================================
+// reconcileStuckArticleJobs
+// ============================================================================
+
+describe("reconcileStuckArticleJobs", () => {
+  beforeEach(() => {
+    mockedRefundTeamTokens.mockResolvedValue(100);
+  });
+
+  function makeStuckJob(
+    overrides: Partial<{
+      id: string;
+      type: string;
+      blog_id: string;
+      article_id: string | null;
+      article_idea_id: string | null;
+      input: Record<string, unknown>;
+      output: Record<string, unknown>;
+      created_at: string;
+    }> = {},
+  ) {
+    return {
+      id: "stuck-1",
+      type: "generate_article" as const,
+      blog_id: "b1",
+      article_id: "article-1",
+      article_idea_id: "idea-1",
+      input: { teamId: "t1", ideaId: "idea-1" },
+      output: {},
+      started_at: "2026-05-11T00:00:00Z",
+      created_at: "2026-05-11T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  function makeReconcileClient(opts: {
+    stuckJobsByType: Record<string, unknown[]>;
+    articleStatusById?: Record<string, string>;
+    ledgerByJobId?: Record<
+      string,
+      Array<{ idempotency_key: string; amount: number; user_id: string }>
+    >;
+  }): MockClient {
+    const client = makeClient({});
+
+    // article_jobs chain handles BOTH the find query (.lt(...).order().limit())
+    // AND the failArticleJob update later. We script the find via the
+    // chain's `then` so the same chain object can satisfy both.
+    let scriptedTypeIndex = 0;
+    const typeOrder = Object.keys(opts.stuckJobsByType);
+    client.__chains.article_jobs = makeChain({ data: null, error: null });
+    client.__chains.article_jobs.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) => {
+      const type = typeOrder[scriptedTypeIndex] ?? null;
+      scriptedTypeIndex += 1;
+      const data = type ? (opts.stuckJobsByType[type] ?? []) : [];
+      return Promise.resolve({ data, error: null }).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.article_jobs.then;
+
+    // articles chain: maybeSingle returns the placeholder's status by id.
+    let articlesMaybeSingleCallCount = 0;
+    const articlesMockOrder: string[] = []; // we'll capture .eq("id", X) calls
+    client.__chains.articles = makeChain({ data: null, error: null });
+    const originalArticlesEq = client.__chains.articles.eq;
+    client.__chains.articles.eq = vi.fn((column: string, value: string) => {
+      if (column === "id") articlesMockOrder.push(value);
+      return originalArticlesEq.call(client.__chains.articles, column, value);
+    }) as never;
+    client.__chains.articles.maybeSingle = vi.fn(() => {
+      const id = articlesMockOrder[articlesMaybeSingleCallCount];
+      articlesMaybeSingleCallCount += 1;
+      const status = opts.articleStatusById?.[id ?? ""] ?? null;
+      return Promise.resolve({
+        data: status ? { status } : null,
+        error: null,
+      });
+    }) as never;
+
+    // token_transactions chain: ledger lookups by idempotency_key.in([...]).
+    let ledgerCallIndex = 0;
+    const ledgerJobIds: string[] = [];
+    client.__chains.token_transactions = makeChain({
+      data: null,
+      error: null,
+    });
+    const originalTxIn = client.__chains.token_transactions.in;
+    client.__chains.token_transactions.in = vi.fn(
+      (column: string, values: unknown[]) => {
+        if (column === "idempotency_key" && Array.isArray(values)) {
+          // The first key in the .in([...]) is the usage key:
+          // article_job::{jobId}. Extract the jobId.
+          const first = values[0] as string;
+          const match = first?.match?.(/article_job::(.+)/);
+          if (match) ledgerJobIds.push(match[1]);
+        }
+        return originalTxIn.call(
+          client.__chains.token_transactions,
+          column,
+          values,
+        );
+      },
+    ) as never;
+    client.__chains.token_transactions.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) => {
+      const jobId = ledgerJobIds[ledgerCallIndex];
+      ledgerCallIndex += 1;
+      const data = jobId ? (opts.ledgerByJobId?.[jobId] ?? []) : [];
+      return Promise.resolve({ data, error: null }).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.token_transactions.then;
+
+    return client;
+  }
+
+  it("exposes default thresholds: 10 min for generate_article, 5 min for generate_ideas", () => {
+    expect(DEFAULT_RECONCILE_THRESHOLDS_MINUTES).toEqual({
+      generate_article: 10,
+      generate_ideas: 5,
+    });
+  });
+
+  it("returns a zeroed result when nothing is stuck", async () => {
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [], generate_ideas: [] },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+    expect(out).toEqual({
+      jobsChecked: 0,
+      jobsFailed: 0,
+      articlesFailed: 0,
+      tokensRefunded: 0,
+      errors: [],
+    });
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("uses the type-specific cutoff when olderThanMinutes is omitted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-11T00:30:00Z"));
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [], generate_ideas: [] },
+    });
+
+    await reconcileStuckArticleJobs({ client: client as never });
+
+    const ltCalls = client.__chains.article_jobs!.lt.mock.calls;
+    expect(ltCalls.length).toBe(2);
+    // generate_article — 10 min ago
+    expect(ltCalls[0]).toEqual(["created_at", "2026-05-11T00:20:00.000Z"]);
+    // generate_ideas — 5 min ago
+    expect(ltCalls[1]).toEqual(["created_at", "2026-05-11T00:25:00.000Z"]);
+  });
+
+  it("uses the override threshold for ALL types when provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-11T00:30:00Z"));
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [] },
+    });
+
+    await reconcileStuckArticleJobs({
+      client: client as never,
+      jobType: "generate_article",
+      olderThanMinutes: 1,
+    });
+
+    expect(client.__chains.article_jobs!.lt).toHaveBeenCalledWith(
+      "created_at",
+      "2026-05-11T00:29:00.000Z",
+    );
+  });
+
+  it("scopes to a single type when jobType is set", async () => {
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_ideas: [] },
+    });
+
+    await reconcileStuckArticleJobs({
+      client: client as never,
+      jobType: "generate_ideas",
+    });
+
+    expect(client.__chains.article_jobs!.eq).toHaveBeenCalledWith(
+      "type",
+      "generate_ideas",
+    );
+    // Only ONE find query should fire.
+    expect(client.__chains.article_jobs!.lt).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks each stuck job failed AND its placeholder article failed", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: { "stuck-1": [] },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsChecked).toBe(1);
+    expect(out.jobsFailed).toBe(1);
+    expect(out.articlesFailed).toBe(1);
+    expect(out.errors).toEqual([]);
+
+    // Job marked failed with the canonical timeout copy.
+    const jobUpdates = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0] as Record<string, unknown>,
+    );
+    expect(
+      jobUpdates.some(
+        (u) =>
+          u.status === "failed" &&
+          typeof u.error_message === "string" &&
+          (u.error_message as string).includes("timed out"),
+      ),
+    ).toBe(true);
+
+    // Article marked failed.
+    const articleUpdates = client.__chains.articles!.update.mock.calls.map(
+      (c) => c[0] as Record<string, unknown>,
+    );
+    expect(articleUpdates).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error_message: expect.stringContaining("timed out"),
+      }),
+    );
+  });
+
+  it("does NOT touch the article when it already moved on (status !== 'generating')", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      // The article quietly succeeded between the cron find and our touch.
+      articleStatusById: { "article-1": "ready_for_review" },
+      ledgerByJobId: { "stuck-1": [] },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(1);
+    expect(out.articlesFailed).toBe(0);
+    expect(client.__chains.articles!.update).not.toHaveBeenCalled();
+  });
+
+  it("skips the article update entirely when the job has no article_id", async () => {
+    const job = makeStuckJob({ article_id: null });
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      ledgerByJobId: { "stuck-1": [] },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(1);
+    expect(out.articlesFailed).toBe(0);
+    expect(client.__chains.articles!.maybeSingle).not.toHaveBeenCalled();
+  });
+
+  it("refunds when a usage transaction exists and no refund transaction exists", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: {
+        "stuck-1": [
+          {
+            idempotency_key: "article_job::stuck-1",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.tokensRefunded).toBe(5);
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "t1",
+        amount: 5,
+        actingUserId: "owner-1",
+        idempotencyKey: "refund::article_job::stuck-1",
+        metadata: expect.objectContaining({
+          refunded_for_job_id: "stuck-1",
+          reconciler: true,
+        }),
+      }),
+    );
+  });
+
+  it("does NOT refund when no usage transaction exists", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: { "stuck-1": [] },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.tokensRefunded).toBe(0);
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("does NOT double-refund when a refund transaction already exists", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: {
+        "stuck-1": [
+          {
+            idempotency_key: "article_job::stuck-1",
+            amount: -5,
+            user_id: "owner-1",
+          },
+          {
+            idempotency_key: "refund::article_job::stuck-1",
+            amount: 5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(1);
+    expect(out.tokensRefunded).toBe(0);
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("records an error when the job has no teamId snapshot to refund against", async () => {
+    const job = makeStuckJob({ input: { /* no teamId */ ideaId: "i" } });
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: {
+        "stuck-1": [
+          {
+            idempotency_key: "article_job::stuck-1",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(1);
+    expect(out.tokensRefunded).toBe(0);
+    expect(out.errors).toContainEqual(
+      expect.stringContaining("missing teamId"),
+    );
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("records the error and continues when fetching stuck jobs fails for one type", async () => {
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [], generate_ideas: [] },
+    });
+    // Override generate_article fetch to error; generate_ideas still works.
+    let callIndex = 0;
+    client.__chains.article_jobs!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) => {
+      const isFirst = callIndex === 0;
+      callIndex += 1;
+      return Promise.resolve(
+        isFirst
+          ? { data: null, error: { message: "fetch boom" } }
+          : { data: [], error: null },
+      ).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.article_jobs.then;
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.errors).toContainEqual(
+      expect.stringContaining("fetch_generate_article: fetch boom"),
+    );
+    // generate_ideas still got scanned (no jobs found).
+    expect(out.jobsChecked).toBe(0);
+  });
+
+  it("records the per-job error and keeps going when one job throws", async () => {
+    // Two jobs scanned. The second one's article maybeSingle rejects
+    // — the per-job try/catch should record the error and the loop
+    // should continue with the rest of the run intact.
+    const goodJob = makeStuckJob({
+      id: "good",
+      article_id: null, // skips the article path entirely
+    });
+    const badJob = makeStuckJob({ id: "bad", article_id: "art-bad" });
+    const client = makeReconcileClient({
+      stuckJobsByType: {
+        generate_article: [goodJob, badJob],
+        generate_ideas: [],
+      },
+      // good job has empty ledger → no refund
+      ledgerByJobId: { good: [], bad: [] },
+    });
+
+    // Override articles.maybeSingle to reject for the SECOND call
+    // (the bad job's article lookup) and resolve for everything else.
+    let articleCallIndex = 0;
+    client.__chains.articles!.maybeSingle = vi.fn(() => {
+      articleCallIndex += 1;
+      if (articleCallIndex === 1) {
+        return Promise.resolve({
+          data: null,
+          error: { message: "article lookup boom" },
+        });
+      }
+      return Promise.resolve({ data: null, error: null });
+    }) as never;
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsChecked).toBe(2);
+    // The good job was fully processed; the bad one failed mid-way
+    // but the JOB-level fail update still ran (it happens before the
+    // article lookup). So jobsFailed === 2.
+    expect(out.jobsFailed).toBe(2);
+    expect(out.errors.length).toBe(1);
+    expect(out.errors[0]).toContain("job_bad:");
+    expect(out.errors[0]).toContain("article lookup boom");
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [], generate_ideas: [] },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await reconcileStuckArticleJobs();
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+
+  it("describes an Error throw using its .message", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: {
+        "stuck-1": [
+          {
+            idempotency_key: "article_job::stuck-1",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+    mockedRefundTeamTokens.mockRejectedValueOnce(new Error("billing API down"));
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.errors).toContainEqual(
+      expect.stringContaining("job_stuck-1: billing API down"),
+    );
+  });
+
+  it("treats a null ledger response as 'no transactions' (no refund, no error)", async () => {
+    const job = makeStuckJob({ article_id: null });
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+    });
+    // Force the ledger query to return null data with no error.
+    client.__chains.token_transactions!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({ data: null, error: null }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.token_transactions.then;
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(1);
+    expect(out.tokensRefunded).toBe(0);
+    expect(out.errors).toEqual([]);
+  });
+
+  it("reads teamId safely from non-object job.input snapshots (defensive)", async () => {
+    // Two stuck jobs, both with corrupt `input` snapshots:
+    //   * one is `null` (oldest write before the orchestration
+    //     started snapshotting)
+    //   * one is an array (someone fat-fingered the jsonb)
+    // Each should be marked failed but skip the refund attempt with
+    // a "missing teamId" error rather than crashing.
+    const nullInputJob = makeStuckJob({
+      id: "null-input",
+      article_id: null,
+      input: null as never,
+    });
+    const arrayInputJob = makeStuckJob({
+      id: "array-input",
+      article_id: null,
+      input: ["wrong", "shape"] as never,
+    });
+    const client = makeReconcileClient({
+      stuckJobsByType: {
+        generate_article: [nullInputJob, arrayInputJob],
+        generate_ideas: [],
+      },
+      ledgerByJobId: {
+        "null-input": [
+          {
+            idempotency_key: "article_job::null-input",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+        "array-input": [
+          {
+            idempotency_key: "article_job::array-input",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.jobsFailed).toBe(2);
+    expect(out.tokensRefunded).toBe(0);
+    expect(out.errors.filter((e) => e.includes("missing teamId"))).toHaveLength(
+      2,
+    );
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("describes a non-Error primitive throw with its String() form (no .message)", async () => {
+    const job = makeStuckJob();
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+      articleStatusById: { "article-1": "generating" },
+      ledgerByJobId: {
+        "stuck-1": [
+          {
+            idempotency_key: "article_job::stuck-1",
+            amount: -5,
+            user_id: "owner-1",
+          },
+        ],
+      },
+    });
+    // refundTeamTokens rejects with a number — exercises the
+    // describeErr fallback (not Error, not object-with-message).
+    mockedRefundTeamTokens.mockRejectedValueOnce(42);
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.errors).toContainEqual(expect.stringContaining("job_stuck-1: 42"));
+  });
+
+  it("propagates the ledger query error as a per-job error in the result", async () => {
+    const job = makeStuckJob({ article_id: null });
+    const client = makeReconcileClient({
+      stuckJobsByType: { generate_article: [job], generate_ideas: [] },
+    });
+    // Force the ledger lookup to error.
+    client.__chains.token_transactions!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({
+        data: null,
+        error: { message: "ledger boom" },
+      }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.token_transactions.then;
+
+    const out = await reconcileStuckArticleJobs({ client: client as never });
+
+    expect(out.errors).toContainEqual(
+      expect.stringContaining("ledger boom"),
+    );
   });
 });

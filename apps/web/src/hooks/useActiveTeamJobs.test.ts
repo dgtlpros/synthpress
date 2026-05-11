@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 vi.mock("@/actions/article-generation", () => ({
   getActiveTeamJobs: vi.fn(),
 }));
 
 import { getActiveTeamJobs } from "@/actions/article-generation";
-import type { ActiveArticleJobRow } from "@/services/article-generation-service";
+import {
+  type ActiveArticleJobRow,
+  dispatchJobQueuedEvent,
+  JOB_QUEUED_EVENT_NAME,
+} from "@/lib/active-jobs";
 import { useActiveTeamJobs } from "./useActiveTeamJobs";
 
 const mockedGet = vi.mocked(getActiveTeamJobs);
@@ -51,6 +55,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount any leftover renderHook trees so their global event
+  // listeners (visibilitychange, JOB_QUEUED) detach before the next
+  // test runs. Without this, multi-test runs accumulate listeners
+  // and a single dispatchJobQueuedEvent fires N times.
+  cleanup();
   vi.useRealTimers();
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -360,6 +369,68 @@ describe("useActiveTeamJobs", () => {
 
     expect(removeSpy).toHaveBeenCalledWith(
       "visibilitychange",
+      expect.any(Function),
+    );
+    removeSpy.mockRestore();
+  });
+
+  it("refetches immediately when a JOB_QUEUED event fires (snappy 'just clicked Generate' path)", async () => {
+    mockedGet.mockResolvedValue({ data: [], error: null });
+
+    renderHook(() => useActiveTeamJobs({ disablePolling: true }));
+    // Initial fetch fires once.
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(1));
+
+    dispatchJobQueuedEvent({ jobId: "job-1", articleId: "art-1" });
+
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(2));
+  });
+
+  it("listens for JOB_QUEUED even when polling is disabled", async () => {
+    // Same scenario as above — explicit re-test that the listener is
+    // registered before the disablePolling early-return so test
+    // environments still get the user-action snap behavior.
+    mockedGet.mockResolvedValue({ data: [], error: null });
+
+    renderHook(() => useActiveTeamJobs({ disablePolling: true }));
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(1));
+
+    dispatchJobQueuedEvent({ jobId: "job-2" });
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(2));
+
+    // Firing again triggers another fetch.
+    dispatchJobQueuedEvent({ jobId: "job-3" });
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(3));
+  });
+
+  it("removes the JOB_QUEUED listener on unmount (no fetch fires after)", async () => {
+    mockedGet.mockResolvedValue({ data: [], error: null });
+
+    const { unmount } = renderHook(() =>
+      useActiveTeamJobs({ disablePolling: true }),
+    );
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(1));
+    unmount();
+
+    const callsAfterUnmount = mockedGet.mock.calls.length;
+    dispatchJobQueuedEvent({ jobId: "job-after-unmount" });
+    // Give the listener a tick to (not) fire.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(mockedGet.mock.calls.length).toBe(callsAfterUnmount);
+  });
+
+  it("removes the JOB_QUEUED listener on unmount in the polling path too", async () => {
+    mockedGet.mockResolvedValue({ data: [], error: null });
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+
+    const { unmount } = renderHook(() =>
+      useActiveTeamJobs({ pollIntervalMs: 30 }),
+    );
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(1));
+    unmount();
+
+    expect(removeSpy).toHaveBeenCalledWith(
+      JOB_QUEUED_EVENT_NAME,
       expect.any(Function),
     );
     removeSpy.mockRestore();
