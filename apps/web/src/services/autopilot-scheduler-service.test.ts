@@ -46,6 +46,7 @@ import {
 import {
   AUTOPAUSE_FAILURE_THRESHOLD,
   AUTOPAUSE_FAILURE_WINDOW_MINUTES,
+  autoApproveIdeasForAutopilotRun,
   computeDailyMaxArticles,
   PAUSED_MESSAGE_FAILURE_RATE,
   PAUSED_REASON_FAILURE_RATE,
@@ -1725,5 +1726,429 @@ describe("runAutopilotForBlog — failure-rate auto-pause", () => {
       (c) => c[0],
     );
     expect(eqCalls).not.toContain("trigger_source");
+  });
+});
+
+// ============================================================================
+// Auto-approve ideas — helper unit tests
+// ============================================================================
+
+describe("autoApproveIdeasForAutopilotRun", () => {
+  it("short-circuits when the id list is empty (no query, count=0)", async () => {
+    const client = makeClient({});
+    const out = await autoApproveIdeasForAutopilotRun({
+      blogId: "blog-1",
+      ideaIds: [],
+      client: client as never,
+    });
+    expect(out.approvedCount).toBe(0);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it("filters by blog_id + status='generated' + id IN (ideaIds) and returns count", async () => {
+    const client = makeClient({});
+    client.__chains.article_ideas = makeChain({
+      data: [{ id: "i-A" }, { id: "i-B" }],
+      error: null,
+    });
+
+    const out = await autoApproveIdeasForAutopilotRun({
+      blogId: "blog-AA",
+      ideaIds: ["i-A", "i-B", "i-C"],
+      client: client as never,
+    });
+
+    expect(out.approvedCount).toBe(2);
+    // Update payload sets status=approved.
+    expect(client.__chains.article_ideas!.update).toHaveBeenCalledWith({
+      status: "approved",
+    });
+    // Defense-in-depth filters all present.
+    const eqCalls = client.__chains.article_ideas!.eq.mock.calls.map(
+      (c) => [c[0], c[1]] as const,
+    );
+    expect(eqCalls).toContainEqual(["blog_id", "blog-AA"]);
+    expect(eqCalls).toContainEqual(["status", "generated"]);
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith("id", [
+      "i-A",
+      "i-B",
+      "i-C",
+    ]);
+  });
+
+  it("returns the *actual* approved count, not the input length (race-safe)", async () => {
+    // 3 ideas requested but only 1 was still in 'generated' status —
+    // the other two were already approved/rejected by the user.
+    const client = makeClient({});
+    client.__chains.article_ideas = makeChain({
+      data: [{ id: "i-A" }],
+      error: null,
+    });
+
+    const out = await autoApproveIdeasForAutopilotRun({
+      blogId: "blog-1",
+      ideaIds: ["i-A", "i-B", "i-C"],
+      client: client as never,
+    });
+    expect(out.approvedCount).toBe(1);
+  });
+
+  it("propagates supabase errors so the caller can mark the run failed", async () => {
+    const client = makeClient({});
+    client.__chains.article_ideas = makeChain({
+      data: null,
+      error: { message: "rls denied" },
+    });
+    await expect(
+      autoApproveIdeasForAutopilotRun({
+        blogId: "blog-1",
+        ideaIds: ["i-A"],
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "rls denied" });
+  });
+
+  it("falls back to the admin client when none is supplied", async () => {
+    const client = makeClient({});
+    client.__chains.article_ideas = makeChain({
+      data: [{ id: "i-A" }],
+      error: null,
+    });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+
+    const out = await autoApproveIdeasForAutopilotRun({
+      blogId: "blog-1",
+      ideaIds: ["i-A"],
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalledTimes(1);
+    expect(out.approvedCount).toBe(1);
+  });
+});
+
+// ============================================================================
+// runAutopilotForBlog — auto-approve integration
+// ============================================================================
+
+/**
+ * Variant of {@link makePerBlogClient} that pre-arms the
+ * `article_ideas` chain to return a specific update count, so tests
+ * can assert how many ideas got auto-approved.
+ */
+function makePerBlogClientForAutoApprove(opts: {
+  approvedIdeas?: Array<{ id: string; title: string }>;
+  blogRow?: PerBlogClientOpts["blogRow"];
+  /** Rows the auto-approve update returns from `.select("id")`. */
+  autoApprovedRows?: Array<{ id: string }>;
+  todayArticleCount?: number;
+}): MockClient {
+  const client = makePerBlogClient({
+    approvedIdeas: opts.approvedIdeas ?? [],
+    blogRow: opts.blogRow,
+    todayArticleCount: opts.todayArticleCount,
+  });
+  // Override the article_ideas chain so the auto-approve `.select("id")`
+  // hand returns whatever the test wants. The same chain instance also
+  // serves the prior `listApprovedIdeasForBlog` call via `then`, so
+  // we keep that data alongside.
+  const approvedIdeas = opts.approvedIdeas ?? [];
+  client.__chains.article_ideas = makeChain({
+    data: opts.autoApprovedRows ?? approvedIdeas,
+    error: null,
+  });
+  return client;
+}
+
+describe("runAutopilotForBlog — auto-approve gate", () => {
+  it("does NOT call auto-approve when requireReview=true (default)", async () => {
+    const client = makePerBlogClient({ approvedIdeas: [] });
+    // Spy on the article_ideas update — should never fire as a
+    // side-effect of auto-approve when requireReview is on.
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+    expect(out.status).toBe("completed");
+    // article_ideas.update is the only signal a write happened.
+    expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call auto-approve when requireReview=false but no ideas were generated", async () => {
+    // Backlog already meets threshold → idea-gen branch skipped →
+    // nothing for auto-approve to do this tick.
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Plenty",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 1,
+        }),
+      },
+      approvedIdeas: [{ id: "i-existing", title: "X" }],
+    });
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+    expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+  });
+
+  it("auto-approves freshly-generated ideas when requireReview=false", async () => {
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Hands-off",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 5, // empty backlog → idea-gen fires
+        }),
+      },
+      approvedIdeas: [],
+      autoApprovedRows: [{ id: "i-A" }, { id: "i-B" }],
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // The update was called with status=approved.
+    expect(client.__chains.article_ideas!.update).toHaveBeenCalledWith({
+      status: "approved",
+    });
+    // The .in("id", [...]) call carried the freshly-generated idea ids
+    // — and ONLY those ids. Manual / older-run `generated` ideas are
+    // never in this list because the helper scopes to the current
+    // run's batch.
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith(
+      "id",
+      ["i-A", "i-B"],
+    );
+  });
+
+  it("does NOT auto-approve when input.dryRun=true (test runs are read-only)", async () => {
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Dry",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 5,
+        }),
+      },
+      approvedIdeas: [],
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      dryRun: true,
+      client: client as never,
+    });
+    expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
+  });
+
+  it("stamps ideasAutoApproved + requireReview onto the run output", async () => {
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Stamp",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 5,
+        }),
+      },
+      approvedIdeas: [],
+      autoApprovedRows: [{ id: "i-A" }, { id: "i-B" }],
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // Either completed or skipped (depending on whether spawning
+    // succeeded) — the output stamp lands either way. Look at the
+    // last completeBlogAutopilotRun call.
+    const completeCall =
+      mockedCompleteRun.mock.calls[mockedCompleteRun.mock.calls.length - 1]!;
+    const arg = completeCall[0] as { output: Record<string, unknown> };
+    expect(arg.output).toMatchObject({
+      ideasAutoApproved: 2,
+      requireReview: false,
+    });
+  });
+
+  it("stamps ideasAutoApproved=0 + requireReview=true on a normal review-on run", async () => {
+    // Even when no auto-approve happened, the stamp keeps the
+    // operator-readable output consistent.
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "Stamp",
+        settings: autopilotSettings({
+          requireReview: true,
+          backlogThreshold: 5,
+        }),
+      },
+      approvedIdeas: [],
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    const completeCall =
+      mockedCompleteRun.mock.calls[mockedCompleteRun.mock.calls.length - 1]!;
+    const arg = completeCall[0] as { output: Record<string, unknown> };
+    expect(arg.output).toMatchObject({
+      ideasAutoApproved: 0,
+      requireReview: true,
+    });
+  });
+
+  it("does not auto-approve previously-generated ideas from older runs (defense in depth via .in())", async () => {
+    // Simulate the existence of an old `generated` idea by passing
+    // it via approvedIdeas (the integration only calls auto-approve
+    // for the current run's `batch.ideas` ids, so the old idea is
+    // never even named in the .in() arg).
+    mockedGenerateIdeas.mockResolvedValueOnce({
+      jobId: "job-ideas",
+      ideas: [{ id: "i-NEW-1", title: "n1" } as never],
+    } as never);
+
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Scope",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 5,
+        }),
+      },
+      approvedIdeas: [],
+      autoApprovedRows: [{ id: "i-NEW-1" }],
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // Only the newly generated id appears in .in() — the old id
+    // ("i-OLD") never makes it into the auto-approve scope, even
+    // though it's still status=generated in the wider system.
+    const inCalls = client.__chains.article_ideas!.in.mock.calls;
+    const lastInCall = inCalls[inCalls.length - 1];
+    expect(lastInCall).toEqual(["id", ["i-NEW-1"]]);
+  });
+
+  it("respects PER_RUN_ARTICLE_CAP / daily caps even when auto-approve produces more ideas", async () => {
+    // Auto-approve creates 7 fresh ideas, but per-run cap is 5 +
+    // daily cap is 3 (autopilotSettings: maxPostsPerDay=3,
+    // generatePerWeek=14 → daily=2 → max(2,3)=3 effective). At
+    // most 3 article workflows should start.
+    mockedGenerateIdeas.mockResolvedValueOnce({
+      jobId: "job-ideas",
+      ideas: [
+        { id: "n1", title: "n1" } as never,
+        { id: "n2", title: "n2" } as never,
+        { id: "n3", title: "n3" } as never,
+        { id: "n4", title: "n4" } as never,
+        { id: "n5", title: "n5" } as never,
+        { id: "n6", title: "n6" } as never,
+        { id: "n7", title: "n7" } as never,
+      ],
+    } as never);
+
+    // After auto-approve the next listApprovedIdeasForBlog call
+    // should return all 7. We can't easily intercept the per-call
+    // result without a per-call override; reuse the chain instead.
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "Cap",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 10,
+          maxPostsPerDay: 3,
+          generatePerWeek: 14,
+        }),
+      },
+      approvedIdeas: [
+        { id: "n1", title: "n1" },
+        { id: "n2", title: "n2" },
+        { id: "n3", title: "n3" },
+        { id: "n4", title: "n4" },
+        { id: "n5", title: "n5" },
+        { id: "n6", title: "n6" },
+        { id: "n7", title: "n7" },
+      ],
+      autoApprovedRows: [{ id: "n1" }, { id: "n2" }, { id: "n3" }, { id: "n4" }, { id: "n5" }, { id: "n6" }, { id: "n7" }],
+    });
+
+    mockedQueueArticle.mockResolvedValue({
+      jobId: "job-x",
+      articleId: "art-x",
+    } as never);
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // Daily cap (3) wins over per-run cap (5) and over auto-approved
+    // pool (7). Even with auto-approve, the safety caps still rule.
+    expect(out.articleJobsStarted).toBeLessThanOrEqual(3);
+  });
+
+  it("auto-pause behavior is unchanged when auto-approve is on (still pauses on threshold)", async () => {
+    // Auto-approve flag has no bearing on the failure-rate policy —
+    // a failing run in requireReview=false land still trips the
+    // pause check.
+    const client = makePerBlogClientForAutoApprove({
+      blogRow: {
+        id: "blog-1",
+        name: "PauseStill",
+        settings: autopilotSettings({
+          requireReview: false,
+          backlogThreshold: 5,
+        }),
+      },
+      approvedIdeas: [],
+    });
+    // Force the failure path.
+    mockedGenerateIdeas.mockRejectedValueOnce(new Error("Claude down"));
+    // Make policy count tip over.
+    client.__chains.blog_autopilot_runs = makeChain({
+      data: { output: {} },
+      error: null,
+      count: AUTOPAUSE_FAILURE_THRESHOLD,
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+    expect(out.status).toBe("failed");
+    expect(out.output.autopilotPaused).toBe(true);
   });
 });

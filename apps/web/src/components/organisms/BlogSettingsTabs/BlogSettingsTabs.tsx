@@ -1043,8 +1043,12 @@ function AutomationTab({
           </Field>
         </div>
         <ToggleField
-          label="Require human review before publishing"
-          description="Generated drafts wait in 'Ready for review' until approved."
+          label="Require review before autopilot creates articles"
+          description={
+            value.requireReview
+              ? "Generated ideas must be approved before autopilot creates articles. Drafts also wait in Ready for review."
+              : "Autopilot can approve its own ideas and generate article drafts automatically. Drafts still wait in Ready for review."
+          }
           checked={value.requireReview}
           onChange={(requireReview) => onChange({ requireReview })}
         />

@@ -30,8 +30,21 @@ export interface AutopilotRunRowData {
   completedAt: string | null;
 }
 
-export interface AutopilotRunRowProps extends HTMLAttributes<HTMLLIElement> {
+export interface AutopilotRunRowProps
+  extends Omit<HTMLAttributes<HTMLLIElement>, "onSelect"> {
   run: AutopilotRunRowData;
+  /**
+   * Fires when the user activates the row. When provided, the row's
+   * inner content is wrapped in a `<button>` so it's keyboard-
+   * accessible and announces "View details for run X". When omitted,
+   * the row stays presentational (used by the storybook + the
+   * fallback case where a connector hasn't wired the click through).
+   *
+   * `Omit`ed from the base HTMLAttributes because `<li>` carries a
+   * native `onSelect` event handler with a different signature; ours
+   * takes the run id, not a SyntheticEvent.
+   */
+  onSelect?: (runId: string) => void;
 }
 
 const TRIGGER_SOURCE_LABELS: Record<string, string> = {
@@ -98,6 +111,19 @@ function readReason(
 }
 
 /**
+ * Reads the auto-approved counter the autopilot scheduler stamps
+ * on `output` when `requireReview === false`. Returns `0` when the
+ * field is missing (older runs) or non-numeric (corrupt jsonb).
+ */
+function readAutoApprovedCount(
+  output: Record<string, unknown> | null,
+): number {
+  if (!output) return 0;
+  const v = output.ideasAutoApproved;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/**
  * One row in the recent autopilot runs panel. Dumb molecule —
  * receives a row, renders the status badge + trigger + counters +
  * (when present) the failure / skip reason. Layout is intentionally
@@ -107,33 +133,32 @@ function readReason(
 export function AutopilotRunRow({
   run,
   className,
+  onSelect,
   ...props
 }: AutopilotRunRowProps) {
   const stepLabel = formatStep(run.currentStep);
   const triggerLabel = formatTriggerSource(run.triggerSource);
   const jobCount = spawnedJobsCount(run.output);
   const reason = readReason(run.output);
+  const autoApprovedCount = readAutoApprovedCount(run.output);
 
   // Only show the secondary metric line when there's something to
   // show. Keeps quiet "skipped, nothing to do" runs from looking
   // visually identical to busy "5 articles started" runs.
   const hasCounters =
     run.ideasGenerated > 0 ||
+    autoApprovedCount > 0 ||
     run.articlesStarted > 0 ||
     run.articlesCompleted > 0 ||
     run.articlesFailed > 0 ||
     run.tokensSpent > 0 ||
     run.tokensRefunded > 0;
 
-  return (
-    <li
-      className={cn(
-        "flex flex-col gap-1.5 px-3 py-2.5 text-sm",
-        "border-b border-border last:border-b-0",
-        className,
-      )}
-      {...props}
-    >
+  // The full body of the row — same content regardless of
+  // clickability; just rendered inside a <button> when onSelect
+  // is wired so the whole row is keyboard-accessible.
+  const body = (
+    <div className="flex flex-col gap-1.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
@@ -157,6 +182,9 @@ export function AutopilotRunRow({
         <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
           {run.ideasGenerated > 0 ? (
             <span>{run.ideasGenerated} ideas generated</span>
+          ) : null}
+          {autoApprovedCount > 0 ? (
+            <span>{autoApprovedCount} auto-approved</span>
           ) : null}
           {run.articlesStarted > 0 ? (
             <span>{run.articlesStarted} article jobs started</span>
@@ -191,12 +219,18 @@ export function AutopilotRunRow({
       ) : null}
 
       {run.errorMessage ? (
-        <p
-          className="line-clamp-2 text-xs text-error"
-          role="alert"
-        >
-          {run.errorMessage}
-        </p>
+        // role isn't used inside a button (announce-on-render is wrong
+        // for a click target). Fall back to a plain <span> so the
+        // alert role only surfaces on the standalone variant.
+        onSelect ? (
+          <span className="line-clamp-2 text-xs text-error">
+            {run.errorMessage}
+          </span>
+        ) : (
+          <p className="line-clamp-2 text-xs text-error" role="alert">
+            {run.errorMessage}
+          </p>
+        )
       ) : null}
 
       {reason && !run.errorMessage ? (
@@ -205,6 +239,32 @@ export function AutopilotRunRow({
           {reason}
         </p>
       ) : null}
+    </div>
+  );
+
+  return (
+    <li
+      className={cn(
+        "text-sm",
+        "border-b border-border last:border-b-0",
+        // The button owns padding when present; otherwise the li does.
+        onSelect ? null : "px-3 py-2.5",
+        className,
+      )}
+      {...props}
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(run.id)}
+          aria-label={`View details for autopilot run ${run.id}`}
+          className="block w-full px-3 py-2.5 text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-blue"
+        >
+          {body}
+        </button>
+      ) : (
+        body
+      )}
     </li>
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   AutopilotRunRow,
   type AutopilotRunRowData,
@@ -384,5 +384,120 @@ describe("AutopilotRunRow", () => {
     expect(
       screen.getByText(new Date("2026-04-01T08:00:00Z").toLocaleDateString()),
     ).toBeInTheDocument();
+  });
+
+  // ── Auto-approve counter ────────────────────────────────────────────────
+  it("renders 'N auto-approved' when output.ideasAutoApproved > 0", () => {
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          ideasGenerated: 5,
+          articlesStarted: 3,
+          output: {
+            reason: "ok",
+            ideasAutoApproved: 5,
+            requireReview: false,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("5 auto-approved")).toBeInTheDocument();
+  });
+
+  it("does NOT render 'auto-approved' when ideasAutoApproved is 0 or missing", () => {
+    // Default `output: { reason: "ok" }` from makeRun → no
+    // ideasAutoApproved field.
+    render(
+      <AutopilotRunRow run={makeRun({ articlesStarted: 1 })} />,
+    );
+    expect(screen.queryByText(/auto-approved/i)).not.toBeInTheDocument();
+  });
+
+  it("ignores non-numeric / negative ideasAutoApproved (defensive: corrupt jsonb)", () => {
+    // Two scenarios in one test — both should hide the chip.
+    const { unmount } = render(
+      <AutopilotRunRow
+        run={makeRun({
+          articlesStarted: 1,
+          output: { ideasAutoApproved: "lots" as unknown as number },
+        })}
+      />,
+    );
+    expect(screen.queryByText(/auto-approved/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          articlesStarted: 1,
+          output: { ideasAutoApproved: -3 },
+        })}
+      />,
+    );
+    expect(screen.queryByText(/auto-approved/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the counter line when ideasAutoApproved > 0 even if everything else is zero", () => {
+    // Edge case: idea-gen happened on a previous tick (so this run
+    // didn't generate anything new) but auto-approve still cleaned
+    // up a stale `generated` row. The counter line should still
+    // render so the operator can see the activity.
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          ideasGenerated: 0,
+          articlesStarted: 0,
+          articlesCompleted: 0,
+          articlesFailed: 0,
+          tokensSpent: 0,
+          tokensRefunded: 0,
+          output: { ideasAutoApproved: 1 },
+        })}
+      />,
+    );
+    expect(screen.getByText("1 auto-approved")).toBeInTheDocument();
+  });
+
+  // ── Clickability ────────────────────────────────────────────────────────
+  it("wraps the row in a button when onSelect is provided", () => {
+    render(<AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={vi.fn()} />);
+    const btn = screen.getByRole("button", {
+      name: /View details for autopilot run r-click/i,
+    });
+    expect(btn).toBeInTheDocument();
+  });
+
+  it("calls onSelect with the run id when the button is clicked", () => {
+    const onSelect = vi.fn();
+    render(<AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={onSelect} />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /View details for autopilot run r-click/i,
+      }),
+    );
+    expect(onSelect).toHaveBeenCalledWith("r-click");
+  });
+
+  it("does NOT render a button when onSelect is omitted", () => {
+    render(<AutopilotRunRow run={makeRun()} />);
+    expect(
+      screen.queryByRole("button", {
+        name: /View details for autopilot run/i,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the failure message inside the button (no role=alert) when clickable", () => {
+    // Putting role=alert inside a click target is a screen-reader
+    // anti-pattern (auto-announce on render). The clickable variant
+    // drops the role; the standalone variant keeps it.
+    render(
+      <AutopilotRunRow
+        run={makeRun({ status: "failed", errorMessage: "boom" })}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

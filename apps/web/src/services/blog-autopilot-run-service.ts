@@ -460,6 +460,206 @@ function clampLimit(n: number): number {
   return Math.min(Math.floor(n), MAX_RUN_LIST_LIMIT);
 }
 
+// ----------------------------------------------------------------------------
+// Per-run detail loader (for the recent-runs drawer)
+// ----------------------------------------------------------------------------
+
+/**
+ * Compact view-model the detail drawer renders. We project the
+ * underlying tables into a narrower shape so the wire payload stays
+ * small AND the UI doesn't need to know about every column.
+ */
+export interface BlogAutopilotRunDetailJob {
+  id: string;
+  type: string;
+  status: string;
+  currentStep: string | null;
+  errorMessage: string | null;
+  input: Json | null;
+  output: Json | null;
+  articleId: string | null;
+  articleIdeaId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface BlogAutopilotRunDetailArticle {
+  id: string;
+  title: string;
+  slug: string | null;
+  status: string;
+  wordCount: number | null;
+  targetKeyword: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BlogAutopilotRunDetailIdea {
+  id: string;
+  title: string;
+  status: string;
+  targetKeyword: string | null;
+  executiveSummary: string | null;
+  createdAt: string;
+}
+
+export interface BlogAutopilotRunDetail {
+  run: Tables<"blog_autopilot_runs">;
+  /** Article jobs whose `input.autopilotRunId` equals this run's id. */
+  jobs: BlogAutopilotRunDetailJob[];
+  /** Articles referenced by `jobs[i].articleId`. Newest-first. */
+  articles: BlogAutopilotRunDetailArticle[];
+  /** Ideas referenced by `jobs[i].articleIdeaId`. Newest-first. */
+  ideas: BlogAutopilotRunDetailIdea[];
+}
+
+export interface GetBlogAutopilotRunDetailInput {
+  blogId: string;
+  runId: string;
+  client?: Client;
+}
+
+/**
+ * Loads the full audit picture for a single autopilot run:
+ *
+ *   1. The run row itself (scoped to `blog_id` so a stray
+ *      project_id swap can't surface another team's data).
+ *   2. Every `article_jobs` row linked back to this run via
+ *      `input.autopilotRunId` (only the autopilot scheduler
+ *      stamps that key).
+ *   3. The articles + ideas those jobs reference, in two follow-up
+ *      `IN (...)` queries. Two extra round-trips, but PostgREST
+ *      resource-embed syntax doesn't compose well across jsonb
+ *      filters, so this is the more boring + more debuggable path.
+ *
+ * Returns `null` when the run doesn't exist or doesn't belong to
+ * the supplied `blogId` — the caller's action then renders a
+ * "not found" state without leaking row existence to other teams.
+ */
+export async function getBlogAutopilotRunDetail(
+  input: GetBlogAutopilotRunDetailInput,
+): Promise<BlogAutopilotRunDetail | null> {
+  const supabase = input.client ?? createAdminClient();
+
+  // 1. The run row, scoped to blog_id (defense in depth — RLS already
+  //    filters by team membership, but action callers pass blogId
+  //    explicitly so we double-check).
+  const { data: run, error: runErr } = await supabase
+    .from("blog_autopilot_runs")
+    .select("*")
+    .eq("id", input.runId)
+    .eq("blog_id", input.blogId)
+    .maybeSingle();
+  if (runErr) throw runErr;
+  if (!run) return null;
+
+  // 2. Every article_jobs row whose input jsonb mentions this run.
+  //    The scheduler stamps `input.autopilotRunId = run.id` for both
+  //    `generate_ideas` and `generate_article` jobs, so a single
+  //    `input->>autopilotRunId` filter catches the whole graph.
+  const { data: jobRows, error: jobsErr } = await supabase
+    .from("article_jobs")
+    .select(
+      "id, type, status, current_step, error_message, input, output, article_id, article_idea_id, created_at, started_at, completed_at",
+    )
+    .eq("blog_id", input.blogId)
+    .filter("input->>autopilotRunId", "eq", input.runId)
+    .order("created_at", { ascending: true });
+  if (jobsErr) throw jobsErr;
+  const jobs: BlogAutopilotRunDetailJob[] = (jobRows ?? []).map((row) => ({
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    currentStep: row.current_step,
+    errorMessage: row.error_message,
+    input: row.input,
+    output: row.output,
+    articleId: row.article_id,
+    articleIdeaId: row.article_idea_id,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  }));
+
+  // 3. Two follow-up loads: articles + ideas the jobs reference.
+  //    Skipping the IN(...) query when the list is empty avoids a
+  //    no-op round-trip (PostgREST returns 400 on empty `in` lists).
+  const articleIds = unique(
+    jobs.map((j) => j.articleId).filter(isNonNull),
+  );
+  const ideaIds = unique(
+    jobs.map((j) => j.articleIdeaId).filter(isNonNull),
+  );
+
+  const articles = await loadArticles(supabase, input.blogId, articleIds);
+  const ideas = await loadIdeas(supabase, input.blogId, ideaIds);
+
+  return { run, jobs, articles, ideas };
+}
+
+async function loadArticles(
+  client: Client,
+  blogId: string,
+  ids: string[],
+): Promise<BlogAutopilotRunDetailArticle[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await client
+    .from("articles")
+    .select(
+      "id, title, slug, status, word_count, target_keyword, created_at, updated_at",
+    )
+    .eq("blog_id", blogId)
+    .in("id", ids)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  /* v8 ignore next 1 -- defensive: PostgREST returns array on success */
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    slug: row.slug,
+    status: row.status,
+    wordCount: row.word_count,
+    targetKeyword: row.target_keyword,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+async function loadIdeas(
+  client: Client,
+  blogId: string,
+  ids: string[],
+): Promise<BlogAutopilotRunDetailIdea[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await client
+    .from("article_ideas")
+    .select(
+      "id, title, status, target_keyword, executive_summary, created_at",
+    )
+    .eq("blog_id", blogId)
+    .in("id", ids)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  /* v8 ignore next 1 -- defensive: PostgREST returns array on success */
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    targetKeyword: row.target_keyword,
+    executiveSummary: row.executive_summary,
+    createdAt: row.created_at,
+  }));
+}
+
+function unique<T>(xs: T[]): T[] {
+  return Array.from(new Set(xs));
+}
+
+function isNonNull<T>(x: T | null | undefined): x is T {
+  return x !== null && x !== undefined;
+}
+
 function toIsoOrNull(value: Date | string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();

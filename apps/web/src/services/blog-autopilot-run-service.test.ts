@@ -12,6 +12,7 @@ import {
   completeBlogAutopilotRun,
   createBlogAutopilotRun,
   failBlogAutopilotRun,
+  getBlogAutopilotRunDetail,
   listBlogAutopilotRunsForBlog,
   updateBlogAutopilotRunStatus,
 } from "./blog-autopilot-run-service";
@@ -839,5 +840,451 @@ describe("listBlogAutopilotRunsForBlog", () => {
 
     expect(mockedCreateAdmin).toHaveBeenCalled();
     expect(adminClient.from).toHaveBeenCalledWith("blog_autopilot_runs");
+  });
+});
+
+// ============================================================================
+// getBlogAutopilotRunDetail
+// ============================================================================
+
+/**
+ * Multi-table mock — the detail loader hits 4 different tables.
+ * Each chain has its own .order/.maybeSingle/.then so we can stage
+ * results per table independently.
+ */
+interface ChainMock {
+  select: ReturnType<typeof vi.fn>;
+  eq: ReturnType<typeof vi.fn>;
+  in: ReturnType<typeof vi.fn>;
+  filter: ReturnType<typeof vi.fn>;
+  order: ReturnType<typeof vi.fn>;
+  maybeSingle: ReturnType<typeof vi.fn>;
+  then: PromiseLike<unknown>["then"];
+}
+
+function makeQueryChain<T>(result: ChainResult<T>): ChainMock {
+  const chain = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
+    filter: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue(result),
+    then: ((onFulfilled, onRejected) =>
+      Promise.resolve(result).then(
+        onFulfilled,
+        onRejected,
+      )) as PromiseLike<ChainResult<T>>["then"],
+  };
+  return chain as unknown as ChainMock;
+}
+
+interface DetailMockClient {
+  from: ReturnType<typeof vi.fn>;
+  __chains: Record<string, ChainMock>;
+}
+
+function makeDetailClient(perTable: {
+  blog_autopilot_runs?: ChainResult<unknown>;
+  article_jobs?: ChainResult<unknown>;
+  articles?: ChainResult<unknown>;
+  article_ideas?: ChainResult<unknown>;
+}): DetailMockClient {
+  const chains: Record<string, ChainMock> = {};
+  for (const [name, result] of Object.entries(perTable)) {
+    chains[name] = makeQueryChain(
+      (result ?? { data: null, error: null }) as ChainResult<unknown>,
+    );
+  }
+  const client = {
+    from: vi.fn((name: string) => {
+      if (!chains[name]) chains[name] = makeQueryChain({ data: null, error: null });
+      return chains[name];
+    }),
+    __chains: chains,
+  };
+  return client as unknown as DetailMockClient;
+}
+
+describe("getBlogAutopilotRunDetail", () => {
+  const RUN_ROW = {
+    id: "run-1",
+    blog_id: "blog-1",
+    project_id: "p1",
+    team_id: "t1",
+    status: "completed",
+    trigger_source: "cron",
+    current_step: "completed",
+    error_message: null,
+    input: { triggerSource: "cron" },
+    output: { reason: "ok" },
+    ideas_generated: 5,
+    articles_started: 2,
+    articles_completed: 0,
+    articles_failed: 0,
+    tokens_spent: 10,
+    tokens_refunded: 0,
+    started_at: "2026-05-11T08:00:00Z",
+    completed_at: "2026-05-11T08:01:00Z",
+    created_at: "2026-05-11T08:00:00Z",
+    triggered_by_user_id: null,
+    scheduled_for: null,
+    updated_at: "2026-05-11T08:01:00Z",
+  };
+
+  it("returns null when the run row is missing for that blog", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: null, error: null },
+    });
+    const out = await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-missing",
+      client: client as never,
+    });
+    expect(out).toBeNull();
+    // Detail loader bails after the first query — no jobs / articles
+    // / ideas queries fired.
+    expect(client.__chains.article_jobs).toBeUndefined();
+  });
+
+  it("scopes the run lookup by both id and blog_id (defense in depth)", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: { data: [], error: null },
+    });
+    await getBlogAutopilotRunDetail({
+      blogId: "blog-AA",
+      runId: "run-1",
+      client: client as never,
+    });
+
+    const eqCalls = client.__chains.blog_autopilot_runs!.eq.mock.calls.map(
+      (c) => [c[0], c[1]] as const,
+    );
+    expect(eqCalls).toContainEqual(["id", "run-1"]);
+    expect(eqCalls).toContainEqual(["blog_id", "blog-AA"]);
+  });
+
+  it("loads related article_jobs filtered by input.autopilotRunId", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: {
+        data: [
+          {
+            id: "job-1",
+            type: "generate_article",
+            status: "completed",
+            current_step: "completed",
+            error_message: null,
+            input: { autopilotRunId: "run-1" },
+            output: { model: "claude" },
+            article_id: "art-1",
+            article_idea_id: "idea-1",
+            created_at: "2026-05-11T08:00:30Z",
+            started_at: "2026-05-11T08:00:31Z",
+            completed_at: "2026-05-11T08:01:00Z",
+          },
+        ],
+        error: null,
+      },
+      articles: {
+        data: [
+          {
+            id: "art-1",
+            title: "Hello",
+            slug: "hello",
+            status: "ready_for_review",
+            word_count: 1200,
+            target_keyword: "hello",
+            created_at: "2026-05-11T08:01:00Z",
+            updated_at: "2026-05-11T08:01:00Z",
+          },
+        ],
+        error: null,
+      },
+      article_ideas: {
+        data: [
+          {
+            id: "idea-1",
+            title: "Hello idea",
+            status: "converted_to_article",
+            target_keyword: "hello",
+            executive_summary: "x",
+            created_at: "2026-05-11T07:55:00Z",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const out = await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-1",
+      client: client as never,
+    });
+
+    expect(out).not.toBeNull();
+    expect(out!.run.id).toBe("run-1");
+    expect(out!.jobs).toHaveLength(1);
+    expect(out!.jobs[0]).toMatchObject({
+      id: "job-1",
+      articleId: "art-1",
+      articleIdeaId: "idea-1",
+    });
+
+    // The crucial filter — input->>autopilotRunId — is on the
+    // article_jobs chain.
+    expect(client.__chains.article_jobs!.filter).toHaveBeenCalledWith(
+      "input->>autopilotRunId",
+      "eq",
+      "run-1",
+    );
+
+    expect(out!.articles).toHaveLength(1);
+    expect(out!.articles[0]!.title).toBe("Hello");
+    expect(out!.ideas).toHaveLength(1);
+    expect(out!.ideas[0]!.title).toBe("Hello idea");
+  });
+
+  it("skips the articles + ideas queries when no jobs reference any", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      // Job exists but it's a generate_ideas job — no article_id /
+      // article_idea_id link.
+      article_jobs: {
+        data: [
+          {
+            id: "job-ideas",
+            type: "generate_ideas",
+            status: "completed",
+            current_step: "completed",
+            error_message: null,
+            input: { autopilotRunId: "run-1" },
+            output: null,
+            article_id: null,
+            article_idea_id: null,
+            created_at: "2026-05-11T08:00:00Z",
+            started_at: "2026-05-11T08:00:01Z",
+            completed_at: "2026-05-11T08:00:30Z",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const out = await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-1",
+      client: client as never,
+    });
+
+    expect(out!.articles).toEqual([]);
+    expect(out!.ideas).toEqual([]);
+    // Two `from()` calls: blog_autopilot_runs + article_jobs.
+    // No follow-up articles / article_ideas calls.
+    expect(client.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes article + idea ids across jobs (one query per unique row)", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: {
+        data: [
+          {
+            id: "j1",
+            type: "generate_article",
+            status: "completed",
+            current_step: "completed",
+            error_message: null,
+            input: {},
+            output: null,
+            article_id: "art-X",
+            article_idea_id: "idea-X",
+            created_at: "2026-05-11T08:00:30Z",
+            started_at: null,
+            completed_at: null,
+          },
+          // Same article + idea (re-run / retry scenario)
+          {
+            id: "j2",
+            type: "generate_article",
+            status: "failed",
+            current_step: "writing_article",
+            error_message: "boom",
+            input: {},
+            output: null,
+            article_id: "art-X",
+            article_idea_id: "idea-X",
+            created_at: "2026-05-11T08:00:35Z",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+        error: null,
+      },
+      articles: {
+        data: [
+          {
+            id: "art-X",
+            title: "X",
+            slug: "x",
+            status: "failed",
+            word_count: null,
+            target_keyword: null,
+            created_at: "2026-05-11T08:00:30Z",
+            updated_at: "2026-05-11T08:00:30Z",
+          },
+        ],
+        error: null,
+      },
+      article_ideas: {
+        data: [
+          {
+            id: "idea-X",
+            title: "X idea",
+            status: "approved",
+            target_keyword: null,
+            executive_summary: null,
+            created_at: "2026-05-11T07:55:00Z",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const out = await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-1",
+      client: client as never,
+    });
+
+    expect(client.__chains.articles!.in).toHaveBeenCalledWith("id", ["art-X"]);
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith(
+      "id",
+      ["idea-X"],
+    );
+    expect(out!.articles).toHaveLength(1);
+    expect(out!.ideas).toHaveLength(1);
+  });
+
+  it("propagates run-row read errors", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: null, error: { message: "rls denied" } },
+    });
+    await expect(
+      getBlogAutopilotRunDetail({
+        blogId: "blog-1",
+        runId: "run-1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "rls denied" });
+  });
+
+  it("propagates jobs-query errors", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: { data: null, error: { message: "jobs broke" } },
+    });
+    await expect(
+      getBlogAutopilotRunDetail({
+        blogId: "blog-1",
+        runId: "run-1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "jobs broke" });
+  });
+
+  it("propagates articles-query errors", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: {
+        data: [
+          {
+            id: "j1",
+            type: "generate_article",
+            status: "completed",
+            current_step: null,
+            error_message: null,
+            input: {},
+            output: null,
+            article_id: "art-1",
+            article_idea_id: null,
+            created_at: "2026-05-11T08:00:30Z",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+        error: null,
+      },
+      articles: { data: null, error: { message: "articles broke" } },
+    });
+    await expect(
+      getBlogAutopilotRunDetail({
+        blogId: "blog-1",
+        runId: "run-1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "articles broke" });
+  });
+
+  it("propagates ideas-query errors", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: {
+        data: [
+          {
+            id: "j1",
+            type: "generate_article",
+            status: "completed",
+            current_step: null,
+            error_message: null,
+            input: {},
+            output: null,
+            article_id: null,
+            article_idea_id: "idea-1",
+            created_at: "2026-05-11T08:00:30Z",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+        error: null,
+      },
+      article_ideas: { data: null, error: { message: "ideas broke" } },
+    });
+    await expect(
+      getBlogAutopilotRunDetail({
+        blogId: "blog-1",
+        runId: "run-1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "ideas broke" });
+  });
+
+  it("falls back to the admin client when none is supplied", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: null, error: null },
+    });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+
+    await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-1",
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats null PostgREST data arrays as empty (defensive)", async () => {
+    const client = makeDetailClient({
+      blog_autopilot_runs: { data: RUN_ROW, error: null },
+      article_jobs: { data: null, error: null },
+    });
+    const out = await getBlogAutopilotRunDetail({
+      blogId: "blog-1",
+      runId: "run-1",
+      client: client as never,
+    });
+    expect(out!.jobs).toEqual([]);
+    expect(out!.articles).toEqual([]);
+    expect(out!.ideas).toEqual([]);
   });
 });

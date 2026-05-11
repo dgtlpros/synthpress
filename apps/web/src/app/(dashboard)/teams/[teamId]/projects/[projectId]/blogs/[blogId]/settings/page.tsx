@@ -105,6 +105,8 @@ export default async function BlogSettingsPage({
         pausedReason={settings.automation.pausedReason}
         pausedAt={settings.automation.pausedAt}
         pausedMessage={settings.automation.pausedMessage}
+        postsHref={`/teams/${teamId}/projects/${projectId}/blogs/${blogId}/posts`}
+        automationSettingsHref={`/teams/${teamId}/projects/${projectId}/blogs/${blogId}/settings#automation`}
       />
 
       <Card>

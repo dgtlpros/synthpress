@@ -34,6 +34,10 @@ vi.mock("@/services/autopilot-scheduler-service", () => ({
   runAutopilotForBlog: vi.fn(),
 }));
 
+vi.mock("@/services/blog-autopilot-run-service", () => ({
+  getBlogAutopilotRunDetail: vi.fn(),
+}));
+
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -43,13 +47,19 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import { runAutopilotForBlog } from "@/services/autopilot-scheduler-service";
-import { runAutopilotNow, AUTOPILOT_ACTION_ERRORS } from "./autopilot";
+import { getBlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
+import {
+  AUTOPILOT_ACTION_ERRORS,
+  getAutopilotRunDetail,
+  runAutopilotNow,
+} from "./autopilot";
 
 const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedAssertCan = vi.mocked(assertCan);
 const mockedRunAutopilot = vi.mocked(runAutopilotForBlog);
 const mockedRevalidatePath = vi.mocked(revalidatePath);
+const mockedGetDetail = vi.mocked(getBlogAutopilotRunDetail);
 
 function makeAuthedClient(user: { id: string } | null = { id: "u1" }) {
   return {
@@ -280,5 +290,112 @@ describe("runAutopilotNow — happy path + revalidation", () => {
 
     const result = await runAutopilotNow("t1", "p1", "b1");
     expect(result.error).toMatch(/Could not run autopilot/);
+  });
+});
+
+// ============================================================================
+// getAutopilotRunDetail
+// ============================================================================
+
+const SAMPLE_DETAIL = {
+  run: { id: "run-1", blog_id: "b1" } as never,
+  jobs: [] as never[],
+  articles: [] as never[],
+  ideas: [] as never[],
+};
+
+describe("getAutopilotRunDetail — auth + validation", () => {
+  it("rejects calls missing the blog id", async () => {
+    const result = await getAutopilotRunDetail("t1", "p1", "", "run-1");
+    expect(result.error).toMatch(/Blog and run ids/);
+    expect(mockedGetDetail).not.toHaveBeenCalled();
+  });
+
+  it("rejects calls missing the run id", async () => {
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "");
+    expect(result.error).toMatch(/Blog and run ids/);
+    expect(mockedGetDetail).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated callers", async () => {
+    mockedCreateClient.mockResolvedValueOnce(makeAuthedClient(null) as never);
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toBe(AUTOPILOT_ACTION_ERRORS.not_signed_in);
+    expect(mockedAssertCan).not.toHaveBeenCalled();
+  });
+
+  it("requires manage_blog permission", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1", settings: {} });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+
+    await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+
+    expect(mockedAssertCan).toHaveBeenCalledWith(
+      "t1",
+      "u1",
+      "manage_blog",
+      expect.anything(),
+    );
+  });
+
+  it("returns the TeamPermissionError code on permission failure", async () => {
+    mockedAssertCan.mockRejectedValueOnce(
+      new TeamPermissionError("forbidden", "manage_blog", "member" as never),
+    );
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toBe("forbidden");
+    expect(mockedGetDetail).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAutopilotRunDetail — happy path + lookups", () => {
+  it("returns blog_not_found when the blog isn't in this project", async () => {
+    const { client } = makeAdminWithBlog(null);
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toBe(AUTOPILOT_ACTION_ERRORS.blog_not_found);
+    expect(mockedGetDetail).not.toHaveBeenCalled();
+  });
+
+  it("returns 'Run not found.' when the detail loader returns null", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1", settings: {} });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+    mockedGetDetail.mockResolvedValueOnce(null);
+
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toMatch(/Run not found/);
+  });
+
+  it("returns the loaded detail when everything resolves", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1", settings: {} });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+    mockedGetDetail.mockResolvedValueOnce(SAMPLE_DETAIL as never);
+
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result).toEqual({ data: SAMPLE_DETAIL, error: null });
+    expect(mockedGetDetail).toHaveBeenCalledWith({
+      blogId: "b1",
+      runId: "run-1",
+      client: expect.anything(),
+    });
+  });
+
+  it("propagates unexpected errors as result.error", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1", settings: {} });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+    mockedGetDetail.mockRejectedValueOnce(new Error("supabase down"));
+
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toBe("supabase down");
+  });
+
+  it("falls back to a default message on non-Error throws", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1", settings: {} });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+    mockedGetDetail.mockRejectedValueOnce("not-an-error");
+
+    const result = await getAutopilotRunDetail("t1", "p1", "b1", "run-1");
+    expect(result.error).toMatch(/Could not load run details/);
   });
 });

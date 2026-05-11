@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import {
   BlogAutopilotPanel,
   type BlogAutopilotPanelProps,
 } from "@/components/organisms/BlogAutopilotPanel";
+import { AutopilotRunDetailDrawerConnector } from "@/connectors/AutopilotRunDetailDrawerConnector";
 import { useRunAutopilotNow } from "@/hooks/useRunAutopilotNow";
 
 export interface BlogAutopilotPanelConnectorProps {
@@ -15,6 +17,11 @@ export interface BlogAutopilotPanelConnectorProps {
   autopilotEnabled: boolean;
   /** URL of the Automation tab so the panel can deep-link disabled callers. */
   automationSettingsHref?: string;
+  /**
+   * Prefix used by the detail drawer to compose "View article"
+   * links — `${postsHref}/${articleId}`. Optional.
+   */
+  postsHref?: string;
   recentRuns: BlogAutopilotPanelProps["recentRuns"];
   /**
    * Auto-pause metadata read from `settings.automation`. The panel
@@ -28,9 +35,16 @@ export interface BlogAutopilotPanelConnectorProps {
 
 /**
  * Bridges the dumb {@link BlogAutopilotPanel} organism to the
- * {@link useRunAutopilotNow} hook. The settings page renders the
- * recent-runs list server-side and passes it through; the connector
- * only owns the button click + result message lifecycle.
+ * {@link useRunAutopilotNow} hook AND the per-run
+ * {@link AutopilotRunDetailDrawerConnector}.
+ *
+ * Click flow:
+ *   1. User clicks a recent-run row.
+ *   2. Panel fires `onRunSelect(runId)`.
+ *   3. We stash the id in local state → drawer connector mounts
+ *      with `runId !== null` → its hook fetches the detail.
+ *   4. User closes → state clears → drawer goes back to "no run"
+ *      (the hook resets its state too).
  */
 export function BlogAutopilotPanelConnector({
   teamId,
@@ -39,6 +53,7 @@ export function BlogAutopilotPanelConnector({
   blogName,
   autopilotEnabled,
   automationSettingsHref,
+  postsHref,
   recentRuns,
   pausedReason = null,
   pausedAt = null,
@@ -49,19 +64,32 @@ export function BlogAutopilotPanelConnector({
     projectId,
     blogId,
   });
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   return (
-    <BlogAutopilotPanel
-      blogName={blogName}
-      autopilotEnabled={autopilotEnabled}
-      automationSettingsHref={automationSettingsHref}
-      recentRuns={recentRuns}
-      onRunNow={run}
-      isRunning={isRunning}
-      resultMessage={resultMessage}
-      pausedReason={pausedReason}
-      pausedAt={pausedAt}
-      pausedMessage={pausedMessage}
-    />
+    <>
+      <BlogAutopilotPanel
+        blogName={blogName}
+        autopilotEnabled={autopilotEnabled}
+        automationSettingsHref={automationSettingsHref}
+        recentRuns={recentRuns}
+        onRunNow={run}
+        isRunning={isRunning}
+        resultMessage={resultMessage}
+        pausedReason={pausedReason}
+        pausedAt={pausedAt}
+        pausedMessage={pausedMessage}
+        onRunSelect={setSelectedRunId}
+      />
+      <AutopilotRunDetailDrawerConnector
+        teamId={teamId}
+        projectId={projectId}
+        blogId={blogId}
+        runId={selectedRunId}
+        onClose={() => setSelectedRunId(null)}
+        postsHref={postsHref}
+        automationSettingsHref={automationSettingsHref}
+      />
+    </>
   );
 }

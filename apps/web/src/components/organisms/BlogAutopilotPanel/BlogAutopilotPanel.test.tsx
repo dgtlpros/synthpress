@@ -432,4 +432,24 @@ describe("BlogAutopilotPanel", () => {
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
   });
+
+  it("forwards onRunSelect to each recent run row", () => {
+    const onRunSelect = vi.fn();
+    render(
+      <BlogAutopilotPanel
+        blogName="x"
+        autopilotEnabled
+        recentRuns={[makeRun({ id: "r-pick" })]}
+        onRunNow={vi.fn()}
+        onRunSelect={onRunSelect}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /View details for autopilot run r-pick/i,
+      }),
+    );
+    expect(onRunSelect).toHaveBeenCalledWith("r-pick");
+  });
 });

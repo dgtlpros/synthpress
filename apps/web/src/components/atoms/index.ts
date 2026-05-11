@@ -64,6 +64,9 @@ export type { DeleteConfirmModalProps } from "./DeleteConfirmModal";
 export { Modal } from "./Modal";
 export type { ModalProps, ModalMaxWidth } from "./Modal";
 
+export { Drawer } from "./Drawer";
+export type { DrawerProps, DrawerWidth } from "./Drawer";
+
 export { PriceTag } from "./PriceTag";
 export type { PriceTagProps } from "./PriceTag";
 

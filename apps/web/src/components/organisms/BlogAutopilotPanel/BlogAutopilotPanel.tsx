@@ -66,6 +66,13 @@ export interface BlogAutopilotPanelProps
   pausedAt?: string | null;
   /** Human copy for the warning banner. */
   pausedMessage?: string | null;
+  /**
+   * Fires when the user activates a recent-run row. The connector
+   * uses this to open the {@link AutopilotRunDetailDrawerConnector}.
+   * Optional — when omitted, rows render as static (used in
+   * Storybook).
+   */
+  onRunSelect?: (runId: string) => void;
 }
 
 export type BlogAutopilotPanelResult =
@@ -103,6 +110,7 @@ export function BlogAutopilotPanel({
   pausedReason = null,
   pausedAt = null,
   pausedMessage = null,
+  onRunSelect,
   className,
   ...props
 }: BlogAutopilotPanelProps) {
@@ -219,7 +227,11 @@ export function BlogAutopilotPanel({
             className="mt-3 max-h-[24rem] overflow-y-auto rounded-[var(--sp-radius-md)] border border-border"
           >
             {recentRuns.map((run) => (
-              <AutopilotRunRow key={run.id} run={run} />
+              <AutopilotRunRow
+                key={run.id}
+                run={run}
+                onSelect={onRunSelect}
+              />
             ))}
           </ul>
         )}

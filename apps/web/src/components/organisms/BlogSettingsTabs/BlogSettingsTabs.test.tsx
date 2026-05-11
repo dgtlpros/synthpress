@@ -424,7 +424,9 @@ describe("BlogSettingsTabs", () => {
       target: { value: "500" },
     });
     fireEvent.click(
-      screen.getByRole("switch", { name: /Require human review/ }),
+      screen.getByRole("switch", {
+        name: /Require review before autopilot creates articles/,
+      }),
     );
     fireEvent.click(
       screen.getByRole("switch", { name: /Auto-regenerate failed drafts/ }),
@@ -440,6 +442,42 @@ describe("BlogSettingsTabs", () => {
     expect(v.settings.automation.dailyTokenBudget).toBe(500);
     expect(v.settings.automation.requireReview).toBe(false);
     expect(v.settings.automation.regenerateOnFail).toBe(false);
+  });
+
+  it("uses the review-on copy when requireReview=true (default)", () => {
+    // Default DEFAULT_BLOG_SETTINGS.automation.requireReview is true.
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
+
+    expect(
+      screen.getByText(
+        /Generated ideas must be approved before autopilot creates articles/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the hands-off copy when requireReview=false", () => {
+    render(
+      <BlogSettingsTabs
+        initialValue={makeValue({
+          settings: {
+            ...DEFAULT_BLOG_SETTINGS,
+            automation: {
+              ...DEFAULT_BLOG_SETTINGS.automation,
+              requireReview: false,
+            },
+          },
+        })}
+        onSave={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Automation" }));
+
+    expect(
+      screen.getByText(
+        /Autopilot can approve its own ideas and generate article drafts automatically/i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("falls back to 0 when generate-per-week, max-drafts, and backlog are empty", () => {

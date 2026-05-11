@@ -94,6 +94,58 @@ export const AUTOPAUSE_FAILURE_THRESHOLD = 3;
  */
 export const PAUSED_REASON_FAILURE_RATE = "failure_rate";
 
+export interface AutoApproveIdeasInput {
+  blogId: string;
+  /**
+   * Ideas the current autopilot run just inserted via
+   * `generateArticleIdeas`. We only update rows whose id is in this
+   * set so previously-generated (manual or older-run) ideas are
+   * never touched, regardless of `requireReview`.
+   */
+  ideaIds: string[];
+  client?: Client;
+}
+
+export interface AutoApproveIdeasResult {
+  /**
+   * Number of rows actually flipped from `generated → approved`.
+   * Lower than `ideaIds.length` is normal — anything that drifted
+   * out of `generated` between insert and approve (e.g. a manual
+   * Approve / Reject from a fast-clicking user) is silently skipped.
+   */
+  approvedCount: number;
+}
+
+/**
+ * Auto-approval policy:
+ *
+ *   * Gated by `settings.automation.requireReview === false` —
+ *     the caller (runAutopilotForBlog) checks the gate; this helper
+ *     just does the write.
+ *   * Defense in depth: scopes the update to `blog_id = blogId` AND
+ *     `id IN (ideaIds)` AND `status = 'generated'`. Even if a stale
+ *     id from another blog leaked into `ideaIds`, RLS + this filter
+ *     prevent cross-blog drift.
+ *   * Idempotent: re-running the helper for the same `ideaIds` is
+ *     a no-op once they're already approved.
+ */
+export async function autoApproveIdeasForAutopilotRun(
+  input: AutoApproveIdeasInput,
+): Promise<AutoApproveIdeasResult> {
+  if (input.ideaIds.length === 0) return { approvedCount: 0 };
+  const supabase = input.client ?? createAdminClient();
+  const { data, error } = await supabase
+    .from("article_ideas")
+    .update({ status: "approved" satisfies ArticleIdeaStatus })
+    .eq("blog_id", input.blogId)
+    .eq("status", "generated" satisfies ArticleIdeaStatus)
+    .in("id", input.ideaIds)
+    .select("id");
+  if (error) throw error;
+  /* v8 ignore next 1 -- defensive: PostgREST returns array on success */
+  return { approvedCount: data?.length ?? 0 };
+}
+
 /**
  * User-facing copy that lands in `settings.automation.pausedMessage`
  * when this module pauses a blog. The settings panel renders it
@@ -589,6 +641,10 @@ export async function runAutopilotForBlog(
     let approvedIdeas = initialApprovedIdeas;
 
     let ideasGenerated = 0;
+    // Tracked separately from `ideasGenerated` so the run output
+    // can answer the question "did autopilot move ideas straight
+    // into the article queue, or did they stop at 'generated'?"
+    let ideasAutoApproved = 0;
     if (
       approvedIdeas.length < backlogThreshold &&
       tokenBalance >= ideaCost &&
@@ -612,6 +668,25 @@ export async function runAutopilotForBlog(
           client: supabase,
         });
         ideasGenerated = batch.ideas.length;
+
+        // Auto-approve gate. Strictly scoped to ids the *current run*
+        // just inserted — older `generated` ideas (manual or from a
+        // previous autopilot run when requireReview was true) are
+        // never touched. The auto-approve helper double-filters on
+        // `status = 'generated'` so any race-approved rows are
+        // skipped silently.
+        if (
+          settings.automation.requireReview === false &&
+          batch.ideas.length > 0 &&
+          !input.dryRun
+        ) {
+          const result = await autoApproveIdeasForAutopilotRun({
+            blogId: input.blogId,
+            ideaIds: batch.ideas.map((idea) => idea.id),
+            client: supabase,
+          });
+          ideasAutoApproved = result.approvedCount;
+        }
       } catch (err) {
         // Idea generation failed (likely Claude / network). Mark the
         // run failed and bail — no point trying to spawn article
@@ -757,6 +832,8 @@ export async function runAutopilotForBlog(
           approvedIdeasCount: approvedIdeas.length,
           articleJobIds,
           dryRun: Boolean(input.dryRun),
+          ideasAutoApproved,
+          requireReview: settings.automation.requireReview,
         }),
         client: supabase,
       });
@@ -783,6 +860,8 @@ export async function runAutopilotForBlog(
         dryRun: Boolean(input.dryRun),
         lastSpawnError,
         blogName: blogRow.name,
+        ideasAutoApproved,
+        requireReview: settings.automation.requireReview,
       }),
       client: supabase,
     });
@@ -1016,6 +1095,20 @@ interface BuildOutputInput {
   dryRun: boolean;
   lastSpawnError?: string | null;
   blogName?: string;
+  /**
+   * Number of ideas the run flipped from `generated → approved`.
+   * Always 0 when `requireReview === true`, and 0 when no new
+   * ideas were generated this tick. Surfaced in the recent-runs
+   * panel and in dashboards/exports.
+   */
+  ideasAutoApproved: number;
+  /**
+   * Snapshot of the gating setting at run time so an operator
+   * reading old runs can tell whether auto-approve was off (the
+   * scheduler couldn't have approved) vs. on but no ideas were
+   * generated this tick.
+   */
+  requireReview: boolean;
 }
 
 function buildOutput(input: BuildOutputInput): Record<string, unknown> {
@@ -1036,6 +1129,8 @@ function buildOutput(input: BuildOutputInput): Record<string, unknown> {
       approvedIdeasAvailable: input.approvedIdeasCount,
     },
     spawnedArticleJobIds: input.articleJobIds,
+    ideasAutoApproved: input.ideasAutoApproved,
+    requireReview: input.requireReview,
     ...(input.lastSpawnError ? { lastSpawnError: input.lastSpawnError } : {}),
   };
 }

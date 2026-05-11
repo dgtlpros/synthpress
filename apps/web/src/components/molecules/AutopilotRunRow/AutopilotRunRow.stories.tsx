@@ -70,6 +70,38 @@ export const CompletedManualWithIdeas: Story = {
   },
 };
 
+/**
+ * What a fully hands-off autopilot run looks like:
+ * `requireReview: false`, ideas were both generated and
+ * auto-approved in the same tick, and article workflows started.
+ */
+export const CompletedAutoApprovedHandsOff: Story = {
+  args: {
+    run: {
+      id: "r2b",
+      status: "completed",
+      triggerSource: "cron",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        reason: "ok",
+        ideasAutoApproved: 5,
+        requireReview: false,
+        spawnedArticleJobIds: ["j1", "j2", "j3"],
+      },
+      ideasGenerated: 5,
+      articlesStarted: 3,
+      articlesCompleted: 0,
+      articlesFailed: 0,
+      tokensSpent: 16,
+      tokensRefunded: 0,
+      createdAt: TWO_MIN_AGO,
+      startedAt: TWO_MIN_AGO,
+      completedAt: NOW,
+    },
+  },
+};
+
 export const SkippedDailyCap: Story = {
   args: {
     run: {
