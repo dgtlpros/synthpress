@@ -13,6 +13,7 @@ import {
   WorkspaceSidebar,
   type WorkspaceSidebarTeam,
 } from "@/components/molecules/WorkspaceSidebar";
+import { ActiveJobsTrayConnector } from "@/connectors/ActiveJobsTrayConnector";
 import { MobileNavConnector } from "@/connectors/MobileNavConnector";
 import {
   HeaderTokenContextConnector,
@@ -145,6 +146,11 @@ export default async function DashboardLayout({
         </header>
         <div className="p-4 sm:p-6">{children}</div>
       </main>
+      {/* Floating active-jobs widget. Mounted once per dashboard
+          shell so it's visible across every page (settings, ideas,
+          posts, billing, etc.). The component itself returns null
+          when there are no jobs to show, so quiet pages stay quiet. */}
+      <ActiveJobsTrayConnector />
     </div>
   );
 }

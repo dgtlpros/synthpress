@@ -491,6 +491,158 @@ export async function getActiveGenerateArticleIdeaIds(
 }
 
 /**
+ * Recently-finished window for the global jobs widget. Completed /
+ * failed jobs appear in the tray for ~5 minutes after they finish so
+ * users notice them when they return to the app, then drop off.
+ *
+ * Exported so the hook layer can compute the same cutoff client-side
+ * if it ever wants to evict rows in memory before the next poll.
+ */
+export const ACTIVE_JOB_RECENT_WINDOW_MS = 5 * 60_000;
+
+/**
+ * Display row for the global active-jobs widget. Wraps the raw
+ * `article_jobs` row with the small slice of related blog + article
+ * data the tray needs to render a "View article" link with a friendly
+ * label.
+ */
+export interface ActiveArticleJobRow {
+  id: string;
+  type: string;
+  status: string;
+  currentStep: string | null;
+  errorMessage: string | null;
+  output: Json | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  blog: { id: string; name: string; projectId: string; teamId: string };
+  article: { id: string; title: string; status: string } | null;
+  ideaId: string | null;
+}
+
+/**
+ * Returns the `article_jobs` rows the global widget should display:
+ *
+ *   * Anything pending or processing right now (live work).
+ *   * Anything completed / failed / cancelled within the last
+ *     {@link ACTIVE_JOB_RECENT_WINDOW_MS} so users see "Article ready
+ *     for review" / "Generation failed" without polling stale state.
+ *
+ * Relies on the `Members can view article jobs in team blogs` RLS
+ * policy to scope to the caller's teams — pass a user-context client
+ * (not the admin / service-role one) so RLS actually fires.
+ */
+export async function listActiveArticleJobsForUser(
+  client: Client,
+  options: { recentWindowMs?: number; limit?: number } = {},
+): Promise<ActiveArticleJobRow[]> {
+  const window = options.recentWindowMs ?? ACTIVE_JOB_RECENT_WINDOW_MS;
+  const limit = options.limit ?? 50;
+  const cutoffIso = new Date(Date.now() - window).toISOString();
+
+  const { data, error } = await client
+    .from("article_jobs")
+    .select(
+      `
+      id,
+      type,
+      status,
+      current_step,
+      error_message,
+      output,
+      created_at,
+      started_at,
+      completed_at,
+      article_idea_id,
+      blog:blogs!blog_id (
+        id,
+        name,
+        project_id,
+        project:projects!project_id ( team_id )
+      ),
+      article:articles!article_id ( id, title, status )
+    `,
+    )
+    .or(`status.in.(pending,processing),completed_at.gte.${cutoffIso}`)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  if (!data) return [];
+
+  type RawRow = {
+    id: string;
+    type: string;
+    status: string;
+    current_step: string | null;
+    error_message: string | null;
+    output: Json | null;
+    created_at: string;
+    started_at: string | null;
+    completed_at: string | null;
+    article_idea_id: string | null;
+    blog:
+      | {
+          id: string;
+          name: string;
+          project_id: string;
+          project: { team_id: string } | { team_id: string }[] | null;
+        }
+      | { id: string; name: string; project_id: string; project: unknown }[]
+      | null;
+    article:
+      | { id: string; title: string; status: string }
+      | { id: string; title: string; status: string }[]
+      | null;
+  };
+
+  // Supabase typed FK joins return either a single object or an array
+  // depending on cardinality inference. Normalize both shapes here so
+  // callers get a flat row.
+  const rows: ActiveArticleJobRow[] = [];
+  for (const raw of data as RawRow[]) {
+    const blogRaw = Array.isArray(raw.blog) ? raw.blog[0] : raw.blog;
+    if (!blogRaw) continue;
+    const projectRaw = Array.isArray(blogRaw.project)
+      ? blogRaw.project[0]
+      : blogRaw.project;
+    /* v8 ignore next 1 -- defensive: blog FK guarantees the project row */
+    if (!projectRaw) continue;
+    const articleRaw = Array.isArray(raw.article)
+      ? raw.article[0]
+      : raw.article;
+
+    rows.push({
+      id: raw.id,
+      type: raw.type,
+      status: raw.status,
+      currentStep: raw.current_step,
+      errorMessage: raw.error_message,
+      output: raw.output,
+      createdAt: raw.created_at,
+      startedAt: raw.started_at,
+      completedAt: raw.completed_at,
+      blog: {
+        id: blogRaw.id,
+        name: blogRaw.name,
+        projectId: blogRaw.project_id,
+        teamId: (projectRaw as { team_id: string }).team_id,
+      },
+      article: articleRaw
+        ? {
+            id: articleRaw.id,
+            title: articleRaw.title,
+            status: articleRaw.status,
+          }
+        : null,
+      ideaId: raw.article_idea_id,
+    });
+  }
+  return rows;
+}
+
+/**
  * Allowed status transitions for `updateArticleIdeaStatus`.
  *
  *   * `generated` can move forward to `approved` or `rejected`.

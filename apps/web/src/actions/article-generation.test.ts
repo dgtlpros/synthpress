@@ -32,6 +32,7 @@ vi.mock("@/services/team-policy-service", () => {
 
 vi.mock("@/services/article-generation-service", () => ({
   generateArticleIdeas: vi.fn(),
+  listActiveArticleJobsForUser: vi.fn(),
   queueGenerateArticleFromIdea: vi.fn(),
   updateArticleIdeaStatus: vi.fn(),
 }));
@@ -55,11 +56,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   generateArticleIdeas,
+  listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
 import {
+  getActiveTeamJobs,
   generateArticleFromIdea,
   generateIdeasManual,
   updateIdeaStatus,
@@ -69,6 +72,7 @@ const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedAssertCan = vi.mocked(assertCan);
 const mockedGenerateArticleIdeas = vi.mocked(generateArticleIdeas);
+const mockedListActiveJobs = vi.mocked(listActiveArticleJobsForUser);
 const mockedQueueGenerateArticle = vi.mocked(queueGenerateArticleFromIdea);
 const mockedUpdateArticleIdeaStatus = vi.mocked(updateArticleIdeaStatus);
 const mockedRevalidatePath = vi.mocked(revalidatePath);
@@ -631,5 +635,69 @@ describe("generateArticleFromIdea", () => {
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Could not generate article.");
+  });
+});
+
+describe("getActiveTeamJobs", () => {
+  it("returns an empty list (no error) when the caller is signed out", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient(null) as never);
+
+    const result = await getActiveTeamJobs();
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(mockedListActiveJobs).not.toHaveBeenCalled();
+  });
+
+  it("delegates to listActiveArticleJobsForUser for signed-in callers (passing the user-context client, not admin)", async () => {
+    const userClient = makeAuthedClient();
+    mockedCreateClient.mockResolvedValue(userClient as never);
+    mockedListActiveJobs.mockResolvedValueOnce([
+      {
+        id: "job-1",
+        type: "generate_article",
+        status: "processing",
+        currentStep: "writing_article",
+        errorMessage: null,
+        output: null,
+        createdAt: "2026-05-11T00:00:00Z",
+        startedAt: "2026-05-11T00:00:01Z",
+        completedAt: null,
+        ideaId: "i1",
+        blog: { id: "b1", name: "Blog", projectId: "p1", teamId: "t1" },
+        article: {
+          id: "article-1",
+          title: "Draft",
+          status: "ready_for_review",
+        },
+      },
+    ]);
+
+    const result = await getActiveTeamJobs();
+
+    expect(mockedListActiveJobs).toHaveBeenCalledWith(userClient);
+    // Crucially NOT the admin client — RLS does the team scoping.
+    expect(mockedListActiveJobs).not.toHaveBeenCalledWith(
+      expect.objectContaining({ from: expect.anything(), __admin: true }),
+    );
+    expect(result.data).toHaveLength(1);
+    expect(result.data?.[0]?.id).toBe("job-1");
+    expect(result.error).toBeNull();
+  });
+
+  it("surfaces a friendly error message when the service throws", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient() as never);
+    mockedListActiveJobs.mockRejectedValueOnce(new Error("supabase down"));
+
+    const result = await getActiveTeamJobs();
+    expect(result.error).toBe("supabase down");
+    expect(result.data).toBeNull();
+  });
+
+  it("falls back to a default message when the service throws a non-Error", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient() as never);
+    mockedListActiveJobs.mockRejectedValueOnce("string-failure");
+
+    const result = await getActiveTeamJobs();
+    expect(result.error).toBe("Could not load active jobs.");
   });
 });

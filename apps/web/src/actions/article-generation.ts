@@ -6,9 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
+  type ActiveArticleJobRow,
   type ArticleIdeaStatus,
   generateArticleIdeas,
   type GenerateArticleIdeasResult,
+  listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
@@ -412,6 +414,37 @@ export async function generateArticleFromIdea(
           "Only approved ideas can be turned into articles. Approve the idea first.",
       };
     }
+    return { data: null, error: message };
+  }
+}
+
+/**
+ * Polled by the global active-jobs tray. Returns active + recently
+ * finished `article_jobs` for blogs the signed-in user can see.
+ *
+ * Auth: must be signed in. Team scoping happens via the user-context
+ * Supabase client + the existing `Members can view article jobs in
+ * team blogs` RLS policy — no admin client involved.
+ *
+ * Returns `{ data: [], error: null }` for unauthenticated callers
+ * rather than an error so the tray can render a no-op state on the
+ * marketing pages without surfacing a scary toast.
+ */
+export async function getActiveTeamJobs(): Promise<
+  ActionResult<ActiveArticleJobRow[]>
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { data: [], error: null };
+
+  try {
+    const rows = await listActiveArticleJobsForUser(supabase);
+    return { data: rows, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Could not load active jobs.";
     return { data: null, error: message };
   }
 }

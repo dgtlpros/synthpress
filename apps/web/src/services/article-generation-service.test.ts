@@ -33,9 +33,11 @@ import {
   failArticleJob,
   generateArticleDraftFromIdea,
   generateArticleIdeas,
+  ACTIVE_JOB_RECENT_WINDOW_MS,
   getActiveGenerateArticleIdeaIds,
   getBlogGenerationContext,
   isAllowedIdeaStatusTransition,
+  listActiveArticleJobsForUser,
   listArticleIdeasForBlog,
   logUsageEvent,
   queueGenerateArticleFromIdea,
@@ -70,6 +72,7 @@ function makeChain<T>(result: ChainResult<T>) {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
@@ -2959,5 +2962,156 @@ describe("getActiveGenerateArticleIdeaIds", () => {
     await getActiveGenerateArticleIdeaIds("b1", ["i1"]);
 
     expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// listActiveArticleJobsForUser
+// ============================================================================
+
+describe("listActiveArticleJobsForUser", () => {
+  function makeJobsClient(rows: unknown) {
+    return makeClient({
+      article_jobs: { data: rows, error: null },
+    });
+  }
+
+  const baseRow = {
+    id: "job-1",
+    type: "generate_article",
+    status: "processing",
+    current_step: "writing_article",
+    error_message: null,
+    output: null,
+    created_at: "2026-05-11T00:00:00Z",
+    started_at: "2026-05-11T00:00:01Z",
+    completed_at: null,
+    article_idea_id: "idea-1",
+    blog: {
+      id: "b1",
+      name: "Indie Stories",
+      project_id: "p1",
+      project: { team_id: "t1" },
+    },
+    article: { id: "article-1", title: "Draft title", status: "generating" },
+  };
+
+  it("returns shaped rows with denormalized blog + article data", async () => {
+    const client = makeJobsClient([baseRow]);
+
+    const rows = await listActiveArticleJobsForUser(client as never);
+
+    expect(rows).toEqual([
+      {
+        id: "job-1",
+        type: "generate_article",
+        status: "processing",
+        currentStep: "writing_article",
+        errorMessage: null,
+        output: null,
+        createdAt: "2026-05-11T00:00:00Z",
+        startedAt: "2026-05-11T00:00:01Z",
+        completedAt: null,
+        ideaId: "idea-1",
+        blog: {
+          id: "b1",
+          name: "Indie Stories",
+          projectId: "p1",
+          teamId: "t1",
+        },
+        article: {
+          id: "article-1",
+          title: "Draft title",
+          status: "generating",
+        },
+      },
+    ]);
+  });
+
+  it("queries the right table with the active-or-recent OR clause", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-11T00:30:00Z"));
+    const client = makeJobsClient([]);
+
+    await listActiveArticleJobsForUser(client as never);
+
+    expect(client.from).toHaveBeenCalledWith("article_jobs");
+    const orArg = client.__chains.article_jobs!.or.mock.calls[0]![0];
+    expect(orArg).toContain("status.in.(pending,processing)");
+    // Cutoff = now - default window (5 min) = 00:25:00.000Z
+    expect(orArg).toContain("completed_at.gte.2026-05-11T00:25:00.000Z");
+  });
+
+  it("respects a custom recentWindowMs and limit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-11T00:30:00Z"));
+    const client = makeJobsClient([]);
+
+    await listActiveArticleJobsForUser(client as never, {
+      recentWindowMs: 60_000,
+      limit: 5,
+    });
+
+    const orArg = client.__chains.article_jobs!.or.mock.calls[0]![0];
+    expect(orArg).toContain("completed_at.gte.2026-05-11T00:29:00.000Z");
+    expect(client.__chains.article_jobs!.limit).toHaveBeenCalledWith(5);
+  });
+
+  it("returns [] when supabase yields null data with no error", async () => {
+    const client = makeJobsClient(null);
+
+    const rows = await listActiveArticleJobsForUser(client as never);
+    expect(rows).toEqual([]);
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({
+      article_jobs: { data: null, error: { message: "boom" } },
+    });
+
+    await expect(
+      listActiveArticleJobsForUser(client as never),
+    ).rejects.toMatchObject({ message: "boom" });
+  });
+
+  it("handles supabase returning the FK joins as arrays (cardinality fallback)", async () => {
+    const client = makeJobsClient([
+      {
+        ...baseRow,
+        blog: [
+          {
+            id: "b1",
+            name: "Indie Stories",
+            project_id: "p1",
+            project: [{ team_id: "t1" }],
+          },
+        ],
+        article: [
+          { id: "article-1", title: "Draft", status: "ready_for_review" },
+        ],
+      },
+    ]);
+
+    const rows = await listActiveArticleJobsForUser(client as never);
+    expect(rows[0]?.blog.teamId).toBe("t1");
+    expect(rows[0]?.article?.status).toBe("ready_for_review");
+  });
+
+  it("skips rows whose blog FK is missing (defensive)", async () => {
+    const client = makeJobsClient([{ ...baseRow, blog: null }]);
+
+    const rows = await listActiveArticleJobsForUser(client as never);
+    expect(rows).toEqual([]);
+  });
+
+  it("returns null article when the job has no linked article yet", async () => {
+    const client = makeJobsClient([{ ...baseRow, article: null }]);
+
+    const rows = await listActiveArticleJobsForUser(client as never);
+    expect(rows[0]?.article).toBeNull();
+  });
+
+  it("exposes a sane default recent-window constant (5 min)", () => {
+    expect(ACTIVE_JOB_RECENT_WINDOW_MS).toBe(5 * 60_000);
   });
 });
