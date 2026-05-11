@@ -183,10 +183,133 @@ and the bar will jump.
 
 ### Deployed cron
 
-When we add `vercel.json` with the schedule, Vercel sends a `GET`
-to the route on the configured cadence with the `Authorization`
-header set to `Bearer ${CRON_SECRET}` automatically. No further
-client setup needed.
+`vercel.json` at `apps/web/vercel.json` configures both cron routes:
+
+```json
+{
+  "crons": [
+    { "path": "/api/cron/reconcile-article-jobs", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/autopilot",              "schedule": "*/15 * * * *" }
+  ]
+}
+```
+
+Vercel sends a `GET` to each route on the configured cadence with
+`Authorization: Bearer ${CRON_SECRET}` set automatically.
+
+## Autopilot scheduler
+
+`/api/cron/autopilot` runs the per-blog autopilot scheduler.
+
+Per cron tick:
+
+1. Load up to 50 blogs whose owner has explicitly armed autopilot
+   (`settings.automation.mode='autopilot' AND .enabled=true`).
+2. For each blog, create a `blog_autopilot_runs` row in
+   `processing`, then walk through:
+   - `loading_settings` — re-confirm eligibility.
+   - `checking_budget` — read team token balance, sum tokens already
+     spent on this blog in the last 24h, derive a daily article cap
+     from `maxPostsPerDay` + `ceil(generatePerWeek / 7)`.
+   - `checking_backlog` — count approved ideas.
+   - `generating_ideas` (only if `approvedIdeas < backlogThreshold`
+     AND budget allows) — call the same `generateArticleIdeas`
+     helper the manual flow uses, with `triggerSource='autopilot'`
+     and `jobMetadata={ autopilotRunId }`.
+   - `generating_articles` — for up to
+     `min(approvedIdeas.length, articleSlotsRemainingToday,
+     articlesAllowedByTokens, PER_RUN_ARTICLE_CAP=5)` ideas, queue
+     a job + start a workflow with `autopilotRunId` in the input.
+   - `completed` — close the run with `status='completed'`,
+     `status='skipped'` (no work was needed), or `status='failed'`
+     (an unexpected exception escaped). Counters and a budget /
+     backlog snapshot land on `output`.
+
+### What autopilot does NOT do
+
+* Auto-approve ideas. New ideas land as `status='generated'` and
+  wait for human review.
+* Auto-publish articles. Drafts land as `ready_for_review`
+  regardless of `requireReview` (publishing ships in a later PR).
+* Re-spawn workflows for jobs already pending/processing on the
+  same idea. `queueGenerateArticleFromIdea` short-circuits with
+  `alreadyQueued=true`.
+
+### Per-run + global safety caps
+
+| Cap                    | Source                                 | Behavior                                                         |
+| ---------------------- | -------------------------------------- | ---------------------------------------------------------------- |
+| Per-blog daily article | `min(maxPostsPerDay, ceil(weekly/7))`  | Subtracts today's already-started count.                         |
+| Per-blog daily tokens  | `dailyTokenBudget` (jsonb), nullable   | Subtracts today's `usage_events.credits_used` for this blog.     |
+| Team-wide tokens       | `team owner balance`                   | `floor(balance / cost_per_article)` articles allowed.            |
+| Per-run hard cap       | `PER_RUN_ARTICLE_CAP = 5`              | Always wins. Keeps a single tick from going wild on cold start.  |
+| Approved-idea backlog  | `backlogThreshold` (jsonb)             | Below threshold → top up via idea generation; above → skip ideas.|
+
+### Local testing
+
+```bash
+# .env.local
+CRON_SECRET=dev-secret-not-for-prod
+
+# Arm autopilot on a blog (Supabase Studio):
+UPDATE blogs
+SET settings = jsonb_set(
+  jsonb_set(settings, '{automation,mode}',    '"autopilot"'::jsonb),
+  '{automation,enabled}', 'true'::jsonb
+)
+WHERE id = '<your-blog-id>';
+
+# Optional: approve an idea so the article-spawning path runs
+UPDATE article_ideas SET status = 'approved'
+WHERE id = '<some-generated-idea-id>';
+
+pnpm dev
+
+# Dry run first — see what the scheduler WOULD do without actually
+# spawning workflows or generating ideas:
+curl -i \
+  -H "Authorization: Bearer dev-secret-not-for-prod" \
+  "http://localhost:3000/api/cron/autopilot?dry_run=true"
+
+# Real run:
+curl -i \
+  -H "Authorization: Bearer dev-secret-not-for-prod" \
+  http://localhost:3000/api/cron/autopilot
+
+# Verify in Supabase Studio:
+#   - blog_autopilot_runs has a new row with status completed/skipped/failed
+#   - blog_autopilot_runs.current_step landed at 'completed'
+#   - blog_autopilot_runs.output has the budget + backlog snapshot
+#   - blog_autopilot_runs.ideas_generated / .articles_started counters
+#     reflect what happened
+#   - article_jobs spawned by the scheduler have:
+#       input.triggerSource = 'autopilot'
+#       input.autopilotRunId = the blog_autopilot_runs.id
+#   - The global active-jobs tray shows the new "Generating…" rows
+#     within ~8s of the curl returning.
+```
+
+### "Run autopilot now" for a single blog
+
+For one-off testing without waiting for the cron tick (or to
+confirm a freshly-armed blog), call the per-blog helper directly
+from a script / `next dev` REPL:
+
+```ts
+import { runAutopilotForBlog } from "@/services/autopilot-scheduler-service";
+
+await runAutopilotForBlog({
+  teamId:    "<team-id>",
+  projectId: "<project-id>",
+  blogId:    "<blog-id>",
+  triggerSource: "manual",
+  triggeredByUserId: "<your-uuid>", // for the audit log
+});
+```
+
+A future PR can wrap this in a server action + a "Run autopilot
+now" button on the blog settings page; deferred so this PR stays
+focused on the scheduler.
 
 ## Why the workflow is one big step (not many small ones)
 

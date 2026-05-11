@@ -127,6 +127,16 @@ export {
 } from "./IdeaStatusBadge";
 export type { IdeaStatus, IdeaStatusBadgeProps } from "./IdeaStatusBadge";
 
+export {
+  AutopilotRunStatusBadge,
+  AUTOPILOT_RUN_STATUSES,
+  getAutopilotRunStatusLabel,
+} from "./AutopilotRunStatusBadge";
+export type {
+  AutopilotRunStatus,
+  AutopilotRunStatusBadgeProps,
+} from "./AutopilotRunStatusBadge";
+
 export { MarkdownPreview } from "./MarkdownPreview";
 export type { MarkdownPreviewProps } from "./MarkdownPreview";
 

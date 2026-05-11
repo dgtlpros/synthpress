@@ -3,13 +3,19 @@ import {
   createClient,
   getAuthUserOncePerResponse,
 } from "@/lib/supabase/server";
+import { BlogAutopilotPanelConnector } from "@/connectors/BlogAutopilotPanelConnector";
 import { BlogSettingsConnector } from "@/connectors/BlogSettingsConnector";
 import { BlogSettingsFormConnector } from "@/connectors/BlogSettingsFormConnector";
 import { Card } from "@/components/atoms/Card";
+import type { AutopilotRunRowData } from "@/components/molecules/AutopilotRunRow";
+import type { AutopilotRunStatus } from "@/components/atoms/AutopilotRunStatusBadge";
 import { loadBlogSettings } from "@/lib/blog-settings";
+import { listBlogAutopilotRunsForBlog } from "@/services/blog-autopilot-run-service";
 import type { BlogSettingsTabsValue } from "@/components/organisms/BlogSettingsTabs";
 
 export const dynamic = "force-dynamic";
+
+const RECENT_RUNS_LIMIT = 10;
 
 export default async function BlogSettingsPage({
   params,
@@ -37,6 +43,37 @@ export default async function BlogSettingsPage({
   if (!blog) notFound();
 
   const settings = loadBlogSettings(blog.settings);
+  const autopilotEnabled =
+    settings.automation.mode === "autopilot" && settings.automation.enabled;
+
+  // Recent autopilot runs feed the in-page panel. The list helper
+  // accepts a user-context client and `blog_autopilot_runs` has
+  // SELECT RLS for team members, so this read is naturally scoped
+  // without us threading admin credentials.
+  const runRows = await listBlogAutopilotRunsForBlog(blogId, {
+    limit: RECENT_RUNS_LIMIT,
+    client: supabase,
+  });
+  const recentRuns: AutopilotRunRowData[] = runRows.map((row) => ({
+    id: row.id,
+    status: row.status as AutopilotRunStatus,
+    triggerSource: row.trigger_source,
+    currentStep: row.current_step,
+    errorMessage: row.error_message,
+    output:
+      row.output && typeof row.output === "object" && !Array.isArray(row.output)
+        ? (row.output as Record<string, unknown>)
+        : null,
+    ideasGenerated: row.ideas_generated,
+    articlesStarted: row.articles_started,
+    articlesCompleted: row.articles_completed,
+    articlesFailed: row.articles_failed,
+    tokensSpent: row.tokens_spent,
+    tokensRefunded: row.tokens_refunded,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  }));
 
   const initialValue: BlogSettingsTabsValue = {
     general: {
@@ -56,6 +93,18 @@ export default async function BlogSettingsPage({
         projectId={projectId}
         blogId={blogId}
         initialValue={initialValue}
+      />
+
+      <BlogAutopilotPanelConnector
+        teamId={teamId}
+        projectId={projectId}
+        blogId={blogId}
+        blogName={blog.name}
+        autopilotEnabled={autopilotEnabled}
+        recentRuns={recentRuns}
+        pausedReason={settings.automation.pausedReason}
+        pausedAt={settings.automation.pausedAt}
+        pausedMessage={settings.automation.pausedMessage}
       />
 
       <Card>

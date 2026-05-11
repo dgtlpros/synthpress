@@ -149,6 +149,9 @@ describe("loadBlogSettings", () => {
         regenerateOnFail: false,
         backlogThreshold: 25,
         dailyTokenBudget: 1000,
+        pausedReason: "failure_rate",
+        pausedAt: "2026-05-11T12:00:00.000Z",
+        pausedMessage: "Autopilot was paused.",
       },
       publishing: {
         defaultDestination: "wordpress",
@@ -185,6 +188,9 @@ describe("loadBlogSettings", () => {
     expect(out.automation.enabled).toBe(true);
     expect(out.automation.backlogThreshold).toBe(25);
     expect(out.automation.dailyTokenBudget).toBe(1000);
+    expect(out.automation.pausedReason).toBe("failure_rate");
+    expect(out.automation.pausedAt).toBe("2026-05-11T12:00:00.000Z");
+    expect(out.automation.pausedMessage).toBe("Autopilot was paused.");
     expect(out.publishing.defaultDestination).toBe("wordpress");
     expect(out.media.imageSource).toBe("manual_upload");
     expect(out.advanced.competitorsToAvoid).toBe("y");
@@ -194,6 +200,48 @@ describe("loadBlogSettings", () => {
     expect(DEFAULT_BLOG_SETTINGS.automation.enabled).toBe(false);
     expect(DEFAULT_BLOG_SETTINGS.automation.backlogThreshold).toBe(10);
     expect(DEFAULT_BLOG_SETTINGS.automation.dailyTokenBudget).toBeNull();
+  });
+
+  it("defaults the autopilot pause-metadata fields to null (no pause)", () => {
+    expect(DEFAULT_BLOG_SETTINGS.automation.pausedReason).toBeNull();
+    expect(DEFAULT_BLOG_SETTINGS.automation.pausedAt).toBeNull();
+    expect(DEFAULT_BLOG_SETTINGS.automation.pausedMessage).toBeNull();
+  });
+
+  it("preserves explicit null pause-metadata values (means: not paused)", () => {
+    const out = loadBlogSettings({
+      automation: {
+        pausedReason: null,
+        pausedAt: null,
+        pausedMessage: null,
+      },
+    } as never);
+    expect(out.automation.pausedReason).toBeNull();
+    expect(out.automation.pausedAt).toBeNull();
+    expect(out.automation.pausedMessage).toBeNull();
+  });
+
+  it("preserves valid string pause-metadata values from a paused blog", () => {
+    const out = loadBlogSettings({
+      automation: {
+        pausedReason: "failure_rate",
+        pausedAt: "2026-05-11T12:00:00.000Z",
+        pausedMessage:
+          "Autopilot was paused because multiple recent runs failed.",
+      },
+    } as never);
+    expect(out.automation.pausedReason).toBe("failure_rate");
+    expect(out.automation.pausedAt).toBe("2026-05-11T12:00:00.000Z");
+    expect(out.automation.pausedMessage).toMatch(/multiple recent runs/);
+  });
+
+  it("falls back to default when pause-metadata fields are non-string non-null", () => {
+    const out = loadBlogSettings({
+      automation: { pausedReason: 42 },
+    } as never);
+    expect(out.automation.pausedReason).toBe(
+      DEFAULT_BLOG_SETTINGS.automation.pausedReason,
+    );
   });
 
   it("preserves an explicit null dailyTokenBudget (means: no per-blog cap)", () => {

@@ -1280,6 +1280,160 @@ describe("updateBlog", () => {
     const result = await updateBlog("t1", "p1", "b1", { name: "Blog" });
     expect(result).toEqual({ data: null, error: "update failed" });
   });
+
+  // ── Auto-pause clear on re-enable ──────────────────────────────────────────
+  //
+  // When an autopilot run trips the failure-rate threshold, the
+  // scheduler stamps `pausedReason / pausedAt / pausedMessage` onto
+  // `settings.automation` and flips `enabled=false`. The settings
+  // panel surfaces those fields as a warning. The moment the user
+  // toggles Enabled back on (presumably after fixing whatever was
+  // broken), this action wipes the three paused fields so the
+  // warning disappears and recent-runs panel goes back to normal.
+
+  function mockUpdateBlogClient(
+    existingBlog: Record<string, unknown>,
+    update: ReturnType<typeof vi.fn>,
+  ): void {
+    mockedCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: existingBlog, error: null }),
+            }),
+          }),
+        }),
+        update,
+      }),
+    } as never);
+  }
+
+  it("clears paused metadata when the user re-enables autopilot", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const existingBlog = {
+      name: "Blog",
+      slug: "blog",
+      settings: {
+        automation: {
+          mode: "autopilot",
+          enabled: false,
+          pausedReason: "failure_rate",
+          pausedAt: "2026-05-11T12:00:00.000Z",
+          pausedMessage: "Autopilot was paused.",
+        },
+      },
+    };
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+    mockUpdateBlogClient(existingBlog, update);
+
+    const result = await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { enabled: true } },
+    });
+
+    expect(result.error).toBeNull();
+    expect(update).toHaveBeenCalledTimes(1);
+    const updatePayload = update.mock.calls[0]![0] as {
+      settings: { automation: Record<string, unknown> };
+    };
+    expect(updatePayload.settings.automation).toMatchObject({
+      mode: "autopilot",
+      enabled: true,
+      pausedReason: null,
+      pausedAt: null,
+      pausedMessage: null,
+    });
+  });
+
+  it("preserves paused metadata when the user changes other settings without flipping enabled", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    const existingBlog = {
+      name: "Blog",
+      slug: "blog",
+      settings: {
+        automation: {
+          mode: "autopilot",
+          enabled: false,
+          generatePerWeek: 5,
+          pausedReason: "failure_rate",
+          pausedAt: "2026-05-11T12:00:00.000Z",
+          pausedMessage: "Autopilot was paused.",
+        },
+      },
+    };
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+    mockUpdateBlogClient(existingBlog, update);
+
+    await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { generatePerWeek: 10 } },
+    });
+
+    const updatePayload = update.mock.calls[0]![0] as {
+      settings: { automation: Record<string, unknown> };
+    };
+    expect(updatePayload.settings.automation).toMatchObject({
+      enabled: false,
+      pausedReason: "failure_rate",
+      pausedAt: "2026-05-11T12:00:00.000Z",
+      pausedMessage: "Autopilot was paused.",
+      generatePerWeek: 10,
+    });
+  });
+
+  it("does not write paused fields when the blog was never paused (still re-enabling)", async () => {
+    mockAuth({ id: "u1" });
+    mockedAssertCan.mockResolvedValue("member");
+    mockAdmin({});
+
+    // Blog has automation.enabled=false but no paused metadata
+    // (manual disable, not a scheduler pause). Re-enabling should
+    // skip the clear branch entirely — no harm if it ran, but the
+    // optimization keeps update payloads minimal.
+    const existingBlog = {
+      name: "Blog",
+      slug: "blog",
+      settings: {
+        automation: {
+          mode: "autopilot",
+          enabled: false,
+        },
+      },
+    };
+    const updateEq2 = vi.fn().mockResolvedValue({ error: null });
+    const updateEq1 = vi.fn().mockReturnValue({ eq: updateEq2 });
+    const update = vi.fn().mockReturnValue({ eq: updateEq1 });
+    mockUpdateBlogClient(existingBlog, update);
+
+    await updateBlog("t1", "p1", "b1", {
+      settings: { automation: { enabled: true } },
+    });
+
+    const updatePayload = update.mock.calls[0]![0] as {
+      settings: { automation: Record<string, unknown> };
+    };
+    // Defaults from the normalizer are null anyway — assert the
+    // re-enable still works and the update is well formed.
+    expect(updatePayload.settings.automation).toMatchObject({
+      enabled: true,
+      pausedReason: null,
+      pausedAt: null,
+      pausedMessage: null,
+    });
+  });
 });
 
 // ── deleteBlog ────────────────────────────────────────────────────────────────

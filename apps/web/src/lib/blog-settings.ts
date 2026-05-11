@@ -137,6 +137,25 @@ export interface BlogAutomationSettings {
    * per-blog cap beyond the team's overall balance / plan limit.
    */
   dailyTokenBudget: number | null;
+  /**
+   * When the autopilot scheduler auto-pauses a blog (e.g. repeated
+   * failures), it stamps these three fields onto `settings.automation`
+   * alongside `enabled=false`. The settings panel reads them to
+   * distinguish "user turned autopilot off" from "the system paused
+   * it for a reason".
+   *
+   *   * `pausedReason` — short machine-readable code (currently the
+   *     only value is `"failure_rate"`; future: `"budget_exhausted"`,
+   *     `"plan_downgrade"`, etc.)
+   *   * `pausedAt` — ISO timestamp the pause was recorded.
+   *   * `pausedMessage` — human copy the panel renders verbatim.
+   *
+   * All three are cleared the moment the user re-enables autopilot
+   * via the settings save flow (see `actions/workspace.ts`).
+   */
+  pausedReason: string | null;
+  pausedAt: string | null;
+  pausedMessage: string | null;
 }
 
 export interface BlogPublishingSettings {
@@ -237,6 +256,9 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
     regenerateOnFail: true,
     backlogThreshold: 10,
     dailyTokenBudget: null,
+    pausedReason: null,
+    pausedAt: null,
+    pausedMessage: null,
   },
   publishing: {
     defaultDestination: "none",
@@ -304,6 +326,23 @@ function pickNumberOrNull(
   const v = source[key];
   if (v === null) return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
+  return fallback;
+}
+
+/**
+ * Like {@link pickString} but allows `null` as a meaningful value.
+ * Used for the autopilot pause-metadata fields where `null` ≠ default;
+ * it encodes "this blog has never been paused".
+ */
+function pickStringOrNull(
+  source: Record<string, unknown> | undefined,
+  key: string,
+  fallback: string | null,
+): string | null {
+  if (!source) return fallback;
+  const v = source[key];
+  if (v === null) return null;
+  if (typeof v === "string") return v;
   return fallback;
 }
 
@@ -586,6 +625,21 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         automation,
         "dailyTokenBudget",
         d.automation.dailyTokenBudget,
+      ),
+      pausedReason: pickStringOrNull(
+        automation,
+        "pausedReason",
+        d.automation.pausedReason,
+      ),
+      pausedAt: pickStringOrNull(
+        automation,
+        "pausedAt",
+        d.automation.pausedAt,
+      ),
+      pausedMessage: pickStringOrNull(
+        automation,
+        "pausedMessage",
+        d.automation.pausedMessage,
       ),
     },
     publishing: {

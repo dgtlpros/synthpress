@@ -677,6 +677,24 @@ export async function updateBlog(
     if (input.settings) {
       const current = loadBlogSettings(existing.settings as Json);
       const next = mergeBlogSettings(current, input.settings);
+      // When the user re-enables autopilot via the settings save flow,
+      // clear the auto-pause metadata so the warning banner disappears
+      // and recent-runs panel goes back to the normal "armed" state.
+      // The user toggling Enabled is a fresh acknowledgment of the
+      // failed runs, so it's safe to wipe.
+      if (
+        input.settings.automation?.enabled === true &&
+        (next.automation.pausedReason !== null ||
+          next.automation.pausedAt !== null ||
+          next.automation.pausedMessage !== null)
+      ) {
+        next.automation = {
+          ...next.automation,
+          pausedReason: null,
+          pausedAt: null,
+          pausedMessage: null,
+        };
+      }
       update.settings = next as unknown as Json;
     }
 
