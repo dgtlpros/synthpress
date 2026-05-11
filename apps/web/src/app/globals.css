@@ -1,8 +1,29 @@
 @import "tailwindcss";
 
 /*
+ * Dark mode is opt-in via the `dark` class on <html>, set by `next-themes`
+ * (see `ThemeProvider` in `src/components/atoms/ThemeProvider`). Tailwind v4
+ * does not pick up `darkMode: "class"` from a config file — it follows
+ * `prefers-color-scheme` by default — so we register an explicit variant
+ * here instead. The `:where(.dark, .dark *)` selector keeps the variant at
+ * specificity (0,1,0) so utility classes still win like normal Tailwind.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
  * SynthPress Design Tokens
  * Extracted from the brand logo: indigo→blue→cyan body, purple→magenta accents
+ *
+ * Theming model
+ *   * `:root` defines the light-mode values.
+ *   * `.dark` overrides the surface/text/border tokens for dark mode.
+ *   * `@theme inline` (below) maps every token to a Tailwind utility, so
+ *     class names like `bg-surface`, `text-foreground`, and `border-border`
+ *     automatically pick up whichever theme is active. Components stay
+ *     theme-agnostic — they reference semantic tokens, not raw colours.
+ *   * Brand palette tokens (`--sp-indigo`, `--sp-cyan`, etc.) are
+ *     intentionally NOT overridden in dark mode so the brand reads the
+ *     same in both themes.
  */
 
 :root {
@@ -47,6 +68,29 @@
   --border-hover: #cbd5e1;
   --muted: #64748b;
   --muted-foreground: #94a3b8;
+
+  /*
+   * Standard semantic aliases. Most of the codebase uses `--surface` /
+   * `--border` directly, but exposing the conventional `card`, `popover`,
+   * `primary`, `secondary`, `destructive`, `ring`, `input` names keeps us
+   * compatible with the shadcn vocabulary and gives future code one
+   * obvious knob to turn per surface type. They alias the existing tokens
+   * so today's components don't need to change.
+   */
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface);
+  --popover-foreground: var(--foreground);
+  --primary: var(--sp-blue);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-hover);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--sp-purple);
+  --accent-foreground: #ffffff;
+  --destructive: var(--sp-error);
+  --destructive-foreground: #ffffff;
+  --input: var(--border);
+  --ring: var(--sp-blue);
 
   /* Gradients */
   --sp-gradient-brand: linear-gradient(
@@ -97,16 +141,61 @@
 }
 
 .dark {
-  --background: #030712;
-  --foreground: #f8fafc;
-  --surface: #0f172a;
-  --surface-hover: #1e293b;
-  --surface-active: #334155;
-  --border: #1e293b;
-  --border-hover: #334155;
+  /*
+   * Dark mode is a slate-on-deep-navy take on the brand. We deliberately
+   * step away from pitch black so:
+   *   * Page background (`--background`) sits one shade BELOW raised
+   *     surfaces — cards, headers, and the sidebar lift visibly.
+   *   * Borders are noticeably lighter than `--surface` so dividers and
+   *     card edges stay legible (the previous `--border = surface-hover`
+   *     made them disappear into hovered rows).
+   *   * Body text (`--foreground`) is near-white but not pure white,
+   *     reducing harshness on OLED screens.
+   *   * Muted text stays above WCAG AA contrast on `--surface`.
+   */
+  --background: #0b1120;
+  --foreground: #f1f5f9;
+  --surface: #111c34;
+  --surface-hover: #1c2945;
+  --surface-active: #2a3a5c;
+  --border: #25324f;
+  --border-hover: #38476a;
   --muted: #94a3b8;
   --muted-foreground: #64748b;
-  --sp-shadow-glow: 0 0 20px rgb(99 102 241 / 0.25);
+
+  /* Aliases follow the new dark surfaces. */
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface);
+  --popover-foreground: var(--foreground);
+  /* Lift `primary` to the lighter brand-blue stop (--sp-cyan) for AA
+   * contrast on dark surfaces while keeping the brand family. */
+  --primary: var(--sp-cyan);
+  --primary-foreground: #0b1120;
+  --secondary: var(--surface-hover);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--sp-magenta);
+  --accent-foreground: #ffffff;
+  --destructive: var(--sp-error);
+  --destructive-foreground: #ffffff;
+  --input: var(--border);
+  --ring: var(--sp-cyan);
+
+  /* Shadows lose contrast on dark backgrounds — punch them up so cards
+   * still feel raised. The default shadows use `rgb(0 0 0 / …)` which
+   * disappears against the dark page; a slightly stronger alpha plus a
+   * cool blue tint keeps the depth cue without tinting cards purple. */
+  --sp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --sp-shadow-md:
+    0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.45);
+  --sp-shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 0.55), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+  --sp-shadow-glow: 0 0 24px rgb(99 102 241 / 0.35);
+
+  /* The `--sp-gradient-lime-strong` text gradient is tuned for white
+   * surfaces; on dark backgrounds we want the brighter neon end so the
+   * value reads loud without shifting away from the lime → cyan family. */
+  --sp-gradient-lime-strong: linear-gradient(135deg, #bfff00 0%, #67e8f9 100%);
 }
 
 @theme inline {
@@ -119,6 +208,22 @@
   --color-border-hover: var(--border-hover);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+
+  /* Standard semantic aliases — see `:root` for the rationale. */
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --color-brand-navy: var(--sp-navy);
   --color-brand-navy-light: var(--sp-navy-light);

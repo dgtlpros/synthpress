@@ -457,6 +457,40 @@ export async function listArticleIdeasForBlog(
 }
 
 /**
+ * Returns the set of idea ids in `blogId` that have at least one
+ * pending or processing `generate_article` job. Used by the Ideas page
+ * to render a "Generating…" badge for ideas the user has already
+ * kicked off — survives a page refresh because it reads from
+ * `article_jobs`, not React state.
+ *
+ * Returns an empty Set when there are no ideas to check (saves a
+ * round-trip) or when no jobs match.
+ */
+export async function getActiveGenerateArticleIdeaIds(
+  blogId: string,
+  ideaIds: readonly string[],
+  client?: Client,
+): Promise<Set<string>> {
+  if (ideaIds.length === 0) return new Set();
+  const supabase = client ?? createAdminClient();
+
+  const { data, error } = await supabase
+    .from("article_jobs")
+    .select("article_idea_id")
+    .eq("blog_id", blogId)
+    .eq("type", "generate_article")
+    .in("status", ["pending", "processing"])
+    .in("article_idea_id", ideaIds as string[]);
+
+  if (error) throw error;
+  const out = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.article_idea_id) out.add(row.article_idea_id);
+  }
+  return out;
+}
+
+/**
  * Allowed status transitions for `updateArticleIdeaStatus`.
  *
  *   * `generated` can move forward to `approved` or `rejected`.
@@ -878,22 +912,42 @@ export async function generateArticleIdeas(
 // ============================================================================
 // generateArticleDraftFromIdea — manual + future autopilot single-article flow
 //
+// Two-phase split (introduced when manual article generation moved into
+// Vercel Workflows):
+//
+//   Phase 1 — `queueGenerateArticleFromIdea`
+//     Synchronous, runs inside the server action / cron tick. Validates
+//     the idea, creates the durable `article_jobs` + `articles`
+//     placeholders, returns immediately so the UI can show "generating".
+//     No tokens consumed yet. Idempotent on the idea: a second call
+//     while a job is already pending/processing returns the existing
+//     job/article instead of creating duplicates.
+//
+//   Phase 2 — `runGenerateArticleFromIdeaJob`
+//     The unit of work the Vercel Workflow step calls. Consumes tokens,
+//     calls Claude, persists the article, flips the idea, logs usage,
+//     completes the job. On failure: marks article+job failed and
+//     refunds the consumed credits (idempotent on the job id).
+//
+// `generateArticleDraftFromIdea` is now a thin wrapper that runs both
+// phases in-process. The autopilot scheduler + the Vercel Workflow
+// runner each compose the two phases on their own — see
+// `apps/web/src/workflows/generate-article.ts`.
+//
 // Failure-safe semantics (per `docs/ai-pricing.md` "reserve credits when
 // generation starts"):
 //
 //   * Idea is loaded and verified `approved` BEFORE any state writes —
 //     a non-approved idea throws fast and nothing changes.
 //   * Tokens are consumed BEFORE the AI call. An out-of-tokens team
-//     gets a typed error and the only side effect is the `failed` job
-//     row (no article placeholder, no idea status flip).
+//     gets a typed error and the article+job stay marked `failed`
+//     (no token spend, no idea status flip).
 //   * If the AI call OR the subsequent article update fails, both the
-//     article placeholder and the job are marked `failed`, but the
-//     idea STAYS `approved` so the user can click Generate again.
+//     article placeholder and the job are marked `failed`, the
+//     consumed tokens are refunded, and the idea STAYS `approved` so
+//     the user can click Generate again.
 //   * The idea only flips to `converted_to_article` AFTER a successful
-//     `ready_for_review` write. This is the entire reason this PR
-//     ships before refund-on-failure: the "did the user pay for
-//     nothing" question becomes "did the user lose their idea?", and
-//     the answer is now "no".
+//     `ready_for_review` write.
 // ============================================================================
 
 export interface GenerateArticleDraftFromIdeaInput {
@@ -928,6 +982,433 @@ export interface GenerateArticleDraftFromIdeaResult {
   completionTokens: number | null;
 }
 
+// ----------------------------------------------------------------------------
+// Phase 1 — queueGenerateArticleFromIdea
+// ----------------------------------------------------------------------------
+
+export interface QueueGenerateArticleFromIdeaInput extends Omit<
+  GenerateArticleDraftFromIdeaInput,
+  "anthropicProvider" | "client"
+> {
+  client?: Client;
+}
+
+export interface QueueGenerateArticleFromIdeaResult {
+  jobId: string;
+  articleId: string;
+  ideaId: string;
+  /** Status the durable job/article rows are in after queueing. */
+  status: "pending" | "processing";
+  /**
+   * `true` when a pending/processing job already existed for this idea
+   * and we returned it instead of creating a new one. Lets the server
+   * action skip starting a duplicate workflow run.
+   */
+  alreadyQueued: boolean;
+}
+
+/**
+ * Validates the idea and creates the durable `article_jobs` +
+ * `articles` placeholders. Does NOT consume tokens, call Claude, or
+ * start the workflow — that's the caller's job.
+ *
+ * Idempotency: if there's already a `pending` or `processing`
+ * `generate_article` job for this idea, returns the existing job +
+ * article. The caller can decide whether to re-trigger the workflow
+ * (probably not) or just hand the existing ids back to the UI.
+ *
+ * Throws:
+ *   * `Error("blog_not_found")`
+ *   * `Error("idea_not_found")`
+ *   * `Error("idea_not_approved")`
+ *   * Other supabase errors — propagated as-is.
+ */
+export async function queueGenerateArticleFromIdea(
+  input: QueueGenerateArticleFromIdeaInput,
+): Promise<QueueGenerateArticleFromIdeaResult> {
+  const supabase = input.client ?? createAdminClient();
+
+  // 1. Resolve blog context — fail fast with a typed message.
+  const ctx = await getBlogGenerationContext(input.blogId, supabase);
+  if (!ctx) throw new Error("blog_not_found");
+
+  // 2. Load the idea + verify status.
+  const { data: ideaRow, error: ideaErr } = await supabase
+    .from("article_ideas")
+    .select("*")
+    .eq("id", input.ideaId)
+    .eq("blog_id", input.blogId)
+    .maybeSingle();
+
+  if (ideaErr) throw ideaErr;
+  if (!ideaRow) throw new Error("idea_not_found");
+  if ((ideaRow.status as ArticleIdeaStatus) !== "approved") {
+    throw new Error("idea_not_approved");
+  }
+  const idea = ideaRow as ArticleIdeaRow;
+
+  // 3. Idempotency: short-circuit if a pending/processing job already
+  // exists for this idea. Prevents double-charging when the user
+  // double-clicks Generate Article (or two tabs both fire it).
+  const { data: existingJobs, error: existingJobsErr } = await supabase
+    .from("article_jobs")
+    .select("id, article_id, status")
+    .eq("article_idea_id", input.ideaId)
+    .eq("type", "generate_article")
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (existingJobsErr) throw existingJobsErr;
+  if (existingJobs && existingJobs.length > 0) {
+    const existing = existingJobs[0];
+    /* v8 ignore next -- defensive: existing rows always have article_id since queue links them */
+    if (!existing.article_id) {
+      throw new Error("queued_job_missing_article_id");
+    }
+    return {
+      jobId: existing.id,
+      articleId: existing.article_id,
+      ideaId: input.ideaId,
+      status: existing.status as "pending" | "processing",
+      alreadyQueued: true,
+    };
+  }
+
+  // 4. Insert the job row with the full input snapshot. Autopilot
+  // replay and the workflow runner can reproduce the call from this
+  // jsonb alone.
+  const jobInput: Record<string, unknown> = {
+    triggerSource: input.triggerSource,
+    teamId: input.teamId,
+    ideaId: input.ideaId,
+    ideaSnapshot: idea as unknown as Record<string, unknown>,
+    blogSettingsSnapshot: ctx.settings as unknown as Record<string, unknown>,
+    ...(input.jobMetadata ?? {}),
+  };
+
+  const job = await createArticleJob({
+    blogId: input.blogId,
+    type: "generate_article",
+    userId: input.userId,
+    articleIdeaId: input.ideaId,
+    input: jobInput,
+    client: supabase,
+  });
+
+  // 5. Insert the article placeholder. Seeded from the idea so the
+  // dashboard shows something meaningful while generation is in
+  // flight; the workflow step overwrites it on success.
+  const placeholder: TablesInsert<"articles"> = {
+    blog_id: input.blogId,
+    user_id: input.userId,
+    article_idea_id: input.ideaId,
+    title: idea.title,
+    target_keyword: idea.target_keyword,
+    status: "generating",
+  };
+  const { data: insertedArticle, error: insertArticleErr } = await supabase
+    .from("articles")
+    .insert(placeholder)
+    .select("id")
+    .single();
+
+  if (insertArticleErr) {
+    // Best-effort: tear down the job so the dashboard doesn't show an
+    // orphan pending job that'll never be picked up.
+    await failArticleJob({
+      jobId: job.id,
+      errorMessage: insertArticleErr.message,
+      client: supabase,
+    });
+    throw insertArticleErr;
+  }
+  const articleId = insertedArticle.id;
+
+  // 6. Link the job to the article so queue/dashboard pages can
+  // resolve article ↔ job both ways.
+  await supabase
+    .from("article_jobs")
+    .update({ article_id: articleId })
+    .eq("id", job.id);
+
+  return {
+    jobId: job.id,
+    articleId,
+    ideaId: input.ideaId,
+    status: "pending",
+    alreadyQueued: false,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Phase 2 — runGenerateArticleFromIdeaJob (called by the Vercel Workflow step)
+// ----------------------------------------------------------------------------
+
+export interface RunGenerateArticleFromIdeaJobInput {
+  /** Pre-existing job row from {@link queueGenerateArticleFromIdea}. */
+  jobId: string;
+  /** Pre-existing article placeholder. */
+  articleId: string;
+  blogId: string;
+  teamId: string;
+  userId: string;
+  ideaId: string;
+  /**
+   * Echoed onto the consume_team_tokens metadata so the billing audit
+   * log can filter "tokens spent by manual generation" vs. autopilot.
+   * Defaults to `"workflow"` when omitted (the workflow runner is the
+   * primary caller of this function).
+   */
+  triggerSource?: TriggerSource;
+  /**
+   * Free-form metadata to merge into `article_jobs.input` AFTER the
+   * queue snapshot. The workflow step uses this to stamp
+   * `workflowRunId` / `autopilotRunId` so a refresh shows the
+   * connection between a queued job and the workflow that's running it.
+   */
+  jobInputPatch?: Record<string, unknown>;
+  client?: Client;
+  anthropicProvider?: AnthropicLike;
+}
+
+/**
+ * The unit of work the Vercel Workflow step calls. Same body as the
+ * "try" block of the legacy synchronous orchestration: consume tokens,
+ * Claude, persist, convert, complete. On failure: refund + fail.
+ *
+ * Idempotent on `jobId`:
+ *   * `consume_team_tokens` is idempotent on `article_job::{jobId}`.
+ *   * The article update / convertIdeaToArticle / completeArticleJob
+ *     calls are all natural no-ops if the workflow somehow re-runs
+ *     after success (the article + job land in their final state).
+ *
+ * NOTE on retries: callers (the workflow step in particular) should
+ * NOT retry this function on failure. The catch block already refunds
+ * the user, and a re-run would consume Claude budget without
+ * consuming tokens (consume_team_tokens no-ops on the idempotency
+ * key). The recommended pattern is to throw `FatalError` from the
+ * workflow step so the SDK treats the failure as terminal.
+ */
+export async function runGenerateArticleFromIdeaJob(
+  input: RunGenerateArticleFromIdeaJobInput,
+): Promise<GenerateArticleDraftFromIdeaResult> {
+  const supabase = input.client ?? createAdminClient();
+
+  // Re-resolve context inside the workflow process — we don't trust
+  // anything from the queue's call site to still be in scope.
+  const ctx = await getBlogGenerationContext(input.blogId, supabase);
+  if (!ctx) throw new Error("blog_not_found");
+
+  const { data: ideaRow, error: ideaErr } = await supabase
+    .from("article_ideas")
+    .select("*")
+    .eq("id", input.ideaId)
+    .eq("blog_id", input.blogId)
+    .maybeSingle();
+  if (ideaErr) throw ideaErr;
+  if (!ideaRow) throw new Error("idea_not_found");
+  // The idea must still be `approved`. If it was already converted
+  // (e.g. duplicate workflow ran), bail out without touching anything.
+  if ((ideaRow.status as ArticleIdeaStatus) !== "approved") {
+    throw new Error("idea_not_approved");
+  }
+  const idea = ideaRow as ArticleIdeaRow;
+
+  // Optionally enrich the job's input jsonb with workflow metadata
+  // (workflowRunId, autopilotRunId) so an operator inspecting the row
+  // can connect the job to its execution context.
+  if (input.jobInputPatch && Object.keys(input.jobInputPatch).length > 0) {
+    await mergeArticleJobInput(supabase, input.jobId, input.jobInputPatch);
+  }
+
+  let consumed = false;
+  const creditsUsed = getCreditCost("generateArticle");
+
+  try {
+    await updateArticleJobStatus({
+      jobId: input.jobId,
+      status: "processing",
+      currentStep: "loading_context",
+      incrementAttempts: true,
+      client: supabase,
+    });
+
+    await consumeTeamTokens({
+      teamId: input.teamId,
+      amount: creditsUsed,
+      actingUserId: input.userId,
+      description: `Generate article draft for "${idea.title}"`,
+      metadata: {
+        blog_id: input.blogId,
+        job_id: input.jobId,
+        job_type: "generate_article",
+        idea_id: input.ideaId,
+        trigger_source: input.triggerSource ?? "workflow",
+      },
+      idempotencyKey: `article_job::${input.jobId}`,
+      client: supabase,
+    });
+    consumed = true;
+
+    await updateArticleJobStatus({
+      jobId: input.jobId,
+      currentStep: "writing_article",
+      client: supabase,
+    });
+
+    const draft: GeneratedArticleDraft = await generateArticleDraft({
+      blogName: ctx.blog.name,
+      blogDescription: ctx.blog.description || undefined,
+      settings: ctx.settings,
+      brief: buildBriefFromIdea(idea),
+      anthropicProvider: input.anthropicProvider,
+    });
+
+    await updateArticleJobStatus({
+      jobId: input.jobId,
+      currentStep: "saving_article",
+      client: supabase,
+    });
+
+    const articleUpdate: TablesUpdate<"articles"> = {
+      title: draft.title,
+      slug: draft.slug,
+      excerpt: draft.excerpt,
+      meta_description: draft.metaDescription,
+      content_markdown: draft.contentMarkdown,
+      target_keyword: draft.targetKeyword,
+      word_count: draft.wordCount,
+      generated_by_model: draft.model,
+      raw_ai_response: draft as unknown as Json,
+      status: "ready_for_review",
+      error_message: null,
+    };
+    const { error: updateArticleErr } = await supabase
+      .from("articles")
+      .update(articleUpdate)
+      .eq("id", input.articleId);
+    if (updateArticleErr) throw updateArticleErr;
+
+    await updateArticleJobStatus({
+      jobId: input.jobId,
+      currentStep: "logging_usage",
+      client: supabase,
+    });
+
+    await logUsageEvent({
+      userId: input.userId,
+      blogId: input.blogId,
+      articleId: input.articleId,
+      articleIdeaId: input.ideaId,
+      jobId: input.jobId,
+      provider: PROVIDER_ANTHROPIC,
+      model: draft.model,
+      inputTokens: draft.promptTokens,
+      outputTokens: draft.completionTokens,
+      creditsUsed,
+      client: supabase,
+    });
+
+    await convertIdeaToArticle({
+      ideaId: input.ideaId,
+      articleId: input.articleId,
+      client: supabase,
+    });
+
+    await completeArticleJob({
+      jobId: input.jobId,
+      articleId: input.articleId,
+      articleIdeaId: input.ideaId,
+      output: {
+        model: draft.model,
+        promptTokens: draft.promptTokens,
+        completionTokens: draft.completionTokens,
+        cachedReadTokens: draft.cachedReadTokens,
+        cachedWriteTokens: draft.cachedWriteTokens,
+        wordCount: draft.wordCount,
+        creditsUsed,
+      },
+      client: supabase,
+    });
+
+    return {
+      jobId: input.jobId,
+      articleId: input.articleId,
+      ideaId: input.ideaId,
+      status: "ready_for_review",
+      creditsUsed,
+      model: draft.model,
+      promptTokens: draft.promptTokens,
+      completionTokens: draft.completionTokens,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      await failArticleAndJob(supabase, input.articleId, input.jobId, message);
+      /* v8 ignore start -- defensive: secondary failure during fail-marking */
+    } catch {
+      // Swallow — the primary error is what the caller cares about.
+    }
+    /* v8 ignore stop */
+
+    if (consumed) {
+      try {
+        await refundTeamTokens({
+          teamId: input.teamId,
+          amount: creditsUsed,
+          actingUserId: input.userId,
+          description: `Refund for failed article job ${input.jobId}: ${message}`,
+          metadata: {
+            refunded_for_job_id: input.jobId,
+            refunded_for_blog_id: input.blogId,
+            refunded_for_idea_id: input.ideaId,
+            reason: message,
+          },
+          idempotencyKey: `refund::article_job::${input.jobId}`,
+          client: supabase,
+        });
+        await markJobRefunded(supabase, input.jobId, creditsUsed);
+        /* v8 ignore start -- defensive: secondary failure during refund */
+      } catch {
+        // Swallow — operators reconcile via token_transactions.
+      }
+      /* v8 ignore stop */
+    }
+
+    throw err;
+  }
+}
+
+/**
+ * Merges a partial patch into the existing `article_jobs.input` jsonb.
+ * Read-then-write is fine because the workflow step is the only writer
+ * for a given job at a time.
+ */
+async function mergeArticleJobInput(
+  client: Client,
+  jobId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const { data, error: readErr } = await client
+    .from("article_jobs")
+    .select("input")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+
+  const currentInput =
+    data?.input && typeof data.input === "object" && !Array.isArray(data.input)
+      ? (data.input as Record<string, unknown>)
+      : {};
+
+  const { error: updateErr } = await client
+    .from("article_jobs")
+    .update({ input: { ...currentInput, ...patch } as Json })
+    .eq("id", jobId);
+  /* v8 ignore next -- defensive throw */
+  if (updateErr) throw updateErr;
+}
+
 /**
  * Builds the brief that the {@link generateArticleDraft} provider sees
  * for an idea-driven generation. Exported only so the service tests can
@@ -959,278 +1440,55 @@ export function buildBriefFromIdea(
   return lines.filter((l): l is string => Boolean(l)).join("\n");
 }
 
+/**
+ * In-process orchestration: queue the job, then run it synchronously.
+ * Used by:
+ *   * existing tests that exercise the end-to-end happy/failure paths
+ *   * future callers that want to bypass the workflow runner (e.g. a
+ *     CLI script, a background batch reprocessor)
+ *
+ * The server action no longer calls this — it calls
+ * {@link queueGenerateArticleFromIdea} and starts the Vercel Workflow,
+ * which in turn calls {@link runGenerateArticleFromIdeaJob}.
+ */
 export async function generateArticleDraftFromIdea(
   input: GenerateArticleDraftFromIdeaInput,
 ): Promise<GenerateArticleDraftFromIdeaResult> {
   const supabase = input.client ?? createAdminClient();
 
-  // 1. Resolve blog context — fail fast with a typed message.
-  const ctx = await getBlogGenerationContext(input.blogId, supabase);
-  if (!ctx) {
-    throw new Error("blog_not_found");
-  }
-
-  // 2. Load the idea + verify status. Both checks happen BEFORE any
-  // job/article rows are written so a bad request leaves no garbage.
-  const { data: ideaRow, error: ideaErr } = await supabase
-    .from("article_ideas")
-    .select("*")
-    .eq("id", input.ideaId)
-    .eq("blog_id", input.blogId)
-    .maybeSingle();
-
-  if (ideaErr) throw ideaErr;
-  if (!ideaRow) throw new Error("idea_not_found");
-  if ((ideaRow.status as ArticleIdeaStatus) !== "approved") {
-    throw new Error("idea_not_approved");
-  }
-  const idea = ideaRow as ArticleIdeaRow;
-
-  // 3. Insert the job row with the full input snapshot. autopilot replay
-  // and audit can reproduce the call from this jsonb alone.
-  const jobInput: Record<string, unknown> = {
-    triggerSource: input.triggerSource,
-    teamId: input.teamId,
-    ideaId: input.ideaId,
-    ideaSnapshot: idea as unknown as Record<string, unknown>,
-    blogSettingsSnapshot: ctx.settings as unknown as Record<string, unknown>,
-    ...(input.jobMetadata ?? {}),
-  };
-
-  const job = await createArticleJob({
+  const queued = await queueGenerateArticleFromIdea({
     blogId: input.blogId,
-    type: "generate_article",
+    teamId: input.teamId,
     userId: input.userId,
-    articleIdeaId: input.ideaId,
-    input: jobInput,
+    ideaId: input.ideaId,
+    triggerSource: input.triggerSource,
+    jobMetadata: input.jobMetadata,
     client: supabase,
   });
 
-  let articleId: string | null = null;
-  let consumed = false;
-  // Hoisted out of the try so the catch can reference the cost when
-  // building the refund call. Same value as the consume amount above.
-  const creditsUsed = getCreditCost("generateArticle");
-
-  try {
-    // 4. Move into processing. Stamp `started_at`, bump attempts.
-    await updateArticleJobStatus({
-      jobId: job.id,
-      status: "processing",
-      currentStep: "loading_context",
-      incrementAttempts: true,
-      client: supabase,
-    });
-
-    // 5. Reserve credits BEFORE the AI call so an out-of-tokens team
-    // doesn't burn a Claude request. Idempotency key = job id so a
-    // workflow replay no-ops on the credit ledger. The catch-all below
-    // refunds these credits if anything after this line fails.
-    await consumeTeamTokens({
-      teamId: input.teamId,
-      amount: creditsUsed,
-      actingUserId: input.userId,
-      description: `Generate article draft for "${idea.title}"`,
-      metadata: {
-        blog_id: input.blogId,
-        job_id: job.id,
-        job_type: "generate_article",
-        idea_id: input.ideaId,
-        trigger_source: input.triggerSource,
-      },
-      idempotencyKey: `article_job::${job.id}`,
-      client: supabase,
-    });
-    consumed = true;
-
-    // 6. Insert the article placeholder. We seed `title` from the idea
-    // (articles.title is NOT NULL) so it shows something meaningful in
-    // the dashboard while generation is in flight; the AI overwrites
-    // it on success.
-    const placeholder: TablesInsert<"articles"> = {
-      blog_id: input.blogId,
-      user_id: input.userId,
-      article_idea_id: input.ideaId,
-      title: idea.title,
-      target_keyword: idea.target_keyword,
-      status: "generating",
-    };
-    const { data: insertedArticle, error: insertArticleErr } = await supabase
-      .from("articles")
-      .insert(placeholder)
-      .select("id")
-      .single();
-
-    if (insertArticleErr) throw insertArticleErr;
-    articleId = insertedArticle.id;
-
-    // 7. Link the job to the article (so the queue page can resolve
-    // article ↔ job both ways). Plain update — the article_id column
-    // is `set null on delete` so a later article delete won't orphan.
-    await supabase
-      .from("article_jobs")
-      .update({ article_id: articleId })
-      .eq("id", job.id);
-
-    // 8. Call the AI provider with a brief built from the idea.
-    await updateArticleJobStatus({
-      jobId: job.id,
-      currentStep: "writing_article",
-      client: supabase,
-    });
-
-    const draft: GeneratedArticleDraft = await generateArticleDraft({
-      blogName: ctx.blog.name,
-      blogDescription: ctx.blog.description || undefined,
-      settings: ctx.settings,
-      brief: buildBriefFromIdea(idea),
-      anthropicProvider: input.anthropicProvider,
-    });
-
-    // 9. Persist the generated content + flip article to ready_for_review.
-    await updateArticleJobStatus({
-      jobId: job.id,
-      currentStep: "saving_article",
-      client: supabase,
-    });
-
-    const articleUpdate: TablesUpdate<"articles"> = {
-      title: draft.title,
-      slug: draft.slug,
-      excerpt: draft.excerpt,
-      meta_description: draft.metaDescription,
-      content_markdown: draft.contentMarkdown,
-      target_keyword: draft.targetKeyword,
-      word_count: draft.wordCount,
-      generated_by_model: draft.model,
-      raw_ai_response: draft as unknown as Json,
-      status: "ready_for_review",
-      error_message: null,
-    };
-    const { error: updateArticleErr } = await supabase
-      .from("articles")
-      .update(articleUpdate)
-      .eq("id", articleId);
-
-    if (updateArticleErr) throw updateArticleErr;
-
-    // 10. Audit log.
-    await updateArticleJobStatus({
-      jobId: job.id,
-      currentStep: "logging_usage",
-      client: supabase,
-    });
-
-    await logUsageEvent({
-      userId: input.userId,
-      blogId: input.blogId,
-      articleId,
-      articleIdeaId: input.ideaId,
-      jobId: job.id,
-      provider: PROVIDER_ANTHROPIC,
-      model: draft.model,
-      inputTokens: draft.promptTokens,
-      outputTokens: draft.completionTokens,
-      creditsUsed,
-      client: supabase,
-    });
-
-    // 11. Flip the idea to converted_to_article. This is the ONLY path
-    // that lands an idea there — the manual approve/reject UI explicitly
-    // forbids it via the transition matrix. We do this AFTER the article
-    // is saved so a failed AI call leaves the idea retryable.
-    await convertIdeaToArticle({
-      ideaId: input.ideaId,
-      articleId,
-      client: supabase,
-    });
-
-    // 12. Done.
-    await completeArticleJob({
-      jobId: job.id,
-      articleId,
-      articleIdeaId: input.ideaId,
-      output: {
-        model: draft.model,
-        promptTokens: draft.promptTokens,
-        completionTokens: draft.completionTokens,
-        cachedReadTokens: draft.cachedReadTokens,
-        cachedWriteTokens: draft.cachedWriteTokens,
-        wordCount: draft.wordCount,
-        creditsUsed,
-      },
-      client: supabase,
-    });
-
-    return {
-      jobId: job.id,
-      articleId,
-      ideaId: input.ideaId,
-      status: "ready_for_review",
-      creditsUsed,
-      model: draft.model,
-      promptTokens: draft.promptTokens,
-      completionTokens: draft.completionTokens,
-    };
-  } catch (err) {
-    // Single failure handler for everything between `createArticleJob`
-    // and a successful return:
-    //   1. Mark article (if created) + job as failed.
-    //   2. If credits were consumed, refund them. The refund is
-    //      idempotent on `refund::article_job::{jobId}` so a retried
-    //      handler is a no-op on the ledger. The user keeps their
-    //      tokens — they can click Generate Article again from the
-    //      same approved idea (which is still approved because the
-    //      orchestration only flips it on success).
-    //   3. After a successful refund, mark `article_jobs.output.refunded`
-    //      so the queue page / analytics can see at a glance which
-    //      jobs were reimbursed without joining `token_transactions`.
-    const message = err instanceof Error ? err.message : String(err);
-    try {
-      await failArticleAndJob(supabase, articleId, job.id, message);
-      /* v8 ignore start -- defensive: secondary failure during fail-marking */
-    } catch {
-      // Swallow — the primary error is what the caller cares about.
-    }
-    /* v8 ignore stop */
-
-    if (consumed) {
-      try {
-        await refundTeamTokens({
-          teamId: input.teamId,
-          amount: creditsUsed,
-          actingUserId: input.userId,
-          description: `Refund for failed article job ${job.id}: ${message}`,
-          metadata: {
-            refunded_for_job_id: job.id,
-            refunded_for_blog_id: input.blogId,
-            refunded_for_idea_id: input.ideaId,
-            reason: message,
-          },
-          idempotencyKey: `refund::article_job::${job.id}`,
-          client: supabase,
-        });
-        await markJobRefunded(supabase, job.id, creditsUsed);
-        /* v8 ignore start -- defensive: secondary failure during refund */
-      } catch {
-        // Swallow — the primary error is what the caller cares about.
-        // Operators can detect missing refunds by joining article_jobs
-        // (status=failed, output.refunded != true) against
-        // token_transactions (no usage_refund row for the job).
-      }
-      /* v8 ignore stop */
-    }
-
-    throw err;
-  }
+  return runGenerateArticleFromIdeaJob({
+    jobId: queued.jobId,
+    articleId: queued.articleId,
+    blogId: input.blogId,
+    teamId: input.teamId,
+    userId: input.userId,
+    ideaId: input.ideaId,
+    triggerSource: input.triggerSource,
+    client: supabase,
+    anthropicProvider: input.anthropicProvider,
+  });
 }
 
 /**
- * Marks both the article (when one was created) and the job as failed
- * in one place. Used by every failure branch of
- * {@link generateArticleDraftFromIdea} to keep the order consistent
- * (article first so the queue page doesn't briefly show "completed
- * job, generating article").
+ * Marks both the article and the job as failed in one place. Used by
+ * the catch block of {@link runGenerateArticleFromIdeaJob} to keep
+ * the order consistent (article first so the queue page doesn't
+ * briefly show "completed job, generating article").
+ *
+ * `articleId` is typed nullable for forward compatibility (a future
+ * caller might want to mark a job failed before any article exists)
+ * but the `null` branch is currently unreachable — `runGenerateArticleFromIdeaJob`
+ * always receives the queue's article id.
  */
 async function failArticleAndJob(
   client: Client,
@@ -1238,12 +1496,15 @@ async function failArticleAndJob(
   jobId: string,
   errorMessage: string,
 ): Promise<void> {
-  if (articleId !== null) {
-    await client
-      .from("articles")
-      .update({ status: "failed", error_message: errorMessage })
-      .eq("id", articleId);
+  /* v8 ignore next 7 -- defensive: current callers always pass an articleId */
+  if (articleId === null) {
+    await failArticleJob({ jobId, errorMessage, client });
+    return;
   }
+  await client
+    .from("articles")
+    .update({ status: "failed", error_message: errorMessage })
+    .eq("id", articleId);
   await failArticleJob({ jobId, errorMessage, client });
 }
 

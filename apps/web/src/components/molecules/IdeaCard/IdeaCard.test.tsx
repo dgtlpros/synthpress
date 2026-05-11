@@ -484,4 +484,56 @@ describe("IdeaCard View article link", () => {
       screen.queryByRole("link", { name: /view article/i }),
     ).not.toBeInTheDocument();
   });
+
+  describe("when isGenerating is set (persisted workflow state)", () => {
+    it("renders a 'Generating…' badge in the footer", () => {
+      render(
+        <IdeaCard
+          idea={{ ...baseIdea, status: "approved", isGenerating: true }}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+          onGenerate={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("Generating…")).toBeInTheDocument();
+    });
+
+    it("hides the Generate / Approve / Reject buttons", () => {
+      render(
+        <IdeaCard
+          idea={{ ...baseIdea, status: "approved", isGenerating: true }}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+          onGenerate={vi.fn()}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: /generate article/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /approve/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /reject/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("still renders the View Article link to the in-flight placeholder", () => {
+      render(
+        <IdeaCard
+          idea={{
+            ...baseIdea,
+            status: "approved",
+            isGenerating: true,
+            viewArticleHref: "/posts/article-1",
+          }}
+          onApprove={vi.fn()}
+          onGenerate={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("link", { name: /view article/i }),
+      ).toHaveAttribute("href", "/posts/article-1");
+    });
+  });
 });

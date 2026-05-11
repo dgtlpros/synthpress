@@ -21,7 +21,7 @@ export function Hero({ className }: HeroProps) {
         </div>
 
         <div className="mb-6 flex justify-center">
-          <span className="inline-flex items-center gap-2 rounded-[var(--sp-radius-full)] border border-brand-lime/30 bg-brand-lime/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-lime-dark">
+          <span className="inline-flex items-center gap-2 rounded-[var(--sp-radius-full)] border border-brand-lime/30 bg-brand-lime/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-lime-dark dark:bg-brand-lime/15 dark:text-brand-lime">
             <span
               aria-hidden="true"
               className="relative flex h-2 w-2 items-center justify-center"

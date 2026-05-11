@@ -29,9 +29,9 @@ describe("useGenerateArticleFromIdea", () => {
         jobId: "job-1",
         articleId: "article-1",
         ideaId: "i1",
-        status: "ready_for_review",
-        model: "claude-sonnet-4-6",
-        creditsUsed: 5,
+        status: "pending",
+        alreadyQueued: false,
+        workflowRunId: "run-1",
       },
       error: null,
     });
@@ -51,9 +51,9 @@ describe("useGenerateArticleFromIdea", () => {
       jobId: "job-1",
       articleId: "article-1",
       ideaId: "i1",
-      status: "ready_for_review",
-      model: "claude-sonnet-4-6",
-      creditsUsed: 5,
+      status: "pending",
+      alreadyQueued: false,
+      workflowRunId: "run-1",
     });
   });
 
@@ -82,9 +82,9 @@ describe("useGenerateArticleFromIdea", () => {
         jobId: "job-1",
         articleId: "article-1",
         ideaId: "i1",
-        status: "ready_for_review",
-        model: "claude-sonnet-4-6",
-        creditsUsed: 5,
+        status: "pending",
+        alreadyQueued: false,
+        workflowRunId: "run-1",
       },
       error: null,
     });

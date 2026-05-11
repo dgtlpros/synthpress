@@ -38,6 +38,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|logo.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // Exclude:
+    //   * Next.js static asset paths
+    //   * favicon / logo
+    //   * Common image extensions
+    //   * `.well-known/workflow/*` — the Vercel Workflow SDK generates
+    //     route handlers there (see `withWorkflow()` in `next.config.ts`).
+    //     If auth middleware ran on them we'd block workflow callbacks.
+    "/((?!_next/static|_next/image|favicon.ico|logo.png|\\.well-known/workflow/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

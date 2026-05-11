@@ -24,10 +24,23 @@ export interface IdeaCardIdea {
   createdAt: string;
   /**
    * URL to the linked article's detail page. Set by the Ideas page
-   * server component for `converted_to_article` ideas; rendered as a
-   * "View article" link in the card footer.
+   * server component for `converted_to_article` ideas (and for any
+   * approved idea that has a generating/failed article placeholder).
+   * Rendered as a "View article" link in the card footer.
    */
   viewArticleHref?: string | null;
+  /**
+   * `true` when an `article_jobs` row with status `pending` or
+   * `processing` exists for this idea — i.e. the user already clicked
+   * Generate Article and the workflow is still running. Survives a
+   * page refresh because it comes from Supabase, not React state.
+   * When set:
+   *   * the Generate / Approve / Reject buttons are hidden
+   *   * a "Generating…" pill renders in their place
+   *   * the View Article link still renders (the placeholder article
+   *     row exists with status = `generating`)
+   */
+  isGenerating?: boolean;
 }
 
 /**
@@ -110,18 +123,39 @@ export function IdeaCard({
   // manual approve/reject/generate UI here. Converted ideas instead
   // surface a "View article" link when the article id is known.
   const isTerminal = idea.status === "converted_to_article";
-  const showViewArticle = isTerminal && Boolean(idea.viewArticleHref);
-  // Generate Article is only meaningful for approved ideas.
+  // A persisted "generating" job is the same shape as a terminal idea
+  // for our purposes: hide the action buttons, show a status pill +
+  // optional "View article" link to the in-flight placeholder.
+  const isGenerating = Boolean(idea.isGenerating);
+  const showViewArticle =
+    (isTerminal || isGenerating) && Boolean(idea.viewArticleHref);
+  // Generate Article is only meaningful for approved ideas. Hidden
+  // while a generation is already in flight (so we don't fire two
+  // workflows for the same idea — the server action also prevents
+  // this, but the UI shouldn't show the button).
   const showGenerate =
-    Boolean(onGenerate) && !isTerminal && idea.status === "approved";
+    Boolean(onGenerate) &&
+    !isTerminal &&
+    !isGenerating &&
+    idea.status === "approved";
   // Approve is hidden when the idea is already approved (we surface
   // Generate Article as the primary next step instead).
   const showApprove =
-    Boolean(onApprove) && !isTerminal && idea.status !== "approved";
+    Boolean(onApprove) &&
+    !isTerminal &&
+    !isGenerating &&
+    idea.status !== "approved";
   const showReject =
-    Boolean(onReject) && !isTerminal && idea.status !== "rejected";
+    Boolean(onReject) &&
+    !isTerminal &&
+    !isGenerating &&
+    idea.status !== "rejected";
   const hasFooter =
-    showApprove || showReject || showGenerate || showViewArticle;
+    showApprove ||
+    showReject ||
+    showGenerate ||
+    showViewArticle ||
+    isGenerating;
 
   // Disable ALL action buttons whenever any update is in flight (this
   // card or another). The button that's actually mid-call shows a
@@ -173,6 +207,15 @@ export function IdeaCard({
       {hasFooter ? (
         <>
           <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+            {isGenerating ? (
+              <Badge
+                variant="brand"
+                size="sm"
+                aria-label="Article generation in progress"
+              >
+                Generating…
+              </Badge>
+            ) : null}
             {showViewArticle ? (
               <Link
                 href={idea.viewArticleHref!}

@@ -7,7 +7,7 @@ const variantStyles = {
   warning: "bg-warning/10 text-warning border border-warning/20",
   error: "bg-error/10 text-error border border-error/20",
   brand: "bg-gradient-accent text-white border-0",
-  lime: "bg-brand-lime/10 text-brand-lime-dark border border-brand-lime/30",
+  lime: "bg-brand-lime/10 text-brand-lime-dark border border-brand-lime/30 dark:bg-brand-lime/15 dark:text-brand-lime",
 } as const;
 
 const sizeStyles = {

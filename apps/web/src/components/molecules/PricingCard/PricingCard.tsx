@@ -58,7 +58,7 @@ export function PricingCard({
           >
             <span
               aria-hidden="true"
-              className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-brand-lime/15 text-[10px] font-bold text-brand-lime-dark"
+              className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-brand-lime/15 text-[10px] font-bold text-brand-lime-dark dark:bg-brand-lime/20 dark:text-brand-lime"
             >
               &#10003;
             </span>

@@ -102,7 +102,7 @@ export default async function TeamUsagePage({
             className={
               isLowRemaining
                 ? "font-semibold text-warning"
-                : "font-semibold text-brand-lime-dark"
+                : "font-semibold text-brand-lime-dark dark:text-brand-lime"
             }
             data-testid="usage-remaining-emphasis"
           >

@@ -5,6 +5,7 @@ import NextLink from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Avatar } from "@/components/atoms/Avatar";
+import { ThemeToggle } from "@/components/atoms/ThemeToggle";
 
 export interface WorkspaceSidebarProject {
   id: string;
@@ -425,19 +426,26 @@ export function WorkspaceSidebar({
 
       {email ? (
         <div className="border-t border-border/80 p-3">
-          <div className="rounded-[var(--sp-radius-lg)] border border-border/70 bg-surface px-3 py-2.5 shadow-[var(--sp-shadow-sm)]">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-              Signed in
-            </p>
-            <p
-              className="mt-1 truncate text-xs text-foreground/90"
-              title={email}
-            >
-              {email}
-            </p>
+          <div className="flex items-center gap-2 rounded-[var(--sp-radius-lg)] border border-border/70 bg-surface px-3 py-2.5 shadow-[var(--sp-shadow-sm)]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                Signed in
+              </p>
+              <p
+                className="mt-1 truncate text-xs text-foreground/90"
+                title={email}
+              >
+                {email}
+              </p>
+            </div>
+            <ThemeToggle className="shrink-0" />
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex items-center justify-end border-t border-border/80 p-3">
+          <ThemeToggle />
+        </div>
+      )}
     </aside>
   );
 }

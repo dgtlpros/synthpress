@@ -32,8 +32,16 @@ vi.mock("@/services/team-policy-service", () => {
 
 vi.mock("@/services/article-generation-service", () => ({
   generateArticleIdeas: vi.fn(),
-  generateArticleDraftFromIdea: vi.fn(),
+  queueGenerateArticleFromIdea: vi.fn(),
   updateArticleIdeaStatus: vi.fn(),
+}));
+
+vi.mock("workflow/api", () => ({
+  start: vi.fn(),
+}));
+
+vi.mock("@/workflows/generate-article", () => ({
+  generateArticleWorkflow: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -41,14 +49,16 @@ vi.mock("next/cache", () => ({
 }));
 
 import { revalidatePath } from "next/cache";
+import { start } from "workflow/api";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
-  generateArticleDraftFromIdea,
   generateArticleIdeas,
+  queueGenerateArticleFromIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
+import { generateArticleWorkflow } from "@/workflows/generate-article";
 import {
   generateArticleFromIdea,
   generateIdeasManual,
@@ -59,9 +69,10 @@ const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedAssertCan = vi.mocked(assertCan);
 const mockedGenerateArticleIdeas = vi.mocked(generateArticleIdeas);
-const mockedGenerateArticleDraft = vi.mocked(generateArticleDraftFromIdea);
+const mockedQueueGenerateArticle = vi.mocked(queueGenerateArticleFromIdea);
 const mockedUpdateArticleIdeaStatus = vi.mocked(updateArticleIdeaStatus);
 const mockedRevalidatePath = vi.mocked(revalidatePath);
+const mockedStart = vi.mocked(start);
 
 function makeAuthedClient(user: { id: string } | null = { id: "u1" }) {
   return {
@@ -386,22 +397,21 @@ describe("updateIdeaStatus", () => {
 
 describe("generateArticleFromIdea", () => {
   beforeEach(() => {
-    mockedGenerateArticleDraft.mockResolvedValue({
+    mockedQueueGenerateArticle.mockResolvedValue({
       jobId: "job-1",
       articleId: "article-1",
-      ideaId: "idea-1",
-      status: "ready_for_review",
-      creditsUsed: 5,
-      model: "claude-sonnet-4-6",
-      promptTokens: 2200,
-      completionTokens: 1800,
+      ideaId: "i1",
+      status: "pending",
+      alreadyQueued: false,
     } as never);
+    mockedStart.mockResolvedValue({ id: "run-1" } as never);
   });
 
   it("rejects calls without an idea id", async () => {
     const result = await generateArticleFromIdea("t1", "p1", "b1", "");
     expect(result.error).toBe("Idea id is required.");
-    expect(mockedGenerateArticleDraft).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateArticle).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
   it("rejects unauthenticated callers", async () => {
@@ -410,7 +420,8 @@ describe("generateArticleFromIdea", () => {
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("You must be signed in.");
     expect(mockedAssertCan).not.toHaveBeenCalled();
-    expect(mockedGenerateArticleDraft).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateArticle).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
   it("checks consume_team_tokens permission before doing any work", async () => {
@@ -433,16 +444,17 @@ describe("generateArticleFromIdea", () => {
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Blog not found.");
-    expect(mockedGenerateArticleDraft).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateArticle).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
-  it("delegates to generateArticleDraftFromIdea with triggerSource manual", async () => {
+  it("queues the durable job AND starts the workflow on first call", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
 
     await generateArticleFromIdea("t1", "p1", "b1", "i1");
 
-    expect(mockedGenerateArticleDraft).toHaveBeenCalledWith(
+    expect(mockedQueueGenerateArticle).toHaveBeenCalledWith(
       expect.objectContaining({
         blogId: "b1",
         teamId: "t1",
@@ -452,9 +464,20 @@ describe("generateArticleFromIdea", () => {
         client: expect.anything(),
       }),
     );
+    expect(mockedStart).toHaveBeenCalledWith(generateArticleWorkflow, [
+      expect.objectContaining({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "i1",
+        triggerSource: "manual",
+      }),
+    ]);
   });
 
-  it("returns the trimmed result and revalidates the relevant paths", async () => {
+  it("returns the durable job/article ids and the workflow run id", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
 
@@ -464,33 +487,103 @@ describe("generateArticleFromIdea", () => {
       data: {
         jobId: "job-1",
         articleId: "article-1",
-        ideaId: "idea-1",
-        status: "ready_for_review",
-        model: "claude-sonnet-4-6",
-        creditsUsed: 5,
+        ideaId: "i1",
+        status: "pending",
+        alreadyQueued: false,
+        workflowRunId: "run-1",
       },
       error: null,
     });
     const calls = mockedRevalidatePath.mock.calls.map((c) => c[0]);
     expect(calls).toContain("/teams/t1/projects/p1/blogs/b1/ideas");
     expect(calls).toContain("/teams/t1/projects/p1/blogs/b1");
+    expect(calls).toContain("/teams/t1/projects/p1/blogs/b1/posts/article-1");
+  });
+
+  it("falls back to runId when the SDK exposes runId instead of id", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedStart.mockResolvedValueOnce({ runId: "run-2" } as never);
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+    expect(result.data?.workflowRunId).toBe("run-2");
+  });
+
+  it("returns workflowRunId=null when the SDK returns no id", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedStart.mockResolvedValueOnce({} as never);
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+    expect(result.data?.workflowRunId).toBeNull();
+  });
+
+  it("does NOT start a second workflow when a job is already queued for the idea", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedQueueGenerateArticle.mockResolvedValueOnce({
+      jobId: "job-existing",
+      articleId: "article-existing",
+      ideaId: "i1",
+      status: "processing",
+      alreadyQueued: true,
+    } as never);
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+
+    expect(mockedStart).not.toHaveBeenCalled();
+    expect(result.data).toEqual({
+      jobId: "job-existing",
+      articleId: "article-existing",
+      ideaId: "i1",
+      status: "processing",
+      alreadyQueued: true,
+      workflowRunId: null,
+    });
+  });
+
+  it("surfaces a friendly error when start() throws", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedStart.mockRejectedValueOnce(new Error("workflow runner offline"));
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+
+    expect(result.error).toMatch(
+      /Could not start the article generation workflow/,
+    );
+    expect(result.error).toMatch(/workflow runner offline/);
+  });
+
+  it("falls back to a default message when start() throws a non-Error", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedStart.mockRejectedValueOnce("string-failure");
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+
+    expect(result.error).toMatch(
+      /Could not start the article generation workflow/,
+    );
+    expect(result.error).toMatch(/Could not start workflow/);
   });
 
   it("translates idea_not_found into a friendly error", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce(
+    mockedQueueGenerateArticle.mockRejectedValueOnce(
       new Error("idea_not_found"),
     );
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Idea not found.");
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
   it("translates idea_not_approved into a friendly error", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce(
+    mockedQueueGenerateArticle.mockRejectedValueOnce(
       new Error("idea_not_approved"),
     );
 
@@ -501,23 +594,12 @@ describe("generateArticleFromIdea", () => {
   it("translates blog_not_found into a friendly error", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce(
+    mockedQueueGenerateArticle.mockRejectedValueOnce(
       new Error("blog_not_found"),
     );
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Blog not found.");
-  });
-
-  it("translates insufficient_tokens into a friendly error", async () => {
-    const { client } = makeAdminWithBlog({ id: "b1" });
-    mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce(
-      new Error("insufficient_tokens"),
-    );
-
-    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
-    expect(result.error).toMatch(/Not enough synth tokens/);
   });
 
   it("returns the TeamPermissionError code when the caller can't spend tokens", async () => {
@@ -533,10 +615,10 @@ describe("generateArticleFromIdea", () => {
     expect(result.error).toBe("forbidden");
   });
 
-  it("propagates unknown service errors as-is", async () => {
+  it("propagates unknown queue errors as-is", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce(new Error("network"));
+    mockedQueueGenerateArticle.mockRejectedValueOnce(new Error("network"));
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("network");
@@ -545,7 +627,7 @@ describe("generateArticleFromIdea", () => {
   it("falls back to the default error when something non-Error throws", async () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
-    mockedGenerateArticleDraft.mockRejectedValueOnce("nope");
+    mockedQueueGenerateArticle.mockRejectedValueOnce("nope");
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Could not generate article.");

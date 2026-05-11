@@ -1,17 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { start } from "workflow/api";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   type ArticleIdeaStatus,
-  generateArticleDraftFromIdea,
-  type GenerateArticleDraftFromIdeaResult,
   generateArticleIdeas,
   type GenerateArticleIdeasResult,
+  queueGenerateArticleFromIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
+import { generateArticleWorkflow } from "@/workflows/generate-article";
 import type { ActionResult } from "./workspace";
 
 /**
@@ -252,19 +253,42 @@ export async function updateIdeaStatus(
 }
 
 /**
- * Trimmed result for the manual "Generate article from idea" action.
- * The orchestration result includes more diagnostic data (cached
- * tokens, etc.) than the UI needs.
+ * Result of the manual "Generate article from idea" action AFTER the
+ * shift to Vercel Workflows: returns immediately with the durable job
+ * + article ids. The actual generation runs in the background — the
+ * UI polls / refreshes Supabase to learn when the article is ready.
  */
-export type GenerateArticleFromIdeaResult = Pick<
-  GenerateArticleDraftFromIdeaResult,
-  "jobId" | "articleId" | "ideaId" | "status" | "model" | "creditsUsed"
->;
+export interface GenerateArticleFromIdeaResult {
+  jobId: string;
+  articleId: string;
+  ideaId: string;
+  /**
+   * Status of the durable `article_jobs` row at the moment this action
+   * returned. The workflow may already be processing it by the time
+   * the UI reads `article_jobs` (the `start()` call returns as soon as
+   * the run is enqueued), so callers should treat both values as
+   * "work in progress".
+   */
+  status: "pending" | "processing";
+  /** True when an in-flight job already existed for this idea. */
+  alreadyQueued: boolean;
+  /** Workflow run id if the SDK exposed one. */
+  workflowRunId: string | null;
+}
 
 /**
  * Manual entry point for the "Generate article" button on an approved
- * idea card. Permission model + thin-action shape mirrors
- * {@link generateIdeasManual}.
+ * idea card.
+ *
+ * Two-step shape (see `services/article-generation-service.ts`):
+ *
+ *   1. Queue: synchronous create of the `article_jobs` + `articles`
+ *      placeholders. Idempotent on the idea (a second click while a
+ *      job is already pending/processing returns the existing ids).
+ *   2. Start the Vercel Workflow that actually consumes tokens and
+ *      calls Claude.
+ *
+ * Permission model + thin-action shape mirrors {@link generateIdeasManual}.
  */
 export async function generateArticleFromIdea(
   teamId: string,
@@ -288,8 +312,8 @@ export async function generateArticleFromIdea(
     const admin = createAdminClient();
     await assertCan(teamId, user.id, "consume_team_tokens", admin);
 
-    // Confirm the blog belongs to the project (we run the orchestration
-    // through the admin client which bypasses RLS).
+    // Confirm the blog belongs to the project (we use the admin client
+    // below which bypasses RLS).
     const { data: blog } = await admin
       .from("blogs")
       .select("id")
@@ -300,7 +324,9 @@ export async function generateArticleFromIdea(
       return { data: null, error: "Blog not found." };
     }
 
-    const result = await generateArticleDraftFromIdea({
+    // Phase 1: durable enqueue. Validates the idea, creates the job +
+    // article placeholder. No tokens consumed yet.
+    const queued = await queueGenerateArticleFromIdea({
       blogId,
       teamId,
       userId: user.id,
@@ -309,19 +335,61 @@ export async function generateArticleFromIdea(
       client: admin,
     });
 
+    // Phase 2: start the workflow unless one is already in flight for
+    // this idea. `alreadyQueued = true` means a previous click is
+    // still being processed — re-firing the workflow would create a
+    // ghost run that double-consumes tokens (consume is idempotent on
+    // job id, but the SECOND workflow would target the SAME job, hit
+    // the consume no-op, and then race the first workflow's writes).
+    let workflowRunId: string | null = null;
+    if (!queued.alreadyQueued) {
+      try {
+        const run = await start(generateArticleWorkflow, [
+          {
+            jobId: queued.jobId,
+            articleId: queued.articleId,
+            blogId,
+            teamId,
+            userId: user.id,
+            ideaId,
+            triggerSource: "manual",
+          },
+        ]);
+        workflowRunId =
+          (run as { id?: string; runId?: string }).id ??
+          (run as { id?: string; runId?: string }).runId ??
+          null;
+      } catch (err) {
+        // Best effort: if the workflow runner is unreachable we leave
+        // the job in `pending` so an operator can retry by re-running
+        // the workflow with the same ids. The UI shows a friendly
+        // error and the user can click Generate Article again later
+        // (which will hit the idempotency check and re-enqueue).
+        const message =
+          err instanceof Error ? err.message : "Could not start workflow.";
+        return {
+          data: null,
+          error: `Could not start the article generation workflow: ${message}`,
+        };
+      }
+    }
+
     revalidatePath(
       `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/ideas`,
     );
     revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/posts/${queued.articleId}`,
+    );
 
     return {
       data: {
-        jobId: result.jobId,
-        articleId: result.articleId,
-        ideaId: result.ideaId,
-        status: result.status,
-        model: result.model,
-        creditsUsed: result.creditsUsed,
+        jobId: queued.jobId,
+        articleId: queued.articleId,
+        ideaId: queued.ideaId,
+        status: queued.status,
+        alreadyQueued: queued.alreadyQueued,
+        workflowRunId,
       },
       error: null,
     };
@@ -342,13 +410,6 @@ export async function generateArticleFromIdea(
         data: null,
         error:
           "Only approved ideas can be turned into articles. Approve the idea first.",
-      };
-    }
-    if (message === "insufficient_tokens") {
-      return {
-        data: null,
-        error:
-          "Not enough synth tokens to generate an article. Top up your balance to continue.",
       };
     }
     return { data: null, error: message };

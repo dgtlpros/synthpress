@@ -122,3 +122,9 @@ export type { IdeaStatus, IdeaStatusBadgeProps } from "./IdeaStatusBadge";
 
 export { MarkdownPreview } from "./MarkdownPreview";
 export type { MarkdownPreviewProps } from "./MarkdownPreview";
+
+export { ThemeProvider } from "./ThemeProvider";
+export type { ThemeProviderProps } from "./ThemeProvider";
+
+export { ThemeToggle } from "./ThemeToggle";
+export type { ThemeToggleProps } from "./ThemeToggle";

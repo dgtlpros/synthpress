@@ -33,10 +33,13 @@ import {
   failArticleJob,
   generateArticleDraftFromIdea,
   generateArticleIdeas,
+  getActiveGenerateArticleIdeaIds,
   getBlogGenerationContext,
   isAllowedIdeaStatusTransition,
   listArticleIdeasForBlog,
   logUsageEvent,
+  queueGenerateArticleFromIdea,
+  runGenerateArticleFromIdeaJob,
   updateArticleIdeaStatus,
   updateArticleJobStatus,
 } from "./article-generation-service";
@@ -56,17 +59,28 @@ interface ChainResult<T> {
 }
 
 function makeChain<T>(result: ChainResult<T>) {
+  // The mock chain is both chainable AND directly awaitable: every
+  // `.select()/.eq()/.in()/.order()/.limit()/.insert()/.update()` returns
+  // `this`, but the chain itself implements `.then()`, so callers can
+  // either keep chaining or `await` at any point. This matches how
+  // `@supabase/postgrest-js` actually behaves and lets us swap terminal
+  // calls (e.g. `.order()` → `.in().order().limit()` for the new
+  // idempotency check) without rewriting every test fixture.
   const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    order: vi.fn().mockResolvedValue(result),
+    in: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
     single: vi.fn().mockResolvedValue(result),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    then: ((onFulfilled, onRejected) =>
+      Promise.resolve(result).then(onFulfilled, onRejected)) as PromiseLike<
+      ChainResult<T>
+    >["then"],
   };
-  // For inserts that don't .select(), terminal call resolves on the chain itself.
-  // We patch update so a chained .eq returns a thenable that resolves.
   return chain;
 }
 
@@ -1829,7 +1843,10 @@ describe("generateArticleDraftFromIdea", () => {
 
   it("passes blogDescription as undefined when the blog row has none", async () => {
     const client = makeArticleOrchestrationClient();
-    client.__chains.blogs!.maybeSingle = vi.fn().mockResolvedValueOnce({
+    // `getBlogGenerationContext` runs in BOTH the queue and the run
+    // phase now, so use `mockResolvedValue` (not `Once`) to cover both
+    // calls with the empty-description fixture.
+    client.__chains.blogs!.maybeSingle = vi.fn().mockResolvedValue({
       data: {
         id: "b1",
         name: "Acme",
@@ -2035,7 +2052,7 @@ describe("generateArticleDraftFromIdea", () => {
     ).rejects.toEqual({ message: "read boom" });
   });
 
-  it("marks only the job failed when consume_team_tokens fails (no article placeholder, no refund)", async () => {
+  it("marks article + job failed when consume_team_tokens fails (no refund — never consumed)", async () => {
     const client = makeArticleOrchestrationClient();
     mockedConsumeTeamTokens.mockRejectedValueOnce(
       new Error("insufficient_tokens"),
@@ -2052,9 +2069,17 @@ describe("generateArticleDraftFromIdea", () => {
       }),
     ).rejects.toThrow(/insufficient_tokens/);
 
-    // No article placeholder was created.
-    expect(client.__chains.articles!.insert).not.toHaveBeenCalled();
-    // The idea was NOT touched.
+    // Article placeholder WAS created in the queue phase (before the
+    // workflow even tries to consume tokens). The catch in the run
+    // phase then marks it failed.
+    expect(client.__chains.articles!.insert).toHaveBeenCalled();
+    expect(client.__chains.articles!.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        error_message: expect.stringContaining("insufficient_tokens"),
+      }),
+    );
+    // The idea was NOT touched (still approved → user can retry).
     expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
     // The job was marked failed.
     const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
@@ -2124,7 +2149,7 @@ describe("generateArticleDraftFromIdea", () => {
     expect(typeof output.refundedAt).toBe("string");
   });
 
-  it("refunds credits when the article placeholder insert fails after consume", async () => {
+  it("fails the job (no consume, no refund) when the article placeholder insert fails in the queue phase", async () => {
     const client = makeArticleOrchestrationClient({
       insertArticleError: { message: "constraint violation" },
     });
@@ -2140,14 +2165,16 @@ describe("generateArticleDraftFromIdea", () => {
       }),
     ).rejects.toEqual({ message: "constraint violation" });
 
+    // Queue marks the job failed and bails out before any consume.
     const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
       (c) => c[0],
     );
     expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
     // Idea wasn't touched.
     expect(client.__chains.article_ideas!.update).not.toHaveBeenCalled();
-    // Credits WERE consumed before the placeholder insert, so we refund.
-    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+    // No tokens consumed → no refund.
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
   });
 
   it("refunds credits when the post-AI article update fails", async () => {
@@ -2371,5 +2398,566 @@ describe("generateArticleDraftFromIdea", () => {
 
     // Refund still happened — markJobRefunded failed silently.
     expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+  });
+});
+
+// ============================================================================
+// queueGenerateArticleFromIdea — durable enqueue (no token consumption)
+// ============================================================================
+
+describe("queueGenerateArticleFromIdea", () => {
+  it("creates job + article placeholder + links them, returns ids without consuming tokens", async () => {
+    const client = makeArticleOrchestrationClient();
+
+    const result = await queueGenerateArticleFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(result.jobId).toBe("job-X");
+    expect(result.articleId).toBe("article-X");
+    expect(result.ideaId).toBe("idea-1");
+    expect(result.status).toBe("pending");
+    expect(result.alreadyQueued).toBe(false);
+    // No token consumption in queue.
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+    // Article placeholder was inserted in `generating` state.
+    expect(client.__chains.articles!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "generating",
+        article_idea_id: "idea-1",
+      }),
+    );
+    // Job row was created with the snapshot input.
+    expect(client.__chains.article_jobs!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "generate_article",
+        article_idea_id: "idea-1",
+        input: expect.objectContaining({
+          triggerSource: "manual",
+          teamId: "t1",
+          ideaId: "idea-1",
+          ideaSnapshot: expect.objectContaining({ title: ideaRowStub.title }),
+          blogSettingsSnapshot: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
+  it("returns the existing job when one is already pending/processing for the idea", async () => {
+    const client = makeArticleOrchestrationClient();
+    // Override the article_jobs `then` resolver so the idempotency
+    // check (.in("status",[...]).order().limit(1)) yields an existing
+    // active row.
+    client.__chains.article_jobs!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({
+        data: [
+          {
+            id: "job-existing",
+            article_id: "article-existing",
+            status: "processing",
+          },
+        ],
+        error: null,
+      }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.article_jobs.then;
+
+    const result = await queueGenerateArticleFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(result).toEqual({
+      jobId: "job-existing",
+      articleId: "article-existing",
+      ideaId: "idea-1",
+      status: "processing",
+      alreadyQueued: true,
+    });
+    // No new job, no new article were created.
+    expect(client.__chains.article_jobs!.insert).not.toHaveBeenCalled();
+    expect(client.__chains.articles!.insert).not.toHaveBeenCalled();
+  });
+
+  it("propagates the idempotency-check supabase error", async () => {
+    const client = makeArticleOrchestrationClient();
+    client.__chains.article_jobs!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({
+        data: null,
+        error: { message: "active jobs query boom" },
+      }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.article_jobs.then;
+
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "active jobs query boom" });
+  });
+
+  it("propagates blog_not_found / idea_not_found / idea_not_approved", async () => {
+    const blogMissingClient = makeClient({
+      blogs: { data: null, error: null },
+    });
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: blogMissingClient as never,
+      }),
+    ).rejects.toThrow(/blog_not_found/);
+
+    const ideaMissingClient = makeArticleOrchestrationClient({
+      ideaMissing: true,
+    });
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-missing",
+        triggerSource: "manual",
+        client: ideaMissingClient as never,
+      }),
+    ).rejects.toThrow(/idea_not_found/);
+
+    const wrongStatusClient = makeArticleOrchestrationClient({
+      ideaStatus: "generated",
+    });
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: wrongStatusClient as never,
+      }),
+    ).rejects.toThrow(/idea_not_approved/);
+  });
+
+  it("marks the job failed and propagates when the article placeholder insert fails", async () => {
+    const client = makeArticleOrchestrationClient({
+      insertArticleError: { message: "constraint violation" },
+    });
+
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "constraint violation" });
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+    expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
+    // CRITICAL: still no consume.
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await queueGenerateArticleFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+    });
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// runGenerateArticleFromIdeaJob — workflow step body
+// ============================================================================
+
+describe("runGenerateArticleFromIdeaJob", () => {
+  beforeEach(() => {
+    mockedGenerateArticleDraft.mockResolvedValue(draftStub as never);
+    mockedConsumeTeamTokens.mockResolvedValue(95);
+    mockedRefundTeamTokens.mockResolvedValue(100);
+  });
+
+  it("runs the generation against pre-existing job + article ids", async () => {
+    const client = makeArticleOrchestrationClient();
+
+    const result = await runGenerateArticleFromIdeaJob({
+      jobId: "job-existing",
+      articleId: "article-existing",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(result.jobId).toBe("job-existing");
+    expect(result.articleId).toBe("article-existing");
+    expect(result.status).toBe("ready_for_review");
+    // Consumes against the pre-existing job id.
+    expect(mockedConsumeTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "article_job::job-existing",
+        metadata: expect.objectContaining({ trigger_source: "manual" }),
+      }),
+    );
+    // Idea was converted_to_article.
+    expect(client.__chains.article_ideas!.update).toHaveBeenCalledWith({
+      status: "converted_to_article",
+    });
+  });
+
+  it("defaults trigger_source metadata to 'workflow' when not provided", async () => {
+    const client = makeArticleOrchestrationClient();
+
+    await runGenerateArticleFromIdeaJob({
+      jobId: "job-1",
+      articleId: "article-1",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      client: client as never,
+    });
+
+    expect(mockedConsumeTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ trigger_source: "workflow" }),
+      }),
+    );
+  });
+
+  it("merges jobInputPatch into the existing article_jobs.input jsonb", async () => {
+    const client = makeArticleOrchestrationClient();
+    // The article_jobs chain's `maybeSingle` is hit twice: first for
+    // the jobInputPatch merge, then by `updateArticleJobStatus` to
+    // read the current `attempts` count. Provide the input row first
+    // and a default for everything else.
+    client.__chains.article_jobs!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { input: { triggerSource: "manual" } },
+        error: null,
+      })
+      .mockResolvedValue({ data: { attempts: 0 }, error: null });
+
+    await runGenerateArticleFromIdeaJob({
+      jobId: "job-1",
+      articleId: "article-1",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      jobInputPatch: { workflowRunId: "run-1" },
+      client: client as never,
+    });
+
+    const inputUpdate = client.__chains
+      .article_jobs!.update.mock.calls.map((c) => c[0])
+      .find((u) => "input" in u);
+    expect(inputUpdate).toBeDefined();
+    expect(inputUpdate!.input).toMatchObject({
+      triggerSource: "manual",
+      workflowRunId: "run-1",
+    });
+  });
+
+  it("treats a non-object existing input as empty when merging the patch", async () => {
+    const client = makeArticleOrchestrationClient();
+    client.__chains.article_jobs!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { input: null }, error: null })
+      .mockResolvedValue({ data: { attempts: 0 }, error: null });
+
+    await runGenerateArticleFromIdeaJob({
+      jobId: "job-1",
+      articleId: "article-1",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      jobInputPatch: { workflowRunId: "run-1" },
+      client: client as never,
+    });
+
+    const inputUpdate = client.__chains
+      .article_jobs!.update.mock.calls.map((c) => c[0])
+      .find((u) => "input" in u);
+    expect(inputUpdate!.input).toEqual({ workflowRunId: "run-1" });
+  });
+
+  it("propagates the read error when merging jobInputPatch", async () => {
+    const client = makeArticleOrchestrationClient();
+    client.__chains.article_jobs!.maybeSingle = vi.fn().mockResolvedValueOnce({
+      data: null,
+      error: { message: "input read boom" },
+    });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        jobInputPatch: { workflowRunId: "run-1" },
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "input read boom" });
+  });
+
+  it("ignores an empty jobInputPatch (no merge round-trip)", async () => {
+    const client = makeArticleOrchestrationClient();
+
+    await runGenerateArticleFromIdeaJob({
+      jobId: "job-1",
+      articleId: "article-1",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      jobInputPatch: {},
+      client: client as never,
+    });
+
+    // No update call carries an `input` field — the merge path
+    // never fires for an empty patch, so the only writes to
+    // article_jobs are status / step / attempts patches.
+    const updates = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0] as Record<string, unknown>,
+    );
+    expect(updates.some((u) => "input" in u)).toBe(false);
+  });
+
+  it("fails fast when the blog vanished between queue and run", async () => {
+    const client = makeClient({
+      blogs: { data: null, error: null },
+    });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/blog_not_found/);
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("fails fast when the idea was already converted by a parallel run", async () => {
+    const client = makeArticleOrchestrationClient({
+      ideaStatus: "converted_to_article",
+    });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/idea_not_approved/);
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("propagates the idea-load supabase error", async () => {
+    const client = makeArticleOrchestrationClient();
+    client.__chains.article_ideas!.maybeSingle = vi.fn().mockResolvedValueOnce({
+      data: null,
+      error: { message: "idea read boom" },
+    });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "idea read boom" });
+  });
+
+  it("fails fast when the idea row is missing from the run", async () => {
+    const client = makeArticleOrchestrationClient({ ideaMissing: true });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/idea_not_found/);
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await runGenerateArticleFromIdeaJob({
+      jobId: "job-1",
+      articleId: "article-1",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+    });
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// getActiveGenerateArticleIdeaIds
+// ============================================================================
+
+describe("getActiveGenerateArticleIdeaIds", () => {
+  it("returns an empty Set when ideaIds is empty (no DB round-trip)", async () => {
+    const client = makeClient({});
+    const result = await getActiveGenerateArticleIdeaIds(
+      "b1",
+      [],
+      client as never,
+    );
+    expect(result.size).toBe(0);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it("returns the set of idea ids with a pending/processing job", async () => {
+    const client = makeClient({
+      article_jobs: {
+        data: [
+          { article_idea_id: "i1" },
+          { article_idea_id: "i2" },
+          // null entries are filtered out (defensive against the FK
+          // being on-delete-set-null for article_idea_id).
+          { article_idea_id: null },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await getActiveGenerateArticleIdeaIds(
+      "b1",
+      ["i1", "i2", "i3"],
+      client as never,
+    );
+
+    expect([...result].sort()).toEqual(["i1", "i2"]);
+    expect(client.from).toHaveBeenCalledWith("article_jobs");
+    expect(client.__chains.article_jobs!.eq).toHaveBeenCalledWith(
+      "blog_id",
+      "b1",
+    );
+    expect(client.__chains.article_jobs!.eq).toHaveBeenCalledWith(
+      "type",
+      "generate_article",
+    );
+    expect(client.__chains.article_jobs!.in).toHaveBeenCalledWith("status", [
+      "pending",
+      "processing",
+    ]);
+    expect(client.__chains.article_jobs!.in).toHaveBeenCalledWith(
+      "article_idea_id",
+      ["i1", "i2", "i3"],
+    );
+  });
+
+  it("returns an empty Set when the query returns no rows", async () => {
+    const client = makeClient({
+      article_jobs: { data: [], error: null },
+    });
+
+    const result = await getActiveGenerateArticleIdeaIds(
+      "b1",
+      ["i1"],
+      client as never,
+    );
+    expect(result.size).toBe(0);
+  });
+
+  it("returns an empty Set when data is null", async () => {
+    const client = makeClient({
+      article_jobs: { data: null, error: null },
+    });
+
+    const result = await getActiveGenerateArticleIdeaIds(
+      "b1",
+      ["i1"],
+      client as never,
+    );
+    expect(result.size).toBe(0);
+  });
+
+  it("propagates the supabase error", async () => {
+    const client = makeClient({
+      article_jobs: { data: null, error: { message: "boom" } },
+    });
+
+    await expect(
+      getActiveGenerateArticleIdeaIds("b1", ["i1"], client as never),
+    ).rejects.toMatchObject({ message: "boom" });
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({
+      article_jobs: { data: [], error: null },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await getActiveGenerateArticleIdeaIds("b1", ["i1"]);
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
   });
 });

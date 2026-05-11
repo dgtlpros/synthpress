@@ -1,6 +1,7 @@
 import NextLink from "next/link";
 import { cn } from "@/lib/cn";
 import { Link } from "@/components/atoms/Link";
+import { ThemeToggle } from "@/components/atoms/ThemeToggle";
 
 const navLinks = [
   { label: "Features", href: "/#features" },
@@ -44,7 +45,8 @@ export function Navbar({ className, user }: NavbarProps) {
           ))}
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
           {user ? (
             <NextLink
               href="/dashboard"

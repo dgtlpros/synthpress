@@ -22,6 +22,10 @@
 /.next/
 /out/
 
+# vercel workflow sdk (auto-generated route handlers)
+/src/app/.well-known/workflow/
+/app/.well-known/workflow/
+
 # production
 /build
 
