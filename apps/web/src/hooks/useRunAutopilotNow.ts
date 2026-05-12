@@ -111,8 +111,9 @@ export function useRunAutopilotNow({
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] =
     useState<BlogAutopilotPanelResult | null>(null);
-  const [lastResult, setLastResult] =
-    useState<RunAutopilotNowResult | null>(null);
+  const [lastResult, setLastResult] = useState<RunAutopilotNowResult | null>(
+    null,
+  );
 
   const run = useCallback(() => {
     setResultMessage(null);

@@ -55,9 +55,7 @@ describe("AutopilotRunDetailDrawerConnector", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(
-      screen.getByTestId("autopilot-detail-loading"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("autopilot-detail-loading")).toBeInTheDocument();
   });
 
   it("renders the drawer's error state when the hook surfaces an error", () => {

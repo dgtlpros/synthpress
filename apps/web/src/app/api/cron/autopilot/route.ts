@@ -45,8 +45,7 @@ async function handle(request: NextRequest) {
   // Optional `?dry_run=true` lets operators see what the scheduler
   // WOULD do without actually spawning workflows or generating
   // ideas. Useful right after enabling autopilot for a blog.
-  const dryRun =
-    request.nextUrl.searchParams.get("dry_run") === "true";
+  const dryRun = request.nextUrl.searchParams.get("dry_run") === "true";
 
   try {
     const result = await runBlogAutopilotScheduler({ dryRun });

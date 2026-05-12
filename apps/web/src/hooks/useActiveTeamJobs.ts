@@ -77,10 +77,7 @@ function writeDismissed(entries: DismissedEntry[]): void {
   /* v8 ignore next 1 -- defensive: SSR safety */
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(
-      DISMISSED_STORAGE_KEY,
-      JSON.stringify(entries),
-    );
+    window.localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(entries));
     /* v8 ignore start -- defensive: localStorage quota / private mode */
   } catch {
     // Best effort. If localStorage is unavailable we lose dismissals

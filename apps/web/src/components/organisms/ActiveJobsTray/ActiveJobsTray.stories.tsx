@@ -13,7 +13,12 @@ const baseJob: ActiveArticleJobRow = {
   startedAt: "2026-05-11T00:00:01Z",
   completedAt: null,
   ideaId: "i1",
-  blog: { id: "b1", name: "Indie Hacker Stories", projectId: "p1", teamId: "t1" },
+  blog: {
+    id: "b1",
+    name: "Indie Hacker Stories",
+    projectId: "p1",
+    teamId: "t1",
+  },
   article: {
     id: "article-1",
     title: "How to launch a B2B blog in 30 days",

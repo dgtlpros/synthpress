@@ -11,10 +11,7 @@ vi.mock("@/actions/autopilot", () => ({
 }));
 
 import { runAutopilotNow } from "@/actions/autopilot";
-import {
-  describeRunResult,
-  useRunAutopilotNow,
-} from "./useRunAutopilotNow";
+import { describeRunResult, useRunAutopilotNow } from "./useRunAutopilotNow";
 
 const mockedAction = vi.mocked(runAutopilotNow);
 

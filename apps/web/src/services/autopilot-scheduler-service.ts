@@ -239,7 +239,9 @@ export async function pauseAutopilotForBlog(
   if (!data) return;
 
   const currentSettings =
-    data.settings && typeof data.settings === "object" && !Array.isArray(data.settings)
+    data.settings &&
+    typeof data.settings === "object" &&
+    !Array.isArray(data.settings)
       ? (data.settings as Record<string, unknown>)
       : {};
   const currentAutomation =
@@ -288,7 +290,9 @@ async function mergeAutopilotRunOutput(
   if (!data) return;
 
   const currentOutput =
-    data.output && typeof data.output === "object" && !Array.isArray(data.output)
+    data.output &&
+    typeof data.output === "object" &&
+    !Array.isArray(data.output)
       ? (data.output as Record<string, unknown>)
       : {};
 
@@ -866,11 +870,16 @@ export async function runAutopilotForBlog(
       client: supabase,
     });
 
-    return makeResult(run.id, "completed", lastSpawnError ? "partial_failure" : null, {
-      ideasGenerated,
-      articleJobsStarted,
-      articleJobIds,
-    });
+    return makeResult(
+      run.id,
+      "completed",
+      lastSpawnError ? "partial_failure" : null,
+      {
+        ideasGenerated,
+        articleJobsStarted,
+        articleJobIds,
+      },
+    );
   } catch (err) {
     const message = describeErr(err);
     await failBlogAutopilotRun({
@@ -934,12 +943,11 @@ async function loadEligibleBlogs(
     id: string;
     project_id: string;
     settings: Json;
-    project:
-      | { team_id: string }
-      | { team_id: string }[]
-      | null;
+    project: { team_id: string } | { team_id: string }[] | null;
   }>) {
-    const projectRaw = Array.isArray(row.project) ? row.project[0] : row.project;
+    const projectRaw = Array.isArray(row.project)
+      ? row.project[0]
+      : row.project;
     /* v8 ignore next 1 -- defensive: blog FK guarantees the project row */
     if (!projectRaw) continue;
     out.push({
@@ -1043,10 +1051,7 @@ export function computeDailyMaxArticles(
 ): number {
   const dailyFromWeekly =
     generatePerWeek > 0 ? Math.ceil(generatePerWeek / 7) : 0;
-  return Math.min(
-    Math.max(0, maxPostsPerDay),
-    Math.max(0, dailyFromWeekly),
-  );
+  return Math.min(Math.max(0, maxPostsPerDay), Math.max(0, dailyFromWeekly));
 }
 
 interface SkipReasonInput {

@@ -33,9 +33,13 @@ export default async function ArticleDetailPage({
   // Verify the blog belongs to this project (RLS would filter the
   // article query too, but checking the chain explicitly gives us a
   // clean 404 instead of a silent empty result).
+  // We also pull the WP credential columns so the publish card can
+  // render its "connected / not connected" state without a second
+  // request — we never expose the password to the client; we only
+  // surface a boolean.
   const { data: blog } = await supabase
     .from("blogs")
-    .select("id, name")
+    .select("id, name, wp_url, wp_username, wp_app_password")
     .eq("id", blogId)
     .eq("project_id", projectId)
     .maybeSingle();
@@ -58,8 +62,13 @@ export default async function ArticleDetailPage({
     errorMessage: article.error_message,
     updatedAt: article.updated_at,
     createdAt: article.created_at,
+    wpPostId: article.wp_post_id,
+    wpPostUrl: article.wp_post_url,
   };
 
+  const hasWordPressConnection = Boolean(
+    blog.wp_url && blog.wp_username && blog.wp_app_password,
+  );
   const blogBase = `/teams/${teamId}/projects/${projectId}/blogs/${blogId}`;
 
   return (
@@ -81,6 +90,8 @@ export default async function ArticleDetailPage({
         projectId={projectId}
         blogId={blogId}
         article={detail}
+        hasWordPressConnection={hasWordPressConnection}
+        connectionsHref={`${blogBase}/connections`}
       />
     </div>
   );

@@ -20,13 +20,13 @@ export const Open: Story = {
     children: (
       <div className="space-y-4 text-sm text-foreground">
         <p>
-          The drawer body scrolls independently of the header + footer
-          so long content (lists of jobs, raw JSON, etc.) doesn&apos;t
-          shove the close affordance off-screen.
+          The drawer body scrolls independently of the header + footer so long
+          content (lists of jobs, raw JSON, etc.) doesn&apos;t shove the close
+          affordance off-screen.
         </p>
         <p className="text-muted">
-          On mobile (&lt; sm) the same component renders as a bottom
-          sheet anchored to the bottom edge.
+          On mobile (&lt; sm) the same component renders as a bottom sheet
+          anchored to the bottom edge.
         </p>
       </div>
     ),

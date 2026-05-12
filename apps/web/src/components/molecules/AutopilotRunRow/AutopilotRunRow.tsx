@@ -30,8 +30,10 @@ export interface AutopilotRunRowData {
   completedAt: string | null;
 }
 
-export interface AutopilotRunRowProps
-  extends Omit<HTMLAttributes<HTMLLIElement>, "onSelect"> {
+export interface AutopilotRunRowProps extends Omit<
+  HTMLAttributes<HTMLLIElement>,
+  "onSelect"
+> {
   run: AutopilotRunRowData;
   /**
    * Fires when the user activates the row. When provided, the row's
@@ -102,9 +104,7 @@ function spawnedJobsCount(
   return ids.length;
 }
 
-function readReason(
-  output: Record<string, unknown> | null,
-): string | null {
+function readReason(output: Record<string, unknown> | null): string | null {
   if (!output) return null;
   const reason = output.reason;
   return typeof reason === "string" && reason.length > 0 ? reason : null;
@@ -115,9 +115,7 @@ function readReason(
  * on `output` when `requireReview === false`. Returns `0` when the
  * field is missing (older runs) or non-numeric (corrupt jsonb).
  */
-function readAutoApprovedCount(
-  output: Record<string, unknown> | null,
-): number {
+function readAutoApprovedCount(output: Record<string, unknown> | null): number {
   if (!output) return 0;
   const v = output.ideasAutoApproved;
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
@@ -193,17 +191,13 @@ export function AutopilotRunRow({
             <span>{run.articlesCompleted} completed</span>
           ) : null}
           {run.articlesFailed > 0 ? (
-            <span className="text-error">
-              {run.articlesFailed} failed
-            </span>
+            <span className="text-error">{run.articlesFailed} failed</span>
           ) : null}
           {run.tokensSpent > 0 ? (
             <span>{run.tokensSpent} tokens spent</span>
           ) : null}
           {run.tokensRefunded > 0 ? (
-            <span className="text-warning">
-              {run.tokensRefunded} refunded
-            </span>
+            <span className="text-warning">{run.tokensRefunded} refunded</span>
           ) : null}
         </p>
       ) : null}
@@ -213,9 +207,7 @@ export function AutopilotRunRow({
         // (shouldn't happen in practice but the data could disagree
         // if a future feature stamps spawnedArticleJobIds without
         // the `articlesStarted` increment).
-        <p className="text-xs text-muted">
-          {jobCount} article jobs started
-        </p>
+        <p className="text-xs text-muted">{jobCount} article jobs started</p>
       ) : null}
 
       {run.errorMessage ? (
@@ -235,8 +227,7 @@ export function AutopilotRunRow({
 
       {reason && !run.errorMessage ? (
         <p className="text-xs text-muted">
-          <span className="font-medium text-foreground">Reason:</span>{" "}
-          {reason}
+          <span className="font-medium text-foreground">Reason:</span> {reason}
         </p>
       ) : null}
     </div>

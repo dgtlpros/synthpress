@@ -65,7 +65,9 @@ describe("BlogAutopilotPanel", () => {
     expect(
       screen.getByRole("button", { name: /run autopilot now/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("note")).toHaveTextContent(/autopilot is disabled/i);
+    expect(screen.getByRole("note")).toHaveTextContent(
+      /autopilot is disabled/i,
+    );
   });
 
   it("links the helper text to the Automation tab when an href is provided", () => {
@@ -103,11 +105,7 @@ describe("BlogAutopilotPanel", () => {
 
   it("disables the button when no onRunNow handler is provided", () => {
     render(
-      <BlogAutopilotPanel
-        blogName="x"
-        autopilotEnabled
-        recentRuns={[]}
-      />,
+      <BlogAutopilotPanel blogName="x" autopilotEnabled recentRuns={[]} />,
     );
     expect(
       screen.getByRole("button", { name: /run autopilot now/i }),
@@ -124,9 +122,7 @@ describe("BlogAutopilotPanel", () => {
         onRunNow={onRunNow}
       />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /run autopilot now/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /run autopilot now/i }));
     expect(onRunNow).toHaveBeenCalledOnce();
   });
 
@@ -232,7 +228,9 @@ describe("BlogAutopilotPanel", () => {
     expect(
       screen.queryByTestId("autopilot-paused-warning"),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent(/autopilot is disabled/i);
+    expect(screen.getByRole("note")).toHaveTextContent(
+      /autopilot is disabled/i,
+    );
   });
 
   it("does NOT render the warning when autopilot is enabled (defensive: stale paused metadata)", () => {
@@ -338,9 +336,9 @@ describe("BlogAutopilotPanel", () => {
         onRunNow={vi.fn()}
       />,
     );
-    expect(
-      screen.getByTestId("autopilot-paused-warning"),
-    ).toHaveTextContent(/Paused just now/i);
+    expect(screen.getByTestId("autopilot-paused-warning")).toHaveTextContent(
+      /Paused just now/i,
+    );
     u1();
 
     // 90 minutes ago → "1h ago"
@@ -355,9 +353,9 @@ describe("BlogAutopilotPanel", () => {
         onRunNow={vi.fn()}
       />,
     );
-    expect(
-      screen.getByTestId("autopilot-paused-warning"),
-    ).toHaveTextContent(/Paused 1h ago/i);
+    expect(screen.getByTestId("autopilot-paused-warning")).toHaveTextContent(
+      /Paused 1h ago/i,
+    );
     u2();
 
     // 3 days ago → "3d ago"
@@ -372,9 +370,9 @@ describe("BlogAutopilotPanel", () => {
         onRunNow={vi.fn()}
       />,
     );
-    expect(
-      screen.getByTestId("autopilot-paused-warning"),
-    ).toHaveTextContent(/Paused 3d ago/i);
+    expect(screen.getByTestId("autopilot-paused-warning")).toHaveTextContent(
+      /Paused 3d ago/i,
+    );
     u3();
 
     // 30 days ago → falls through to locale date (any non-relative form)

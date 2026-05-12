@@ -9,12 +9,24 @@ import {
   type ArticleEditFormValue,
   useArticleEdit,
 } from "@/hooks/useArticleEdit";
+import { ArticleWordPressPublishConnector } from "./ArticleWordPressPublishConnector";
 
 export interface ArticleDetailConnectorProps {
   teamId: string;
   projectId: string;
   blogId: string;
   article: ArticleDetailData;
+  /**
+   * True iff the blog has all three WordPress credential fields
+   * stored. Computed in the parent server component so we don't
+   * re-query Supabase from the client.
+   */
+  hasWordPressConnection: boolean;
+  /**
+   * Where the publish card's "Connect WordPress" link points —
+   * typically `${blogBase}/connections`.
+   */
+  connectionsHref: string;
 }
 
 /**
@@ -26,12 +38,20 @@ export interface ArticleDetailConnectorProps {
  * The page (server component) hands us the article in `ArticleDetailData`
  * shape; we derive the editor's initial form value from the same
  * source so a Cancel always returns to the canonical server state.
+ *
+ * Below the read view we also mount the WordPress publish card. We
+ * deliberately do NOT render the publish card while the user is
+ * actively editing — the card mutates the same article row through
+ * a different action and the UX is cleaner if "Send to WordPress"
+ * is only available on the saved version.
  */
 export function ArticleDetailConnector({
   teamId,
   projectId,
   blogId,
   article,
+  hasWordPressConnection,
+  connectionsHref,
 }: ArticleDetailConnectorProps) {
   const initialValue: ArticleEditFormValue = {
     title: article.title,
@@ -72,5 +92,23 @@ export function ArticleDetailConnector({
     );
   }
 
-  return <ArticleDetail article={article} onEdit={enterEdit} />;
+  return (
+    <div className="space-y-6">
+      <ArticleDetail article={article} onEdit={enterEdit} />
+      <ArticleWordPressPublishConnector
+        teamId={teamId}
+        projectId={projectId}
+        blogId={blogId}
+        articleId={article.id}
+        hasWordPressConnection={hasWordPressConnection}
+        hasBody={Boolean(
+          article.contentMarkdown && article.contentMarkdown.trim(),
+        )}
+        wpPostId={article.wpPostId}
+        wpPostUrl={article.wpPostUrl}
+        articleStatus={article.status}
+        connectionsHref={connectionsHref}
+      />
+    </div>
+  );
 }

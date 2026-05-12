@@ -5,7 +5,20 @@ vi.mock("@/hooks/useArticleEdit", () => ({
   useArticleEdit: vi.fn(),
 }));
 
+vi.mock("./ArticleWordPressPublishConnector", () => ({
+  ArticleWordPressPublishConnector: vi.fn(
+    (props: { hasBody: boolean; hasWordPressConnection: boolean }) => (
+      <div
+        data-testid="wp-publish-connector"
+        data-has-body={String(props.hasBody)}
+        data-has-connection={String(props.hasWordPressConnection)}
+      />
+    ),
+  ),
+}));
+
 import { useArticleEdit } from "@/hooks/useArticleEdit";
+import { ArticleWordPressPublishConnector } from "./ArticleWordPressPublishConnector";
 import { ArticleDetailConnector } from "./ArticleDetailConnector";
 import type { ArticleDetailData } from "@/components/organisms/ArticleDetail";
 
@@ -25,6 +38,8 @@ const baseArticle: ArticleDetailData = {
   errorMessage: null,
   updatedAt: new Date().toISOString(),
   createdAt: new Date().toISOString(),
+  wpPostId: null,
+  wpPostUrl: null,
 };
 
 const setField = vi.fn();
@@ -62,6 +77,8 @@ const baseProps = {
   projectId: "p1",
   blogId: "b1",
   article: baseArticle,
+  hasWordPressConnection: true,
+  connectionsHref: "/teams/t1/projects/p1/blogs/b1/connections",
 };
 
 beforeEach(() => {
@@ -164,5 +181,115 @@ describe("ArticleDetailConnector", () => {
     expect(initialValue.metaDescription).toBe("");
     expect(initialValue.targetKeyword).toBe("");
     expect(initialValue.contentMarkdown).toBe("");
+  });
+
+  it("mounts the WordPress publish connector in read mode", () => {
+    render(<ArticleDetailConnector {...baseProps} />);
+    expect(screen.getByTestId("wp-publish-connector")).toBeInTheDocument();
+  });
+
+  it("forwards hasWordPressConnection + computed hasBody to the publish connector", () => {
+    render(<ArticleDetailConnector {...baseProps} />);
+    const node = screen.getByTestId("wp-publish-connector");
+    expect(node).toHaveAttribute("data-has-connection", "true");
+    expect(node).toHaveAttribute("data-has-body", "true");
+  });
+
+  it("computes hasBody=false when contentMarkdown is null", () => {
+    render(
+      <ArticleDetailConnector
+        {...baseProps}
+        article={{ ...baseArticle, contentMarkdown: null }}
+      />,
+    );
+    expect(screen.getByTestId("wp-publish-connector")).toHaveAttribute(
+      "data-has-body",
+      "false",
+    );
+  });
+
+  it("computes hasBody=false when contentMarkdown is whitespace-only", () => {
+    render(
+      <ArticleDetailConnector
+        {...baseProps}
+        article={{ ...baseArticle, contentMarkdown: "   \n   " }}
+      />,
+    );
+    expect(screen.getByTestId("wp-publish-connector")).toHaveAttribute(
+      "data-has-body",
+      "false",
+    );
+  });
+
+  it("forwards hasWordPressConnection=false through to the publish connector", () => {
+    render(
+      <ArticleDetailConnector {...baseProps} hasWordPressConnection={false} />,
+    );
+    expect(screen.getByTestId("wp-publish-connector")).toHaveAttribute(
+      "data-has-connection",
+      "false",
+    );
+  });
+
+  it("does NOT mount the WordPress publish connector while editing", () => {
+    mockedUseArticleEdit.mockReturnValueOnce(
+      defaultHookValue({ isEditing: true }),
+    );
+    render(<ArticleDetailConnector {...baseProps} />);
+    expect(
+      screen.queryByTestId("wp-publish-connector"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("forwards the connectionsHref + articleStatus props to the publish connector", () => {
+    render(<ArticleDetailConnector {...baseProps} />);
+    const calls = vi.mocked(ArticleWordPressPublishConnector).mock.calls;
+    const lastCall = calls[calls.length - 1]!;
+    expect(lastCall[0]).toMatchObject({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "b1",
+      articleId: "a1",
+      connectionsHref: baseProps.connectionsHref,
+      wpPostId: null,
+      wpPostUrl: null,
+      articleStatus: "ready_for_review",
+    });
+  });
+
+  it("forwards persisted wp fields to the publish connector", () => {
+    render(
+      <ArticleDetailConnector
+        {...baseProps}
+        article={{
+          ...baseArticle,
+          wpPostId: 7,
+          wpPostUrl: "https://example.com/?p=7",
+        }}
+      />,
+    );
+    const calls = vi.mocked(ArticleWordPressPublishConnector).mock.calls;
+    const lastCall = calls[calls.length - 1]!;
+    expect(lastCall[0]).toMatchObject({
+      wpPostId: 7,
+      wpPostUrl: "https://example.com/?p=7",
+    });
+  });
+
+  it("forwards articleStatus=published to the publish connector when the article is live", () => {
+    render(
+      <ArticleDetailConnector
+        {...baseProps}
+        article={{
+          ...baseArticle,
+          status: "published",
+          wpPostId: 7,
+          wpPostUrl: "https://example.com/?p=7",
+        }}
+      />,
+    );
+    const calls = vi.mocked(ArticleWordPressPublishConnector).mock.calls;
+    const lastCall = calls[calls.length - 1]!;
+    expect(lastCall[0]).toMatchObject({ articleStatus: "published" });
   });
 });

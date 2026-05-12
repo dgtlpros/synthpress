@@ -35,11 +35,7 @@ describe("ActiveJobsTray", () => {
 
   it("renders the collapsed pill by default with the active-count copy", () => {
     render(
-      <ActiveJobsTray
-        jobs={[makeJob()]}
-        activeCount={1}
-        onDismiss={vi.fn()}
-      />,
+      <ActiveJobsTray jobs={[makeJob()]} activeCount={1} onDismiss={vi.fn()} />,
     );
     expect(
       screen.getByRole("button", { name: /1 task running/i }),
@@ -124,11 +120,7 @@ describe("ActiveJobsTray", () => {
 
   it("collapses back when the header collapse button is clicked", () => {
     render(
-      <ActiveJobsTray
-        jobs={[makeJob()]}
-        activeCount={1}
-        onDismiss={vi.fn()}
-      />,
+      <ActiveJobsTray jobs={[makeJob()]} activeCount={1} onDismiss={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /1 task running/i }));
     fireEvent.click(
@@ -141,11 +133,7 @@ describe("ActiveJobsTray", () => {
 
   it("shows only the running half of the subtitle when nothing is finished yet", () => {
     render(
-      <ActiveJobsTray
-        jobs={[makeJob()]}
-        activeCount={1}
-        onDismiss={vi.fn()}
-      />,
+      <ActiveJobsTray jobs={[makeJob()]} activeCount={1} onDismiss={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /1 task running/i }));
     expect(screen.getByText("1 running")).toBeInTheDocument();
@@ -230,17 +218,29 @@ describe("ActiveJobsTray", () => {
             makeJob({
               id: "a",
               currentStep: "loading_context",
-              article: { id: "art-a", title: "Alpha post", status: "generating" },
+              article: {
+                id: "art-a",
+                title: "Alpha post",
+                status: "generating",
+              },
             }),
             makeJob({
               id: "b",
               currentStep: "writing_article",
-              article: { id: "art-b", title: "Beta post", status: "generating" },
+              article: {
+                id: "art-b",
+                title: "Beta post",
+                status: "generating",
+              },
             }),
             makeJob({
               id: "c",
               currentStep: "saving_article",
-              article: { id: "art-c", title: "Gamma post", status: "generating" },
+              article: {
+                id: "art-c",
+                title: "Gamma post",
+                status: "generating",
+              },
             }),
           ]}
           activeCount={3}
@@ -248,9 +248,7 @@ describe("ActiveJobsTray", () => {
         />,
       );
 
-      fireEvent.click(
-        screen.getByRole("button", { name: /3 tasks running/i }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: /3 tasks running/i }));
 
       // Three rows, three progress bars, each with its OWN aria-valuenow.
       const bars = screen.getAllByRole("progressbar");
@@ -277,7 +275,11 @@ describe("ActiveJobsTray", () => {
             makeJob({
               id: "a",
               currentStep: "writing_article",
-              article: { id: "art-a", title: "Alpha post", status: "generating" },
+              article: {
+                id: "art-a",
+                title: "Alpha post",
+                status: "generating",
+              },
             }),
             makeJob({
               id: "b",

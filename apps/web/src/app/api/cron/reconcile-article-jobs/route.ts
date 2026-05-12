@@ -35,10 +35,7 @@ async function handle(request: NextRequest) {
 
   const authHeader = request.headers.get("authorization") ?? "";
   if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json(
-      { error: "Unauthorized." },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
@@ -46,9 +43,7 @@ async function handle(request: NextRequest) {
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
     const message =
-      err instanceof Error
-        ? err.message
-        : "Unknown reconciler failure.";
+      err instanceof Error ? err.message : "Unknown reconciler failure.";
     return NextResponse.json(
       { error: `Reconciler failed: ${message}` },
       { status: 500 },

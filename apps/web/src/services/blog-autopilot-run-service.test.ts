@@ -871,10 +871,9 @@ function makeQueryChain<T>(result: ChainResult<T>): ChainMock {
     order: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
     then: ((onFulfilled, onRejected) =>
-      Promise.resolve(result).then(
-        onFulfilled,
-        onRejected,
-      )) as PromiseLike<ChainResult<T>>["then"],
+      Promise.resolve(result).then(onFulfilled, onRejected)) as PromiseLike<
+      ChainResult<T>
+    >["then"],
   };
   return chain as unknown as ChainMock;
 }
@@ -898,7 +897,8 @@ function makeDetailClient(perTable: {
   }
   const client = {
     from: vi.fn((name: string) => {
-      if (!chains[name]) chains[name] = makeQueryChain({ data: null, error: null });
+      if (!chains[name])
+        chains[name] = makeQueryChain({ data: null, error: null });
       return chains[name];
     }),
     __chains: chains,
@@ -1159,10 +1159,9 @@ describe("getBlogAutopilotRunDetail", () => {
     });
 
     expect(client.__chains.articles!.in).toHaveBeenCalledWith("id", ["art-X"]);
-    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith(
-      "id",
-      ["idea-X"],
-    );
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith("id", [
+      "idea-X",
+    ]);
     expect(out!.articles).toHaveLength(1);
     expect(out!.ideas).toHaveLength(1);
   });

@@ -27,11 +27,7 @@ export interface ActiveJobRowProps {
   className?: string;
 }
 
-export function ActiveJobRow({
-  job,
-  onDismiss,
-  className,
-}: ActiveJobRowProps) {
+export function ActiveJobRow({ job, onDismiss, className }: ActiveJobRowProps) {
   const label = getActiveJobLabel({
     type: job.type,
     status: job.status,
@@ -89,9 +85,7 @@ export function ActiveJobRow({
             value={label.progressPercent!}
             variant={label.variant === "default" ? "default" : "brand"}
             size="sm"
-            label={`${label.label} for ${
-              job.article?.title ?? job.blog.name
-            }`}
+            label={`${label.label} for ${job.article?.title ?? job.blog.name}`}
             className="flex-1"
           />
           <span

@@ -6,8 +6,14 @@ import {
   AutopilotRunStatusBadge,
   type AutopilotRunStatus,
 } from "@/components/atoms/AutopilotRunStatusBadge";
-import { PostStatusBadge, type PostStatus } from "@/components/atoms/PostStatusBadge";
-import { IdeaStatusBadge, type IdeaStatus } from "@/components/atoms/IdeaStatusBadge";
+import {
+  PostStatusBadge,
+  type PostStatus,
+} from "@/components/atoms/PostStatusBadge";
+import {
+  IdeaStatusBadge,
+  type IdeaStatus,
+} from "@/components/atoms/IdeaStatusBadge";
 import { Spinner } from "@/components/atoms/Spinner";
 import type { BlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
 
@@ -123,9 +129,7 @@ export function AutopilotRunDetailDrawer({
           automationSettingsHref={automationSettingsHref}
         />
       ) : (
-        <p className="py-6 text-center text-sm text-muted">
-          No run selected.
-        </p>
+        <p className="py-6 text-center text-sm text-muted">No run selected.</p>
       )}
     </Drawer>
   );
@@ -160,7 +164,9 @@ function DetailBody({
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <AutopilotRunStatusBadge status={run.status as AutopilotRunStatus} />
+            <AutopilotRunStatusBadge
+              status={run.status as AutopilotRunStatus}
+            />
             <span className="text-xs text-muted">
               {formatTriggerSource(run.trigger_source)}
             </span>
@@ -181,7 +187,9 @@ function DetailBody({
             <span className="font-medium text-foreground">
               {run.completed_at ? "Completed:" : "Status:"}
             </span>{" "}
-            {run.completed_at ? formatTimestamp(run.completed_at) : "Still running"}
+            {run.completed_at
+              ? formatTimestamp(run.completed_at)
+              : "Still running"}
           </p>
           <p className="font-mono text-[10px] text-muted/70">
             run id: {run.id}
@@ -196,9 +204,7 @@ function DetailBody({
           tone="warning"
           testId="autopilot-paused-detail-warning"
         >
-          <p>
-            Autopilot was paused because multiple recent runs failed.
-          </p>
+          <p>Autopilot was paused because multiple recent runs failed.</p>
           {automationSettingsHref ? (
             <p className="mt-2">
               Re-enable from the{" "}
@@ -308,8 +314,7 @@ function DetailBody({
               const article = job.articleId
                 ? articlesById.get(job.articleId)
                 : undefined;
-              const refunded =
-                readObject(job.output)?.refunded === true;
+              const refunded = readObject(job.output)?.refunded === true;
               return (
                 <li
                   key={job.id}
@@ -321,9 +326,7 @@ function DetailBody({
                       {article?.title ?? jobTitleFallback(job.type)}
                     </span>
                     {article ? (
-                      <PostStatusBadge
-                        status={article.status as PostStatus}
-                      />
+                      <PostStatusBadge status={article.status as PostStatus} />
                     ) : null}
                     <span className="text-xs text-muted">·</span>
                     <span className="text-xs text-muted">
@@ -385,13 +388,21 @@ function DetailBody({
       ) : null}
 
       {/* Raw input / output jsonb */}
-      <RawJsonSection title="Raw run input" payload={inputObj} testId="raw-input" />
-      <RawJsonSection title="Raw run output" payload={output} testId="raw-output" />
+      <RawJsonSection
+        title="Raw run input"
+        payload={inputObj}
+        testId="raw-input"
+      />
+      <RawJsonSection
+        title="Raw run output"
+        payload={output}
+        testId="raw-output"
+      />
       {/* Hint that the maps for idea→approved status are derivable */}
       <p className="text-[11px] text-muted/70">
-        Tip: ideas marked <em>approved</em> here were auto-approved by this
-        run when <code>requireReview</code> was off; otherwise they were
-        approved separately.
+        Tip: ideas marked <em>approved</em> here were auto-approved by this run
+        when <code>requireReview</code> was off; otherwise they were approved
+        separately.
       </p>
     </div>
   );
@@ -458,13 +469,7 @@ function Counter({
   );
 }
 
-function Card({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Card({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="rounded-[var(--sp-radius-md)] border border-border p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted">

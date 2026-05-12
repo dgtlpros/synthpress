@@ -137,7 +137,9 @@ describe("BlogAutopilotPanelConnector", () => {
     expect(
       screen.getByRole("button", { name: /run autopilot now/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("note")).toHaveTextContent(/autopilot is disabled/i);
+    expect(screen.getByRole("note")).toHaveTextContent(
+      /autopilot is disabled/i,
+    );
   });
 
   it("forwards auto-pause metadata to the panel as a warning banner", () => {

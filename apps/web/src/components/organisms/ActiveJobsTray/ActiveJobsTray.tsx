@@ -115,7 +115,9 @@ function CollapsedPill({
 
 function pillLabel(activeCount: number, finishedCount: number): string {
   if (activeCount > 0) {
-    return activeCount === 1 ? "1 task running" : `${activeCount} tasks running`;
+    return activeCount === 1
+      ? "1 task running"
+      : `${activeCount} tasks running`;
   }
   if (finishedCount === 1) return "1 update";
   return `${finishedCount} updates`;

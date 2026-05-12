@@ -1,4 +1,1 @@
-export {
-  ActiveJobsTray,
-  type ActiveJobsTrayProps,
-} from "./ActiveJobsTray";
+export { ActiveJobsTray, type ActiveJobsTrayProps } from "./ActiveJobsTray";

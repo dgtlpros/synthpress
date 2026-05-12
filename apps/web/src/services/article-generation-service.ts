@@ -1791,7 +1791,9 @@ export async function reconcileStuckArticleJobs(
 
     const { data: stuckJobs, error: fetchErr } = await supabase
       .from("article_jobs")
-      .select("id, type, blog_id, article_id, article_idea_id, input, output, started_at, created_at")
+      .select(
+        "id, type, blog_id, article_id, article_idea_id, input, output, started_at, created_at",
+      )
       .eq("type", type)
       .in("status", ["pending", "processing"])
       .lt("created_at", cutoffIso)

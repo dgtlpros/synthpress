@@ -13,10 +13,6 @@ export function ActiveJobsTrayConnector() {
   const { jobs, activeCount, dismiss } = useActiveTeamJobs();
 
   return (
-    <ActiveJobsTray
-      jobs={jobs}
-      activeCount={activeCount}
-      onDismiss={dismiss}
-    />
+    <ActiveJobsTray jobs={jobs} activeCount={activeCount} onDismiss={dismiss} />
   );
 }

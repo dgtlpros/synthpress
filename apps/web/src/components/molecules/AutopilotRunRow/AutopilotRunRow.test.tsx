@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import {
-  AutopilotRunRow,
-  type AutopilotRunRowData,
-} from "./AutopilotRunRow";
+import { AutopilotRunRow, type AutopilotRunRowData } from "./AutopilotRunRow";
 
 function makeRun(
   overrides: Partial<AutopilotRunRowData> = {},
@@ -49,9 +46,7 @@ describe("AutopilotRunRow", () => {
   });
 
   it("formats the manual trigger source as 'Manual'", () => {
-    render(
-      <AutopilotRunRow run={makeRun({ triggerSource: "manual" })} />,
-    );
+    render(<AutopilotRunRow run={makeRun({ triggerSource: "manual" })} />);
     expect(screen.getByText("Manual")).toBeInTheDocument();
   });
 
@@ -66,17 +61,13 @@ describe("AutopilotRunRow", () => {
 
   it("formats the current step in friendly text", () => {
     render(
-      <AutopilotRunRow
-        run={makeRun({ currentStep: "generating_articles" })}
-      />,
+      <AutopilotRunRow run={makeRun({ currentStep: "generating_articles" })} />,
     );
     expect(screen.getByText(/Generating articles/)).toBeInTheDocument();
   });
 
   it("falls back to the raw current step when not in the known set", () => {
-    render(
-      <AutopilotRunRow run={makeRun({ currentStep: "doing_voodoo" })} />,
-    );
+    render(<AutopilotRunRow run={makeRun({ currentStep: "doing_voodoo" })} />);
     expect(screen.getByText(/doing_voodoo/)).toBeInTheDocument();
   });
 
@@ -132,7 +123,9 @@ describe("AutopilotRunRow", () => {
         })}
       />,
     );
-    expect(screen.queryByText(/articles? jobs? started/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/articles? jobs? started/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/tokens spent/)).not.toBeInTheDocument();
   });
 
@@ -162,9 +155,7 @@ describe("AutopilotRunRow", () => {
         })}
       />,
     );
-    expect(
-      screen.getByText(/daily_article_cap_reached/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/daily_article_cap_reached/)).toBeInTheDocument();
   });
 
   it("does not render the reason line when output.reason is missing", () => {
@@ -244,9 +235,7 @@ describe("AutopilotRunRow", () => {
     );
     // The "N article jobs started" string appears in the counter
     // line, but NOT in the fallback line below it.
-    expect(
-      screen.getAllByText(/article jobs started/),
-    ).toHaveLength(1);
+    expect(screen.getAllByText(/article jobs started/)).toHaveLength(1);
   });
 
   it("ignores non-array output.spawnedArticleJobIds", () => {
@@ -259,9 +248,7 @@ describe("AutopilotRunRow", () => {
         })}
       />,
     );
-    expect(
-      screen.queryByText(/article jobs started/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/article jobs started/)).not.toBeInTheDocument();
   });
 
   it("uses createdAt for the time stamp when completedAt is null (still running)", () => {
@@ -334,9 +321,7 @@ describe("AutopilotRunRow", () => {
       />,
     );
     expect(screen.getByText(/7 ideas generated/)).toBeInTheDocument();
-    expect(
-      screen.queryByText(/article jobs started/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/article jobs started/)).not.toBeInTheDocument();
     expect(screen.queryByText(/tokens spent/)).not.toBeInTheDocument();
   });
 
@@ -367,9 +352,7 @@ describe("AutopilotRunRow", () => {
       />,
     );
     expect(screen.queryByText(/Reason:/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(/article jobs started/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/article jobs started/)).not.toBeInTheDocument();
   });
 
   it("falls back to the locale date for very old runs (> 14d)", () => {
@@ -407,9 +390,7 @@ describe("AutopilotRunRow", () => {
   it("does NOT render 'auto-approved' when ideasAutoApproved is 0 or missing", () => {
     // Default `output: { reason: "ok" }` from makeRun → no
     // ideasAutoApproved field.
-    render(
-      <AutopilotRunRow run={makeRun({ articlesStarted: 1 })} />,
-    );
+    render(<AutopilotRunRow run={makeRun({ articlesStarted: 1 })} />);
     expect(screen.queryByText(/auto-approved/i)).not.toBeInTheDocument();
   });
 
@@ -460,7 +441,9 @@ describe("AutopilotRunRow", () => {
 
   // ── Clickability ────────────────────────────────────────────────────────
   it("wraps the row in a button when onSelect is provided", () => {
-    render(<AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={vi.fn()} />);
+    render(
+      <AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={vi.fn()} />,
+    );
     const btn = screen.getByRole("button", {
       name: /View details for autopilot run r-click/i,
     });
@@ -469,7 +452,9 @@ describe("AutopilotRunRow", () => {
 
   it("calls onSelect with the run id when the button is clicked", () => {
     const onSelect = vi.fn();
-    render(<AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={onSelect} />);
+    render(
+      <AutopilotRunRow run={makeRun({ id: "r-click" })} onSelect={onSelect} />,
+    );
     fireEvent.click(
       screen.getByRole("button", {
         name: /View details for autopilot run r-click/i,

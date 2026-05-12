@@ -22,8 +22,7 @@ import {
  * helper copy that links the user to the Automation tab.
  */
 
-export interface BlogAutopilotPanelProps
-  extends HTMLAttributes<HTMLElement> {
+export interface BlogAutopilotPanelProps extends HTMLAttributes<HTMLElement> {
   /** Display name of the blog — used in the "Run autopilot for X" copy. */
   blogName: string;
   /**
@@ -124,9 +123,7 @@ export function BlogAutopilotPanel({
     <Card className={cn("space-y-4", className)} {...props}>
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-foreground">
-            Autopilot
-          </h2>
+          <h2 className="text-base font-semibold text-foreground">Autopilot</h2>
           <p className="mt-1 text-sm text-muted">
             Trigger a one-off autopilot tick for{" "}
             <span className="font-medium text-foreground">{blogName}</span>{" "}
@@ -209,17 +206,15 @@ export function BlogAutopilotPanel({
       ) : null}
 
       <div>
-        <h3 className="text-sm font-semibold text-foreground">
-          Recent runs
-        </h3>
+        <h3 className="text-sm font-semibold text-foreground">Recent runs</h3>
         <p className="mt-0.5 text-xs text-muted">
-          The last few autopilot ticks for this blog. Updated when the
-          page reloads.
+          The last few autopilot ticks for this blog. Updated when the page
+          reloads.
         </p>
         {recentRuns.length === 0 ? (
           <p className="mt-3 rounded-[var(--sp-radius-md)] border border-dashed border-border p-4 text-center text-xs text-muted">
-            No autopilot runs yet. The first scheduled tick (or a Run
-            Autopilot Now click) will land here.
+            No autopilot runs yet. The first scheduled tick (or a Run Autopilot
+            Now click) will land here.
           </p>
         ) : (
           <ul
@@ -227,11 +222,7 @@ export function BlogAutopilotPanel({
             className="mt-3 max-h-[24rem] overflow-y-auto rounded-[var(--sp-radius-md)] border border-border"
           >
             {recentRuns.map((run) => (
-              <AutopilotRunRow
-                key={run.id}
-                run={run}
-                onSelect={onRunSelect}
-              />
+              <AutopilotRunRow key={run.id} run={run} onSelect={onRunSelect} />
             ))}
           </ul>
         )}

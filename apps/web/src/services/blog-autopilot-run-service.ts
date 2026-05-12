@@ -585,12 +585,8 @@ export async function getBlogAutopilotRunDetail(
   // 3. Two follow-up loads: articles + ideas the jobs reference.
   //    Skipping the IN(...) query when the list is empty avoids a
   //    no-op round-trip (PostgREST returns 400 on empty `in` lists).
-  const articleIds = unique(
-    jobs.map((j) => j.articleId).filter(isNonNull),
-  );
-  const ideaIds = unique(
-    jobs.map((j) => j.articleIdeaId).filter(isNonNull),
-  );
+  const articleIds = unique(jobs.map((j) => j.articleId).filter(isNonNull));
+  const ideaIds = unique(jobs.map((j) => j.articleIdeaId).filter(isNonNull));
 
   const articles = await loadArticles(supabase, input.blogId, articleIds);
   const ideas = await loadIdeas(supabase, input.blogId, ideaIds);
@@ -634,9 +630,7 @@ async function loadIdeas(
   if (ids.length === 0) return [];
   const { data, error } = await client
     .from("article_ideas")
-    .select(
-      "id, title, status, target_keyword, executive_summary, created_at",
-    )
+    .select("id, title, status, target_keyword, executive_summary, created_at")
     .eq("blog_id", blogId)
     .in("id", ids)
     .order("created_at", { ascending: false });

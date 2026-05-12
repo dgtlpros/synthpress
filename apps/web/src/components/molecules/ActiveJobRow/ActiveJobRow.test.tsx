@@ -32,7 +32,9 @@ describe("ActiveJobRow", () => {
     expect(screen.getByText("Writing article…")).toBeInTheDocument();
     expect(screen.getByText("Indie Stories")).toBeInTheDocument();
     // Spinner is announced via role="status" / aria-label="Loading"
-    expect(screen.getByRole("status", { name: /loading/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /loading/i }),
+    ).toBeInTheDocument();
     // Active jobs render an "Active" badge.
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
@@ -113,9 +115,10 @@ describe("ActiveJobRow", () => {
         onDismiss={vi.fn()}
       />,
     );
-    expect(
-      screen.getByRole("link", { name: /view article/i }),
-    ).toHaveAttribute("href", "/teams/t1/projects/p1/blogs/b1/posts/article-1");
+    expect(screen.getByRole("link", { name: /view article/i })).toHaveAttribute(
+      "href",
+      "/teams/t1/projects/p1/blogs/b1/posts/article-1",
+    );
   });
 
   it("renders the failed label + error detail + Failed badge", () => {

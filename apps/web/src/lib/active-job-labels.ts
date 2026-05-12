@@ -176,9 +176,7 @@ export function getActiveJobLabel(input: JobLabelInput): ActiveJobLabel {
   if (input.status === "failed") {
     const refunded = readRefunded(input.output);
     return {
-      label: refunded
-        ? "Generation failed · Refunded"
-        : "Generation failed",
+      label: refunded ? "Generation failed · Refunded" : "Generation failed",
       detail: trimDetail(input.errorMessage),
       variant: refunded ? "warning" : "error",
       isActive: false,

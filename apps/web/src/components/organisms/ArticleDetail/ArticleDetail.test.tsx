@@ -16,6 +16,8 @@ const baseArticle: ArticleDetailData = {
   errorMessage: null,
   updatedAt: new Date("2026-05-07T15:00:00Z").toISOString(),
   createdAt: new Date("2026-05-07T14:00:00Z").toISOString(),
+  wpPostId: null,
+  wpPostUrl: null,
 };
 
 beforeEach(() => {

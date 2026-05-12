@@ -91,10 +91,9 @@ function makeChain<T>(result: ChainResult<T>) {
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     then: ((onFulfilled, onRejected) =>
-      Promise.resolve(result).then(
-        onFulfilled,
-        onRejected,
-      )) as PromiseLike<ChainResult<T>>["then"],
+      Promise.resolve(result).then(onFulfilled, onRejected)) as PromiseLike<
+      ChainResult<T>
+    >["then"],
   };
   return chain;
 }
@@ -182,8 +181,7 @@ const DEFAULT_BLOG_ROW = {
 function makePerBlogClient(opts: PerBlogClientOpts = {}): MockClient {
   // Distinguish "caller didn't pass blogRow" from "caller passed
   // null on purpose" — null means "simulate a missing blog".
-  const blogRow =
-    "blogRow" in opts ? opts.blogRow : DEFAULT_BLOG_ROW;
+  const blogRow = "blogRow" in opts ? opts.blogRow : DEFAULT_BLOG_ROW;
   const approvedIdeas = opts.approvedIdeas ?? [];
   const todayArticleCount = opts.todayArticleCount ?? 0;
   const todayUsageEvents = opts.todayUsageEvents ?? [];
@@ -574,18 +572,14 @@ describe("runAutopilotForBlog — article workflow spawning", () => {
         jobMetadata: { autopilotRunId: "run-1" },
       }),
     );
-    expect(mockedStart).toHaveBeenNthCalledWith(
-      1,
-      generateArticleWorkflow,
-      [
-        expect.objectContaining({
-          jobId: "job-A",
-          articleId: "art-A",
-          triggerSource: "autopilot",
-          autopilotRunId: "run-1",
-        }),
-      ],
-    );
+    expect(mockedStart).toHaveBeenNthCalledWith(1, generateArticleWorkflow, [
+      expect.objectContaining({
+        jobId: "job-A",
+        articleId: "art-A",
+        triggerSource: "autopilot",
+        autopilotRunId: "run-1",
+      }),
+    ]);
     expect(mockedStart).toHaveBeenCalledTimes(2);
   });
 
@@ -1047,10 +1041,7 @@ describe("runBlogAutopilotScheduler", () => {
     client.__chains.blogs = makeChain({ data: null, error: null });
     client.__chains.blogs.then = ((onFulfilled, onRejected) => {
       blogsListCallCount += 1;
-      return Promise.resolve(blogsListResult).then(
-        onFulfilled,
-        onRejected,
-      );
+      return Promise.resolve(blogsListResult).then(onFulfilled, onRejected);
     }) as typeof client.__chains.blogs.then;
     client.__chains.blogs.maybeSingle = vi.fn(() => {
       // Pretend each per-blog detail read returns a sensible row.
@@ -1058,7 +1049,11 @@ describe("runBlogAutopilotScheduler", () => {
       const row = opts.eligibleBlogs[blogIndex] ?? opts.eligibleBlogs[0];
       return Promise.resolve({
         data: row
-          ? { id: row.id, name: `Blog ${row.id}`, settings: autopilotSettings() }
+          ? {
+              id: row.id,
+              name: `Blog ${row.id}`,
+              settings: autopilotSettings(),
+            }
           : null,
         error: null,
       });
@@ -1121,8 +1116,8 @@ describe("runBlogAutopilotScheduler", () => {
     // Each blog ticks → empty backlog → idea generation runs once
     // per blog. Stub createRun to return distinct ids.
     let runCounter = 0;
-    mockedCreateRun.mockImplementation(async () =>
-      ({ id: `run-${++runCounter}` }) as never,
+    mockedCreateRun.mockImplementation(
+      async () => ({ id: `run-${++runCounter}` }) as never,
     );
 
     const out = await runBlogAutopilotScheduler({ client: client as never });
@@ -1658,7 +1653,10 @@ describe("runAutopilotForBlog — failure-rate auto-pause", () => {
     // uses .then, which still resolves cleanly with count=3).
     client.__chains.blog_autopilot_runs!.maybeSingle = vi
       .fn()
-      .mockResolvedValue({ data: null, error: { message: "merge read failed" } });
+      .mockResolvedValue({
+        data: null,
+        error: { message: "merge read failed" },
+      });
     mockedGenerateIdeas.mockRejectedValueOnce(new Error("Claude down"));
 
     const out = await runAutopilotForBlog({
@@ -1926,10 +1924,10 @@ describe("runAutopilotForBlog — auto-approve gate", () => {
     // — and ONLY those ids. Manual / older-run `generated` ideas are
     // never in this list because the helper scopes to the current
     // run's batch.
-    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith(
-      "id",
-      ["i-A", "i-B"],
-    );
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith("id", [
+      "i-A",
+      "i-B",
+    ]);
   });
 
   it("does NOT auto-approve when input.dryRun=true (test runs are read-only)", async () => {
@@ -2098,7 +2096,15 @@ describe("runAutopilotForBlog — auto-approve gate", () => {
         { id: "n6", title: "n6" },
         { id: "n7", title: "n7" },
       ],
-      autoApprovedRows: [{ id: "n1" }, { id: "n2" }, { id: "n3" }, { id: "n4" }, { id: "n5" }, { id: "n6" }, { id: "n7" }],
+      autoApprovedRows: [
+        { id: "n1" },
+        { id: "n2" },
+        { id: "n3" },
+        { id: "n4" },
+        { id: "n5" },
+        { id: "n6" },
+        { id: "n7" },
+      ],
     });
 
     mockedQueueArticle.mockResolvedValue({

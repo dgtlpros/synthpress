@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  dispatchJobQueuedEvent,
-  JOB_QUEUED_EVENT_NAME,
-} from "./active-jobs";
+import { dispatchJobQueuedEvent, JOB_QUEUED_EVENT_NAME } from "./active-jobs";
 
 afterEach(() => {
   vi.restoreAllMocks();

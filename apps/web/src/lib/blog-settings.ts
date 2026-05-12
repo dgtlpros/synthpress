@@ -631,11 +631,7 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         "pausedReason",
         d.automation.pausedReason,
       ),
-      pausedAt: pickStringOrNull(
-        automation,
-        "pausedAt",
-        d.automation.pausedAt,
-      ),
+      pausedAt: pickStringOrNull(automation, "pausedAt", d.automation.pausedAt),
       pausedMessage: pickStringOrNull(
         automation,
         "pausedMessage",

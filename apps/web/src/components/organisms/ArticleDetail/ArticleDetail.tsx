@@ -34,6 +34,20 @@ export interface ArticleDetailData {
   errorMessage: string | null;
   updatedAt: string;
   createdAt: string;
+  /**
+   * Numeric WordPress post id once the article has been pushed to a
+   * connected WordPress site (always written together with
+   * `wpPostUrl`). `null` means the article has not been sent yet —
+   * the publish UI uses this to flip between "Send" and "Already
+   * sent" modes.
+   */
+  wpPostId: number | null;
+  /**
+   * Public URL on the WordPress site. May be `null` even when
+   * `wpPostId` is set (the WP REST response is allowed to omit
+   * `link`).
+   */
+  wpPostUrl: string | null;
 }
 
 export interface ArticleDetailProps {

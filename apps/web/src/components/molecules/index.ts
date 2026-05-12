@@ -74,6 +74,12 @@ export type { BlogHeaderProps } from "./BlogHeader";
 export { WordPressConnectionForm } from "./WordPressConnectionForm";
 export type { WordPressConnectionFormProps } from "./WordPressConnectionForm";
 
+export { WordPressPublishCard } from "./WordPressPublishCard";
+export type {
+  WordPressArticleLocalStatus,
+  WordPressPublishCardProps,
+} from "./WordPressPublishCard";
+
 export { ComingSoonPanel } from "./ComingSoonPanel";
 export type { ComingSoonPanelProps } from "./ComingSoonPanel";
 

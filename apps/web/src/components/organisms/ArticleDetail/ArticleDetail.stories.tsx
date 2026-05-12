@@ -37,6 +37,8 @@ Build the keyword + topic map.
   errorMessage: null,
   updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
   createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
+  wpPostId: null,
+  wpPostUrl: null,
 };
 
 export const Default: Story = {

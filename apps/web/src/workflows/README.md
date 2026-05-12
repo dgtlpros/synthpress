@@ -189,7 +189,7 @@ and the bar will jump.
 {
   "crons": [
     { "path": "/api/cron/reconcile-article-jobs", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/autopilot",              "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/autopilot", "schedule": "*/15 * * * *" }
   ]
 }
 ```
@@ -218,7 +218,7 @@ Per cron tick:
      and `jobMetadata={ autopilotRunId }`.
    - `generating_articles` — for up to
      `min(approvedIdeas.length, articleSlotsRemainingToday,
-     articlesAllowedByTokens, PER_RUN_ARTICLE_CAP=5)` ideas, queue
+articlesAllowedByTokens, PER_RUN_ARTICLE_CAP=5)` ideas, queue
      a job + start a workflow with `autopilotRunId` in the input.
    - `completed` — close the run with `status='completed'`,
      `status='skipped'` (no work was needed), or `status='failed'`
@@ -227,23 +227,23 @@ Per cron tick:
 
 ### What autopilot does NOT do
 
-* Auto-approve ideas. New ideas land as `status='generated'` and
+- Auto-approve ideas. New ideas land as `status='generated'` and
   wait for human review.
-* Auto-publish articles. Drafts land as `ready_for_review`
+- Auto-publish articles. Drafts land as `ready_for_review`
   regardless of `requireReview` (publishing ships in a later PR).
-* Re-spawn workflows for jobs already pending/processing on the
+- Re-spawn workflows for jobs already pending/processing on the
   same idea. `queueGenerateArticleFromIdea` short-circuits with
   `alreadyQueued=true`.
 
 ### Per-run + global safety caps
 
-| Cap                    | Source                                 | Behavior                                                         |
-| ---------------------- | -------------------------------------- | ---------------------------------------------------------------- |
-| Per-blog daily article | `min(maxPostsPerDay, ceil(weekly/7))`  | Subtracts today's already-started count.                         |
-| Per-blog daily tokens  | `dailyTokenBudget` (jsonb), nullable   | Subtracts today's `usage_events.credits_used` for this blog.     |
-| Team-wide tokens       | `team owner balance`                   | `floor(balance / cost_per_article)` articles allowed.            |
-| Per-run hard cap       | `PER_RUN_ARTICLE_CAP = 5`              | Always wins. Keeps a single tick from going wild on cold start.  |
-| Approved-idea backlog  | `backlogThreshold` (jsonb)             | Below threshold → top up via idea generation; above → skip ideas.|
+| Cap                    | Source                                | Behavior                                                          |
+| ---------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| Per-blog daily article | `min(maxPostsPerDay, ceil(weekly/7))` | Subtracts today's already-started count.                          |
+| Per-blog daily tokens  | `dailyTokenBudget` (jsonb), nullable  | Subtracts today's `usage_events.credits_used` for this blog.      |
+| Team-wide tokens       | `team owner balance`                  | `floor(balance / cost_per_article)` articles allowed.             |
+| Per-run hard cap       | `PER_RUN_ARTICLE_CAP = 5`             | Always wins. Keeps a single tick from going wild on cold start.   |
+| Approved-idea backlog  | `backlogThreshold` (jsonb)            | Below threshold → top up via idea generation; above → skip ideas. |
 
 ### Local testing
 
@@ -299,9 +299,9 @@ from a script / `next dev` REPL:
 import { runAutopilotForBlog } from "@/services/autopilot-scheduler-service";
 
 await runAutopilotForBlog({
-  teamId:    "<team-id>",
+  teamId: "<team-id>",
   projectId: "<project-id>",
-  blogId:    "<blog-id>",
+  blogId: "<blog-id>",
   triggerSource: "manual",
   triggeredByUserId: "<your-uuid>", // for the audit log
 });

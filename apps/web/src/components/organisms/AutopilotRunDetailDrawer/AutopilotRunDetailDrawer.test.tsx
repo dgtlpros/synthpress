@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { AutopilotRunDetailDrawer } from "./AutopilotRunDetailDrawer";
 import type { BlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
 
@@ -75,9 +81,9 @@ describe("AutopilotRunDetailDrawer — states", () => {
         error={null}
       />,
     );
-    expect(
-      screen.getByTestId("autopilot-detail-loading"),
-    ).toHaveTextContent(/Loading run details/i);
+    expect(screen.getByTestId("autopilot-detail-loading")).toHaveTextContent(
+      /Loading run details/i,
+    );
   });
 
   it("shows the error message with role=alert", () => {
@@ -307,9 +313,7 @@ describe("AutopilotRunDetailDrawer — failure / reason / paused", () => {
         error={null}
       />,
     );
-    expect(
-      screen.getByText("daily_article_cap_reached"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("daily_article_cap_reached")).toBeInTheDocument();
   });
 
   it("does NOT render reason when both error_message and reason are present (error wins)", () => {
@@ -349,10 +353,9 @@ describe("AutopilotRunDetailDrawer — failure / reason / paused", () => {
     );
     const warning = screen.getByTestId("autopilot-paused-detail-warning");
     expect(warning).toHaveTextContent(/multiple recent runs failed/i);
-    expect(within(warning).getByRole("link", { name: /Automation tab/i })).toHaveAttribute(
-      "href",
-      "/settings#automation",
-    );
+    expect(
+      within(warning).getByRole("link", { name: /Automation tab/i }),
+    ).toHaveAttribute("href", "/settings#automation");
   });
 
   it("renders the auto-paused warning without a link when no href provided", () => {
@@ -437,7 +440,9 @@ describe("AutopilotRunDetailDrawer — budget + backlog", () => {
         open
         onClose={vi.fn()}
         detail={makeDetail({
-          run: makeRun({ output: { daily: { cap: 5, articlesStartedToday: 1 } } }),
+          run: makeRun({
+            output: { daily: { cap: 5, articlesStartedToday: 1 } },
+          }),
         })}
         isLoading={false}
         error={null}
@@ -542,9 +547,7 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
     );
 
     expect(screen.getByText("My article")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: /View article/i }),
-    ).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /View article/i })).toHaveAttribute(
       "href",
       "/teams/t1/projects/p1/blogs/b1/posts/art-1",
     );

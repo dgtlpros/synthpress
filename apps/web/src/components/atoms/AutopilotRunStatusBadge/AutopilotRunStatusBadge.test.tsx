@@ -17,9 +17,7 @@ describe("AutopilotRunStatusBadge", () => {
     ["cancelled", "Cancelled"],
     ["skipped", "Skipped"],
   ])("renders the %s label as '%s'", (status, expected) => {
-    render(
-      <AutopilotRunStatusBadge status={status as never} />,
-    );
+    render(<AutopilotRunStatusBadge status={status as never} />);
     expect(screen.getByText(expected)).toBeInTheDocument();
   });
 

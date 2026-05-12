@@ -3506,10 +3506,7 @@ describe("reconcileStuckArticleJobs", () => {
         isFirst
           ? { data: null, error: { message: "fetch boom" } }
           : { data: [], error: null },
-      ).then(
-        onFulfilled,
-        onRejected,
-      );
+      ).then(onFulfilled, onRejected);
     }) as typeof client.__chains.article_jobs.then;
 
     const out = await reconcileStuckArticleJobs({ client: client as never });
@@ -3693,7 +3690,9 @@ describe("reconcileStuckArticleJobs", () => {
 
     const out = await reconcileStuckArticleJobs({ client: client as never });
 
-    expect(out.errors).toContainEqual(expect.stringContaining("job_stuck-1: 42"));
+    expect(out.errors).toContainEqual(
+      expect.stringContaining("job_stuck-1: 42"),
+    );
   });
 
   it("propagates the ledger query error as a per-job error in the result", async () => {
@@ -3716,8 +3715,6 @@ describe("reconcileStuckArticleJobs", () => {
 
     const out = await reconcileStuckArticleJobs({ client: client as never });
 
-    expect(out.errors).toContainEqual(
-      expect.stringContaining("ledger boom"),
-    );
+    expect(out.errors).toContainEqual(expect.stringContaining("ledger boom"));
   });
 });

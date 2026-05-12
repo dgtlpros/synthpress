@@ -36,16 +36,14 @@ describe("ProgressBar", () => {
 
   it("draws a 0% wide fill when value is 0", () => {
     render(<ProgressBar value={0} label="x" />);
-    const fill = screen
-      .getByRole("progressbar")
+    const fill = screen.getByRole("progressbar")
       .firstElementChild as HTMLElement;
     expect(fill.style.width).toBe("0%");
   });
 
   it("inflates very small percentages to 4% so the bar stays visible", () => {
     render(<ProgressBar value={2} label="x" />);
-    const fill = screen
-      .getByRole("progressbar")
+    const fill = screen.getByRole("progressbar")
       .firstElementChild as HTMLElement;
     expect(fill.style.width).toBe("4%");
     // aria-value still reflects the true percentage
@@ -57,16 +55,14 @@ describe("ProgressBar", () => {
 
   it("uses the literal width for normal values", () => {
     render(<ProgressBar value={75} label="x" />);
-    const fill = screen
-      .getByRole("progressbar")
+    const fill = screen.getByRole("progressbar")
       .firstElementChild as HTMLElement;
     expect(fill.style.width).toBe("75%");
   });
 
   it("applies the variant fill class", () => {
     render(<ProgressBar value={50} variant="success" label="x" />);
-    const fill = screen
-      .getByRole("progressbar")
+    const fill = screen.getByRole("progressbar")
       .firstElementChild as HTMLElement;
     expect(fill.className).toContain("bg-success");
   });
@@ -78,9 +74,7 @@ describe("ProgressBar", () => {
   });
 
   it("merges custom className onto the track", () => {
-    render(
-      <ProgressBar value={50} label="x" className="custom-track" />,
-    );
+    render(<ProgressBar value={50} label="x" className="custom-track" />);
     expect(screen.getByRole("progressbar").className).toContain("custom-track");
   });
 });
