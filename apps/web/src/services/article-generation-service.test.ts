@@ -42,8 +42,10 @@ import {
   listArticleIdeasForBlog,
   logUsageEvent,
   queueGenerateArticleFromIdea,
+  queueGenerateArticleIdeas,
   reconcileStuckArticleJobs,
   runGenerateArticleFromIdeaJob,
+  runGenerateArticleIdeasJob,
   updateArticleIdeaStatus,
   updateArticleJobStatus,
 } from "./article-generation-service";
@@ -1221,9 +1223,10 @@ describe("generateArticleIdeas", () => {
     expect(mockedGenerateIdeas).not.toHaveBeenCalled();
   });
 
-  it("marks the job failed when the AI provider throws (no refund in v1)", async () => {
+  it("marks the job failed AND refunds when the AI provider throws (v1.1 behavior)", async () => {
     const client = makeOrchestrationClient();
     mockedGenerateIdeas.mockRejectedValueOnce(new Error("schema mismatch"));
+    mockedRefundTeamTokens.mockResolvedValueOnce(100);
 
     await expect(
       generateArticleIdeas({
@@ -1235,9 +1238,20 @@ describe("generateArticleIdeas", () => {
       }),
     ).rejects.toThrow(/schema mismatch/);
 
-    // Tokens were consumed before the AI call — that's intentional; v1
-    // does not refund. Verify the consume happened.
     expect(mockedConsumeTeamTokens).toHaveBeenCalledOnce();
+    // v1.1: a refund is issued so the autopilot scheduler doesn't
+    // double-charge a team whose backlog top-up keeps retrying.
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "t1",
+        amount: 1,
+        idempotencyKey: "refund::article_job::job-X",
+        metadata: expect.objectContaining({
+          refunded_for_job_id: "job-X",
+          refunded_for_job_type: "generate_ideas",
+        }),
+      }),
+    );
 
     const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
       (c) => c[0],
@@ -1352,6 +1366,382 @@ describe("generateArticleIdeas", () => {
     expect((failedCall![0] as { error_message: string }).error_message).toBe(
       "plain-string-failure",
     );
+  });
+});
+
+// ============================================================================
+// queueGenerateArticleIdeas — durable enqueue (no token consumption)
+// ============================================================================
+
+describe("queueGenerateArticleIdeas", () => {
+  it("creates a generate_ideas job row and returns ids without consuming tokens", async () => {
+    const client = makeOrchestrationClient();
+
+    const result = await queueGenerateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      brief: "  durable AI workflows  ",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(result).toMatchObject({
+      jobId: "job-X",
+      blogId: "b1",
+      count: 10,
+      status: "pending",
+      alreadyQueued: false,
+    });
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+    expect(mockedGenerateIdeas).not.toHaveBeenCalled();
+    // Job row has the snapshot input.
+    expect(client.__chains.article_jobs!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "generate_ideas",
+        input: expect.objectContaining({
+          triggerSource: "manual",
+          brief: "durable AI workflows",
+          count: 10,
+          teamId: "t1",
+          blogSettingsSnapshot: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
+  it("respects a custom count and merges jobMetadata into the snapshot", async () => {
+    const client = makeOrchestrationClient();
+
+    await queueGenerateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      count: 4,
+      triggerSource: "manual",
+      jobMetadata: { source: "modal" },
+      client: client as never,
+    });
+
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as { input: Record<string, unknown> };
+    expect(insertArg.input).toMatchObject({ count: 4, source: "modal" });
+  });
+
+  it("returns the existing job when one is already pending/processing for the blog", async () => {
+    const client = makeOrchestrationClient();
+    // Make the idempotency check (the article_jobs `then` resolver)
+    // yield an existing in-flight row.
+    client.__chains.article_jobs!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({
+        data: [{ id: "job-existing", status: "processing" }],
+        error: null,
+      }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.article_jobs.then;
+
+    const result = await queueGenerateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(result).toEqual({
+      jobId: "job-existing",
+      blogId: "b1",
+      count: 10,
+      status: "processing",
+      alreadyQueued: true,
+    });
+    // No new job — idempotency short-circuited the insert.
+    expect(client.__chains.article_jobs!.insert).not.toHaveBeenCalled();
+  });
+
+  it("propagates the idempotency-check supabase error", async () => {
+    const client = makeOrchestrationClient();
+    client.__chains.article_jobs!.then = ((
+      onFulfilled?: ((v: unknown) => unknown) | null,
+      onRejected?: ((r: unknown) => unknown) | null,
+    ) =>
+      Promise.resolve({
+        data: null,
+        error: { message: "active jobs query boom" },
+      }).then(
+        onFulfilled,
+        onRejected,
+      )) as typeof client.__chains.article_jobs.then;
+
+    await expect(
+      queueGenerateArticleIdeas({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "active jobs query boom" });
+  });
+
+  it("throws blog_not_found when the blog is missing", async () => {
+    const client = makeClient({
+      blogs: { data: null, error: null },
+      article_jobs: { data: null, error: null },
+    });
+
+    await expect(
+      queueGenerateArticleIdeas({
+        blogId: "missing",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/blog_not_found/);
+
+    expect(client.__chains.article_jobs?.insert).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a blank brief to null", async () => {
+    const client = makeOrchestrationClient();
+
+    await queueGenerateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      brief: "   \n   ",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    const insertArg = client.__chains.article_jobs!.insert.mock
+      .calls[0]![0] as { input: Record<string, unknown> };
+    expect(insertArg.input.brief).toBeNull();
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeOrchestrationClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await queueGenerateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      triggerSource: "manual",
+    });
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// runGenerateArticleIdeasJob — workflow step body
+// ============================================================================
+
+describe("runGenerateArticleIdeasJob", () => {
+  beforeEach(() => {
+    mockedGenerateIdeas.mockResolvedValue(aiBatchStub as never);
+    mockedConsumeTeamTokens.mockResolvedValue(95);
+    mockedRefundTeamTokens.mockResolvedValue(100);
+  });
+
+  it("executes the full pipeline against a pre-existing job id", async () => {
+    const client = makeOrchestrationClient();
+
+    const result = await runGenerateArticleIdeasJob({
+      jobId: "job-existing",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      brief: "durable workflows",
+      count: 6,
+      triggerSource: "workflow",
+      client: client as never,
+    });
+
+    expect(result.jobId).toBe("job-existing");
+    expect(result.ideas).toHaveLength(2);
+    expect(mockedConsumeTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "article_job::job-existing",
+        metadata: expect.objectContaining({
+          job_type: "generate_ideas",
+          trigger_source: "workflow",
+        }),
+      }),
+    );
+    expect(mockedGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brief: "durable workflows",
+        count: 6,
+      }),
+    );
+  });
+
+  it("merges jobInputPatch (workflowRunId/autopilotRunId) into article_jobs.input", async () => {
+    const client = makeOrchestrationClient();
+    // The orchestration calls maybeSingle on article_jobs twice:
+    //   1) inside `mergeArticleJobInput` (reads `input` jsonb)
+    //   2) inside `updateArticleJobStatus` when incrementing attempts
+    // Wire both resolves explicitly so neither returns undefined.
+    client.__chains.article_jobs!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { input: { triggerSource: "workflow" } },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: { attempts: 0 }, error: null });
+
+    await runGenerateArticleIdeasJob({
+      jobId: "job-X",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      jobInputPatch: { workflowRunId: "run-1", workflowName: "test" },
+      client: client as never,
+    });
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0] as Record<string, unknown>,
+    );
+    const merged = updateCalls.find(
+      (u) =>
+        (u.input as Record<string, unknown> | undefined)?.workflowRunId ===
+        "run-1",
+    );
+    expect(merged).toBeDefined();
+  });
+
+  it("refunds tokens when the AI provider throws after a successful consume", async () => {
+    const client = makeOrchestrationClient();
+    mockedGenerateIdeas.mockRejectedValueOnce(new Error("schema mismatch"));
+
+    await expect(
+      runGenerateArticleIdeasJob({
+        jobId: "job-X",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "workflow",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/schema mismatch/);
+
+    expect(mockedConsumeTeamTokens).toHaveBeenCalledOnce();
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "t1",
+        amount: 1,
+        idempotencyKey: "refund::article_job::job-X",
+        metadata: expect.objectContaining({
+          refunded_for_job_id: "job-X",
+          refunded_for_job_type: "generate_ideas",
+        }),
+      }),
+    );
+  });
+
+  it("does NOT refund when consume itself fails (nothing was charged)", async () => {
+    const client = makeOrchestrationClient();
+    mockedConsumeTeamTokens.mockRejectedValueOnce(
+      new Error("insufficient_tokens"),
+    );
+
+    await expect(
+      runGenerateArticleIdeasJob({
+        jobId: "job-X",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "workflow",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/insufficient_tokens/);
+
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+    expect(mockedGenerateIdeas).not.toHaveBeenCalled();
+  });
+
+  it("refunds when the article_ideas insert fails after a successful AI call", async () => {
+    const client = makeOrchestrationClient({
+      insertIdeasError: { message: "constraint violation" },
+    });
+
+    await expect(
+      runGenerateArticleIdeasJob({
+        jobId: "job-X",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "workflow",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "constraint violation" });
+
+    expect(mockedRefundTeamTokens).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "refund::article_job::job-X",
+      }),
+    );
+  });
+
+  it("throws blog_not_found and skips token consumption when the blog vanishes", async () => {
+    const client = makeClient({
+      blogs: { data: null, error: null },
+      article_jobs: { data: { id: "job-X" }, error: null },
+    });
+
+    await expect(
+      runGenerateArticleIdeasJob({
+        jobId: "job-X",
+        blogId: "missing",
+        teamId: "t1",
+        userId: "u1",
+        triggerSource: "workflow",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/blog_not_found/);
+
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("defaults triggerSource to 'workflow' on the consume metadata", async () => {
+    const client = makeOrchestrationClient();
+
+    await runGenerateArticleIdeasJob({
+      jobId: "job-X",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      // no triggerSource passed
+      client: client as never,
+    });
+
+    const consumeArg = mockedConsumeTeamTokens.mock.calls[0]![0] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(consumeArg.metadata.trigger_source).toBe("workflow");
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeOrchestrationClient();
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await runGenerateArticleIdeasJob({
+      jobId: "job-X",
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      triggerSource: "workflow",
+    });
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
   });
 });
 

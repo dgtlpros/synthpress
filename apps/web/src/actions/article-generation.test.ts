@@ -31,9 +31,9 @@ vi.mock("@/services/team-policy-service", () => {
 });
 
 vi.mock("@/services/article-generation-service", () => ({
-  generateArticleIdeas: vi.fn(),
   listActiveArticleJobsForUser: vi.fn(),
   queueGenerateArticleFromIdea: vi.fn(),
+  queueGenerateArticleIdeas: vi.fn(),
   updateArticleIdeaStatus: vi.fn(),
 }));
 
@@ -43,6 +43,10 @@ vi.mock("workflow/api", () => ({
 
 vi.mock("@/workflows/generate-article", () => ({
   generateArticleWorkflow: vi.fn(),
+}));
+
+vi.mock("@/workflows/generate-ideas", () => ({
+  generateIdeasWorkflow: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -55,12 +59,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
-  generateArticleIdeas,
   listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
+  queueGenerateArticleIdeas,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
+import { generateIdeasWorkflow } from "@/workflows/generate-ideas";
 import {
   getActiveTeamJobs,
   generateArticleFromIdea,
@@ -71,7 +76,7 @@ import {
 const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedAssertCan = vi.mocked(assertCan);
-const mockedGenerateArticleIdeas = vi.mocked(generateArticleIdeas);
+const mockedQueueGenerateIdeas = vi.mocked(queueGenerateArticleIdeas);
 const mockedListActiveJobs = vi.mocked(listActiveArticleJobsForUser);
 const mockedQueueGenerateArticle = vi.mocked(queueGenerateArticleFromIdea);
 const mockedUpdateArticleIdeaStatus = vi.mocked(updateArticleIdeaStatus);
@@ -114,17 +119,14 @@ beforeEach(() => {
   mockedCreateClient.mockResolvedValue(makeAuthedClient() as never);
   mockedCreateAdmin.mockReturnValue({} as never);
   mockedAssertCan.mockResolvedValue("owner" as never);
-  mockedGenerateArticleIdeas.mockResolvedValue({
+  mockedQueueGenerateIdeas.mockResolvedValue({
     jobId: "job-1",
-    ideas: [
-      { id: "i1", title: "A", blog_id: "b1", status: "generated" } as never,
-      { id: "i2", title: "B", blog_id: "b1", status: "generated" } as never,
-    ],
-    creditsUsed: 1,
-    promptTokens: 800,
-    completionTokens: 600,
-    model: "claude-haiku-4-5",
+    blogId: "b1",
+    count: 10,
+    status: "pending",
+    alreadyQueued: false,
   });
+  mockedStart.mockResolvedValue({ id: "wf-run-1" } as never);
 });
 
 describe("generateIdeasManual", () => {
@@ -133,7 +135,8 @@ describe("generateIdeasManual", () => {
       brief: "x".repeat(2001),
     });
     expect(result.error).toMatch(/at most/);
-    expect(mockedGenerateArticleIdeas).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateIdeas).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
   it("rejects out-of-range counts", async () => {
@@ -148,7 +151,7 @@ describe("generateIdeasManual", () => {
     });
     expect(notFinite.error).toMatch(/between/);
 
-    expect(mockedGenerateArticleIdeas).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateIdeas).not.toHaveBeenCalled();
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -157,7 +160,7 @@ describe("generateIdeasManual", () => {
     const result = await generateIdeasManual("t1", "p1", "b1");
     expect(result.error).toBe("You must be signed in.");
     expect(mockedAssertCan).not.toHaveBeenCalled();
-    expect(mockedGenerateArticleIdeas).not.toHaveBeenCalled();
+    expect(mockedQueueGenerateIdeas).not.toHaveBeenCalled();
   });
 
   it("calls assertCan with the consume_team_tokens action", async () => {
@@ -171,13 +174,13 @@ describe("generateIdeasManual", () => {
     );
   });
 
-  it("calls generateArticleIdeas with triggerSource manual + admin client", async () => {
+  it("calls queueGenerateArticleIdeas with triggerSource manual + admin client", async () => {
     await generateIdeasManual("t1", "p1", "b1", {
       brief: "How to ship faster",
       count: 5,
     });
 
-    expect(mockedGenerateArticleIdeas).toHaveBeenCalledWith(
+    expect(mockedQueueGenerateIdeas).toHaveBeenCalledWith(
       expect.objectContaining({
         blogId: "b1",
         teamId: "t1",
@@ -190,15 +193,33 @@ describe("generateIdeasManual", () => {
     );
   });
 
-  it("returns a trimmed result on success and revalidates the relevant paths", async () => {
-    const result = await generateIdeasManual("t1", "p1", "b1");
+  it("starts the generateIdeasWorkflow with the queued job id and returns immediately", async () => {
+    const result = await generateIdeasManual("t1", "p1", "b1", {
+      brief: "How to ship faster",
+      count: 5,
+    });
+
+    expect(mockedStart).toHaveBeenCalledWith(generateIdeasWorkflow, [
+      expect.objectContaining({
+        jobId: "job-1",
+        blogId: "b1",
+        teamId: "t1",
+        projectId: "p1",
+        userId: "u1",
+        triggerSource: "manual",
+        brief: "How to ship faster",
+        count: 10,
+      }),
+    ]);
 
     expect(result).toEqual({
       data: {
         jobId: "job-1",
-        creditsUsed: 1,
-        model: "claude-haiku-4-5",
-        ideasGenerated: 2,
+        blogId: "b1",
+        count: 10,
+        status: "pending",
+        alreadyQueued: false,
+        workflowRunId: "wf-run-1",
       },
       error: null,
     });
@@ -208,17 +229,82 @@ describe("generateIdeasManual", () => {
     expect(calls).toContain("/teams/t1/projects/p1/blogs/b1");
   });
 
-  it("translates blog_not_found into a friendly error", async () => {
-    mockedGenerateArticleIdeas.mockRejectedValueOnce(
-      new Error("blog_not_found"),
+  it("forwards null brief to the workflow when none was supplied", async () => {
+    await generateIdeasManual("t1", "p1", "b1");
+
+    expect(mockedStart).toHaveBeenCalledWith(generateIdeasWorkflow, [
+      expect.objectContaining({ brief: null }),
+    ]);
+  });
+
+  it("falls back to runId when start() returns runId instead of id", async () => {
+    mockedStart.mockResolvedValueOnce({ runId: "alt-run" } as never);
+
+    const result = await generateIdeasManual("t1", "p1", "b1");
+    expect(result.data?.workflowRunId).toBe("alt-run");
+  });
+
+  it("falls back to null workflowRunId when start() returns no id at all", async () => {
+    mockedStart.mockResolvedValueOnce({} as never);
+
+    const result = await generateIdeasManual("t1", "p1", "b1");
+    expect(result.data?.workflowRunId).toBeNull();
+  });
+
+  it("does NOT start a second workflow when the queue says alreadyQueued=true", async () => {
+    mockedQueueGenerateIdeas.mockResolvedValueOnce({
+      jobId: "job-existing",
+      blogId: "b1",
+      count: 10,
+      status: "processing",
+      alreadyQueued: true,
+    });
+
+    const result = await generateIdeasManual("t1", "p1", "b1");
+
+    expect(mockedStart).not.toHaveBeenCalled();
+    expect(result.data).toEqual({
+      jobId: "job-existing",
+      blogId: "b1",
+      count: 10,
+      status: "processing",
+      alreadyQueued: true,
+      workflowRunId: null,
+    });
+  });
+
+  it("returns a friendly error when start() throws (job stays pending for operator retry)", async () => {
+    mockedStart.mockRejectedValueOnce(new Error("workflow runner offline"));
+
+    const result = await generateIdeasManual("t1", "p1", "b1");
+    expect(result.error).toMatch(
+      /Could not start the idea-generation workflow.*workflow runner offline/,
     );
+    expect(mockedRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic friendly error when start() throws a non-Error", async () => {
+    mockedStart.mockRejectedValueOnce("nope");
+
+    const result = await generateIdeasManual("t1", "p1", "b1");
+    expect(result.error).toMatch(
+      /Could not start the idea-generation workflow.*Could not start workflow/,
+    );
+  });
+
+  it("translates blog_not_found into a friendly error", async () => {
+    mockedQueueGenerateIdeas.mockRejectedValueOnce(new Error("blog_not_found"));
 
     const result = await generateIdeasManual("t1", "p1", "b1");
     expect(result.error).toBe("Blog not found.");
+    expect(mockedStart).not.toHaveBeenCalled();
   });
 
-  it("translates insufficient_tokens into a friendly error", async () => {
-    mockedGenerateArticleIdeas.mockRejectedValueOnce(
+  it("translates insufficient_tokens into a friendly error (workflow start path)", async () => {
+    // The queue itself doesn't consume tokens, but we keep the
+    // friendly translation in case a future change moves the consume
+    // upstream. This guards against accidentally regressing the copy.
+    mockedQueueGenerateIdeas.mockRejectedValueOnce(
       new Error("insufficient_tokens"),
     );
 
@@ -237,16 +323,17 @@ describe("generateIdeasManual", () => {
 
     const result = await generateIdeasManual("t1", "p1", "b1");
     expect(result.error).toBe("forbidden");
+    expect(mockedQueueGenerateIdeas).not.toHaveBeenCalled();
   });
 
   it("falls back to a generic message for unknown errors", async () => {
-    mockedGenerateArticleIdeas.mockRejectedValueOnce(new Error("network"));
+    mockedQueueGenerateIdeas.mockRejectedValueOnce(new Error("network"));
     const result = await generateIdeasManual("t1", "p1", "b1");
     expect(result.error).toBe("network");
   });
 
   it("falls back to the default error message when something non-Error throws", async () => {
-    mockedGenerateArticleIdeas.mockRejectedValueOnce("nope");
+    mockedQueueGenerateIdeas.mockRejectedValueOnce("nope");
     const result = await generateIdeasManual("t1", "p1", "b1");
     expect(result.error).toBe("Could not generate ideas.");
   });

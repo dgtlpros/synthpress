@@ -60,7 +60,7 @@ export function GenerateIdeasModal({
       open={open}
       onClose={onClose}
       title={`Generate ${count} article ideas`}
-      description="Optionally seed the AI with a topic or angle. Leave blank to let it pick on-strategy topics from your blog's settings."
+      description="Optionally seed the AI with a topic or angle. Leave blank to let it pick on-strategy topics from your blog's settings. Generation runs in the background — this modal closes as soon as the job is queued."
       maxWidth="md"
       className={className}
     >
@@ -120,7 +120,7 @@ export function GenerateIdeasModal({
               Cancel
             </Button>
             <Button type="submit" size="sm" loading={pending}>
-              Generate ideas
+              {pending ? "Queueing…" : "Generate ideas"}
             </Button>
           </div>
         </div>

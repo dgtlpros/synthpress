@@ -768,13 +768,17 @@ export async function convertIdeaToArticle(
 // generateArticleIdeas — the canonical orchestration
 //
 // Called from:
-//   - Today: a server action (UI button click).
-//   - Tomorrow: the autopilot scheduler (cron-driven loop).
-//   - Tomorrow: a Vercel Workflow step.
+//   - Autopilot scheduler: still calls `generateArticleIdeas` directly
+//     (synchronous in-cron-tick semantics — the scheduler already runs
+//     in the background, no need for a second workflow hop).
+//   - Manual UI: now uses the queue + workflow split below
+//     (`queueGenerateArticleIdeas` + `runGenerateArticleIdeasJob`)
+//     so the modal can close immediately after the job is durable.
 //
-// All three paths must produce identical state transitions in
-// `article_jobs`, `article_ideas`, `token_transactions`, and
-// `usage_events`, so they all call this one function.
+// Both paths share `_executeArticleIdeasJob` so the AI/token/insert
+// logic lives in exactly one place. All three paths produce identical
+// state transitions in `article_jobs`, `article_ideas`,
+// `token_transactions`, and `usage_events`.
 // ============================================================================
 
 /**
@@ -824,22 +828,24 @@ export interface GenerateArticleIdeasResult {
  * Generates a batch of article ideas end-to-end. Owns the durable
  * state machine; the AI call is delegated to `lib/ai/provider.ts`.
  *
+ * Used by the autopilot scheduler (one-shot synchronous call inside
+ * a cron tick). The manual UI now goes through
+ * {@link queueGenerateArticleIdeas} + {@link runGenerateArticleIdeasJob}
+ * so the modal can close immediately after the durable job is queued.
+ *
+ * Both paths funnel into {@link _executeArticleIdeasJob}, so token
+ * consumption / Claude / insert / usage logging stay in one place.
+ *
  * Order of operations (deliberate — see comments inline):
  *   1. Resolve blog context (fail fast if blog is missing).
  *   2. Insert `article_jobs` row with full input snapshot.
- *   3. Move the job into `processing`, increment attempts.
- *   4. Reserve credits via `consume_team_tokens`. Throws fast if the
- *      team owner can't pay (no wasted Claude call).
- *   5. Call the AI provider.
- *   6. Insert the batch into `article_ideas`.
- *   7. Log a `usage_events` row tagged with the job id.
- *   8. Mark the job `completed`.
+ *   3-8. Delegate to `_executeArticleIdeasJob` — see its docblock.
  *
- * v1 deliberately does NOT refund credits on AI/insert failure. Each
- * idea batch costs only `AI_CREDIT_COSTS.generateIdeas` (1 token in
- * v1) so the user impact is small, and adding a refund path means
- * adding a `refund_team_tokens` RPC + a separate audit record that's
- * out of scope for this PR. A follow-up will add it.
+ * Refund behavior: this entry point inherits whatever
+ * `_executeArticleIdeasJob` does. By default the job runner refunds
+ * credits on AI/insert failure (added in v1.1) — autopilot benefits
+ * from that too, so a flaky Claude call doesn't double-charge a team
+ * whose backlog top-up gets retried by the scheduler on the next tick.
  */
 export async function generateArticleIdeas(
   input: GenerateArticleIdeasInput,
@@ -875,21 +881,263 @@ export async function generateArticleIdeas(
     client: supabase,
   });
 
+  return _executeArticleIdeasJob({
+    jobId: job.id,
+    blogId: input.blogId,
+    teamId: input.teamId,
+    userId: input.userId,
+    triggerSource: input.triggerSource,
+    brief: input.brief,
+    count,
+    blogContext: ctx,
+    client: supabase,
+    anthropicProvider: input.anthropicProvider,
+  });
+}
+
+// ============================================================================
+// Queue + run split for the manual UI path (mirrors generateArticleDraftFromIdea).
+//
+//   Phase 1 — `queueGenerateArticleIdeas`
+//     Synchronous, runs inside the server action. Validates blog,
+//     creates the durable `article_jobs` row, returns immediately so
+//     the modal can close. NO tokens consumed. NO Claude call.
+//     Idempotent per-blog: a second click while a generate_ideas job
+//     is already pending/processing for the blog returns the existing
+//     job id with `alreadyQueued: true`.
+//
+//   Phase 2 — `runGenerateArticleIdeasJob`
+//     The unit of work the Vercel Workflow step calls. Loads the
+//     pending job row by id, calls `_executeArticleIdeasJob` to
+//     consume tokens / call Claude / insert / log usage / complete.
+//     On failure: marks job failed and refunds the consumed credits
+//     (idempotent on `refund::article_job::{jobId}`).
+// ============================================================================
+
+export interface QueueGenerateArticleIdeasInput {
+  blogId: string;
+  teamId: string;
+  userId: string;
+  brief?: string;
+  count?: number;
+  triggerSource: TriggerSource;
+  /** Free-form metadata stamped onto `article_jobs.input`. */
+  jobMetadata?: Record<string, unknown>;
+  client?: Client;
+}
+
+export interface QueueGenerateArticleIdeasResult {
+  jobId: string;
+  blogId: string;
+  /** Resolved batch size (after defaulting). */
+  count: number;
+  status: "pending" | "processing";
+  /**
+   * `true` when a pending/processing `generate_ideas` job already
+   * existed for this blog and we returned it instead of creating a
+   * new one. The caller skips starting another workflow run.
+   */
+  alreadyQueued: boolean;
+}
+
+/**
+ * Creates the durable `article_jobs` row for a generate_ideas request.
+ * Does NOT consume tokens, call Claude, or start the workflow — the
+ * caller is responsible for kicking off `generateIdeasWorkflow`.
+ *
+ * Idempotency: a second call while a `pending` or `processing`
+ * `generate_ideas` job already exists for this blog returns the
+ * existing job id with `alreadyQueued: true`. Per-blog (not per-brief)
+ * because it'd be confusing for two parallel "Generate ideas" clicks
+ * to land two batches in the user's review queue at once. Operators
+ * who want true parallelism can call `generateArticleIdeas` directly
+ * (autopilot path).
+ *
+ * Throws:
+ *   * `Error("blog_not_found")` — propagated as-is.
+ *   * Other supabase errors — propagated as-is.
+ */
+export async function queueGenerateArticleIdeas(
+  input: QueueGenerateArticleIdeasInput,
+): Promise<QueueGenerateArticleIdeasResult> {
+  const supabase = input.client ?? createAdminClient();
+  const count = input.count ?? IDEA_DEFAULT_COUNT;
+
+  // 1. Resolve blog context — fail fast with a typed message.
+  const ctx = await getBlogGenerationContext(input.blogId, supabase);
+  if (!ctx) throw new Error("blog_not_found");
+
+  // 2. Idempotency: short-circuit if there's already an in-flight
+  // generate_ideas job for this blog. Prevents the user from racking
+  // up duplicate review batches by double-clicking Generate Ideas.
+  const { data: existingJobs, error: existingJobsErr } = await supabase
+    .from("article_jobs")
+    .select("id, status")
+    .eq("blog_id", input.blogId)
+    .eq("type", "generate_ideas")
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (existingJobsErr) throw existingJobsErr;
+  if (existingJobs && existingJobs.length > 0) {
+    const existing = existingJobs[0];
+    return {
+      jobId: existing.id,
+      blogId: input.blogId,
+      count,
+      status: existing.status as "pending" | "processing",
+      alreadyQueued: true,
+    };
+  }
+
+  // 3. Insert the job row with the full input snapshot. Same shape as
+  // `generateArticleIdeas` so the run-phase loader can rehydrate the
+  // execution from the row alone (workflow replay safety).
+  const jobInput: Record<string, unknown> = {
+    triggerSource: input.triggerSource,
+    brief: input.brief?.trim() || null,
+    count,
+    teamId: input.teamId,
+    blogSettingsSnapshot: ctx.settings as unknown as Record<string, unknown>,
+    ...(input.jobMetadata ?? {}),
+  };
+
+  const job = await createArticleJob({
+    blogId: input.blogId,
+    type: "generate_ideas",
+    userId: input.userId,
+    input: jobInput,
+    client: supabase,
+  });
+
+  return {
+    jobId: job.id,
+    blogId: input.blogId,
+    count,
+    status: "pending",
+    alreadyQueued: false,
+  };
+}
+
+export interface RunGenerateArticleIdeasJobInput {
+  /** Pre-existing job row from {@link queueGenerateArticleIdeas}. */
+  jobId: string;
+  blogId: string;
+  teamId: string;
+  userId: string;
+  brief?: string | null;
+  count?: number;
+  triggerSource?: TriggerSource;
+  /**
+   * Free-form metadata to merge into `article_jobs.input` AFTER the
+   * queue snapshot. The workflow step uses this to stamp
+   * `workflowRunId` / `autopilotRunId` so a refresh shows the
+   * connection between a queued job and the workflow that's running it.
+   */
+  jobInputPatch?: Record<string, unknown>;
+  client?: Client;
+  anthropicProvider?: AnthropicLike;
+}
+
+/**
+ * The unit of work the Vercel Workflow step calls. Loads the existing
+ * pending job row, then funnels into {@link _executeArticleIdeasJob}
+ * — same body as the legacy synchronous orchestration's "try" block.
+ *
+ * Idempotent on `jobId`:
+ *   * `consume_team_tokens` is idempotent on `article_job::{jobId}`.
+ *   * `article_ideas` rows insert with no idempotency key (a workflow
+ *     replay would double-insert) — but workflow steps are wrapped in
+ *     `FatalError` so retries are disabled. The caller's failure is
+ *     terminal, with the user able to click Generate Ideas again.
+ *
+ * NOTE on retries: callers (the workflow step in particular) MUST
+ * NOT retry this function on failure. The catch block already
+ * refunds the user.
+ */
+export async function runGenerateArticleIdeasJob(
+  input: RunGenerateArticleIdeasJobInput,
+): Promise<GenerateArticleIdeasResult> {
+  const supabase = input.client ?? createAdminClient();
+
+  // Re-resolve context inside the workflow process — we don't trust
+  // anything from the queue's call site to still be in scope.
+  const ctx = await getBlogGenerationContext(input.blogId, supabase);
+  if (!ctx) throw new Error("blog_not_found");
+
+  // Optionally enrich the job's input jsonb with workflow metadata
+  // (workflowRunId, autopilotRunId) so an operator inspecting the row
+  // can connect the job to its execution context.
+  if (input.jobInputPatch && Object.keys(input.jobInputPatch).length > 0) {
+    await mergeArticleJobInput(supabase, input.jobId, input.jobInputPatch);
+  }
+
+  return _executeArticleIdeasJob({
+    jobId: input.jobId,
+    blogId: input.blogId,
+    teamId: input.teamId,
+    userId: input.userId,
+    triggerSource: input.triggerSource ?? "workflow",
+    brief: input.brief ?? undefined,
+    count: input.count ?? IDEA_DEFAULT_COUNT,
+    blogContext: ctx,
+    client: supabase,
+    anthropicProvider: input.anthropicProvider,
+    refundOnFailure: true,
+  });
+}
+
+interface ExecuteArticleIdeasJobInput {
+  jobId: string;
+  blogId: string;
+  teamId: string;
+  userId: string;
+  triggerSource: TriggerSource;
+  brief?: string;
+  count: number;
+  blogContext: BlogGenerationContext;
+  client: Client;
+  anthropicProvider?: AnthropicLike;
+  /**
+   * When true (the workflow run path), failures after token
+   * consumption issue a `refundTeamTokens` call. Defaults to true —
+   * the autopilot path passes nothing (relying on the default) so a
+   * scheduler-driven AI failure also gets refunded; v1 of this
+   * service silently ate the credit, which was a known gap.
+   */
+  refundOnFailure?: boolean;
+}
+
+/**
+ * Shared executor used by both `generateArticleIdeas` (autopilot) and
+ * `runGenerateArticleIdeasJob` (workflow). The job row already exists;
+ * this function runs the consume → AI → insert → log → complete
+ * pipeline with one set of refund-on-failure semantics.
+ */
+async function _executeArticleIdeasJob(
+  input: ExecuteArticleIdeasJobInput,
+): Promise<GenerateArticleIdeasResult> {
+  const supabase = input.client;
+  const { jobId, blogContext: ctx, count } = input;
+  const refundOnFailure = input.refundOnFailure !== false;
+
+  let consumed = false;
+  const creditsUsed = getCreditCost("generateIdeas");
+
   try {
-    // 3. Move into processing. Stamp `started_at`, bump attempts.
+    // 1. Move into processing. Stamp `started_at`, bump attempts.
     await updateArticleJobStatus({
-      jobId: job.id,
+      jobId,
       status: "processing",
       currentStep: "loading_context",
       incrementAttempts: true,
       client: supabase,
     });
 
-    // 4. Reserve credits BEFORE the AI call so an out-of-tokens team
+    // 2. Reserve credits BEFORE the AI call so an out-of-tokens team
     // doesn't burn a Claude request. The RPC is atomic — the only way
-    // to reach step 5 is with a successful debit. The job id is the
+    // to reach step 3 is with a successful debit. The job id is the
     // idempotency key so a workflow replay (same job id) no-ops.
-    const creditsUsed = getCreditCost("generateIdeas");
     try {
       await consumeTeamTokens({
         teamId: input.teamId,
@@ -898,28 +1146,27 @@ export async function generateArticleIdeas(
         description: `Generate ${count} article ideas for blog "${ctx.blog.name}"`,
         metadata: {
           blog_id: input.blogId,
-          job_id: job.id,
+          job_id: jobId,
           job_type: "generate_ideas",
           trigger_source: input.triggerSource,
         },
-        idempotencyKey: `article_job::${job.id}`,
+        idempotencyKey: `article_job::${jobId}`,
         client: supabase,
       });
+      consumed = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await failArticleJob({
-        jobId: job.id,
+        jobId,
         errorMessage: message,
         client: supabase,
       });
       throw err;
     }
 
-    // 5. Call the AI provider. We surface NO refund on failure here
-    // (see function-level comment); the orchestration just marks the
-    // job failed and propagates.
+    // 3. Call the AI provider.
     await updateArticleJobStatus({
-      jobId: job.id,
+      jobId,
       currentStep: "generating_ideas",
       client: supabase,
     });
@@ -933,11 +1180,11 @@ export async function generateArticleIdeas(
       anthropicProvider: input.anthropicProvider,
     });
 
-    // 6. Persist the batch. We insert the raw provider response on
+    // 4. Persist the batch. We insert the raw provider response on
     // each row's `raw_ai_response` so the future "regenerate just this
     // idea" flow has the original payload to anchor on.
     await updateArticleJobStatus({
-      jobId: job.id,
+      jobId,
       currentStep: "saving_ideas",
       client: supabase,
     });
@@ -968,7 +1215,7 @@ export async function generateArticleIdeas(
 
     if (insertErr) {
       await failArticleJob({
-        jobId: job.id,
+        jobId,
         errorMessage: insertErr.message,
         output: { ideasGenerated: 0, model: batch.model },
         client: supabase,
@@ -980,10 +1227,10 @@ export async function generateArticleIdeas(
     /* v8 ignore next -- defensive: supabase returns data when error is null */
     const insertedRows = inserted ?? [];
 
-    // 7. Audit log. Failure here is logged but doesn't fail the job —
+    // 5. Audit log. Failure here is logged but doesn't fail the job —
     // the user got their ideas, the audit row is recoverable later.
     await updateArticleJobStatus({
-      jobId: job.id,
+      jobId,
       currentStep: "logging_usage",
       client: supabase,
     });
@@ -991,7 +1238,7 @@ export async function generateArticleIdeas(
     await logUsageEvent({
       userId: input.userId,
       blogId: input.blogId,
-      jobId: job.id,
+      jobId,
       provider: PROVIDER_ANTHROPIC,
       model: batch.model,
       inputTokens: batch.promptTokens,
@@ -1000,9 +1247,9 @@ export async function generateArticleIdeas(
       client: supabase,
     });
 
-    // 8. Done.
+    // 6. Done.
     await completeArticleJob({
-      jobId: job.id,
+      jobId,
       output: {
         model: batch.model,
         promptTokens: batch.promptTokens,
@@ -1016,7 +1263,7 @@ export async function generateArticleIdeas(
     });
 
     return {
-      jobId: job.id,
+      jobId,
       ideas: insertedRows,
       creditsUsed,
       promptTokens: batch.promptTokens,
@@ -1031,7 +1278,7 @@ export async function generateArticleIdeas(
     const message = err instanceof Error ? err.message : String(err);
     try {
       await failArticleJob({
-        jobId: job.id,
+        jobId,
         errorMessage: message,
         client: supabase,
       });
@@ -1040,6 +1287,31 @@ export async function generateArticleIdeas(
       // Swallow — the primary error is what the caller cares about.
     }
     /* v8 ignore stop */
+
+    if (consumed && refundOnFailure) {
+      try {
+        await refundTeamTokens({
+          teamId: input.teamId,
+          amount: creditsUsed,
+          actingUserId: input.userId,
+          description: `Refund for failed idea-generation job ${jobId}: ${message}`,
+          metadata: {
+            refunded_for_job_id: jobId,
+            refunded_for_blog_id: input.blogId,
+            refunded_for_job_type: "generate_ideas",
+            reason: message,
+          },
+          idempotencyKey: `refund::article_job::${jobId}`,
+          client: supabase,
+        });
+        await markJobRefunded(supabase, jobId, creditsUsed);
+        /* v8 ignore start -- defensive: secondary failure during refund */
+      } catch {
+        // Swallow — operators reconcile via token_transactions.
+      }
+      /* v8 ignore stop */
+    }
+
     throw err;
   }
 }

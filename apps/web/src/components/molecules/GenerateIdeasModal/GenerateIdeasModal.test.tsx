@@ -113,4 +113,27 @@ describe("GenerateIdeasModal", () => {
     // open — the textarea should still be in the DOM either way.
     expect(screen.getByLabelText(/topic or brief/i)).toBeInTheDocument();
   });
+
+  it("sets background-task expectations in the description", () => {
+    render(<GenerateIdeasModal {...baseProps} />);
+    expect(
+      screen.getByText(
+        /Generation runs in the background — this modal closes as soon as the job is queued\./i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the 'Queueing…' label on the submit button while pending", () => {
+    render(<GenerateIdeasModal {...baseProps} pending />);
+    expect(
+      screen.getByRole("button", { name: /queueing/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the default 'Generate ideas' submit label when idle", () => {
+    render(<GenerateIdeasModal {...baseProps} />);
+    expect(
+      screen.getByRole("button", { name: /^generate ideas$/i }),
+    ).toBeInTheDocument();
+  });
 });

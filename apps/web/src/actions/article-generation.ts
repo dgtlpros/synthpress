@@ -8,13 +8,13 @@ import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   type ActiveArticleJobRow,
   type ArticleIdeaStatus,
-  generateArticleIdeas,
-  type GenerateArticleIdeasResult,
   listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
+  queueGenerateArticleIdeas,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
+import { generateIdeasWorkflow } from "@/workflows/generate-ideas";
 import type { ActionResult } from "./workspace";
 
 /**
@@ -32,12 +32,20 @@ export type IdeaActionTargetStatus = Extract<
 /**
  * Manual entry point for the "Generate ideas" UI flow.
  *
- * The server action is intentionally thin: validate inputs, check that
- * the caller is a team member with `consume_team_tokens` permission,
- * then hand off to `generateArticleIdeas`. The orchestration function
- * is the same one the future autopilot scheduler and Vercel Workflow
- * runner will call — they'll skip this action entirely and pass their
- * own `triggerSource`.
+ * Two-step shape (mirrors {@link generateArticleFromIdea}):
+ *
+ *   1. Queue: synchronous create of the durable `article_jobs` row
+ *      via {@link queueGenerateArticleIdeas}. Idempotent per-blog —
+ *      a second click while a generate_ideas job is already in flight
+ *      returns the existing id instead of creating a duplicate batch.
+ *   2. Start the Vercel Workflow that consumes tokens and calls
+ *      Claude. We skip the start when the queue says
+ *      `alreadyQueued: true`.
+ *
+ * The action returns IMMEDIATELY (no awaiting Claude) so the modal
+ * can close and the global active-jobs tray takes over the progress
+ * UI. The user can refresh, navigate away, or close the browser
+ * without losing the job — durable state lives in `article_jobs`.
  */
 
 const MAX_BRIEF_LENGTH = 2000;
@@ -53,13 +61,25 @@ export interface GenerateIdeasManualInput {
   count?: number;
 }
 
-export type GenerateIdeasManualResult = Pick<
-  GenerateArticleIdeasResult,
-  "jobId" | "creditsUsed" | "model"
-> & {
-  /** Number of ideas inserted into `article_ideas`. */
-  ideasGenerated: number;
-};
+/**
+ * Queue-only result. The action returns BEFORE Claude runs, so we
+ * can't echo `creditsUsed` / `model` / `ideasGenerated` here — the
+ * tray (polling `article_jobs`) surfaces those once the workflow
+ * completes. Callers that need the legacy synchronous result shape
+ * should call `generateArticleIdeas` directly (autopilot does this).
+ */
+export interface GenerateIdeasManualResult {
+  jobId: string;
+  blogId: string;
+  /** Resolved batch size after defaulting. */
+  count: number;
+  /** Status of the durable `article_jobs` row at return time. */
+  status: "pending" | "processing";
+  /** True when an in-flight generate_ideas job already existed for this blog. */
+  alreadyQueued: boolean;
+  /** Workflow run id if the SDK exposed one. */
+  workflowRunId: string | null;
+}
 
 export async function generateIdeasManual(
   teamId: string,
@@ -99,10 +119,10 @@ export async function generateIdeasManual(
     const admin = createAdminClient();
     await assertCan(teamId, user.id, "consume_team_tokens", admin);
 
-    // The orchestration validates the blog itself (404s as
-    // `blog_not_found`) and runs against the admin client — RLS would
-    // otherwise block the article_jobs / usage_events inserts.
-    const result = await generateArticleIdeas({
+    // Phase 1: durable enqueue. Validates the blog (throws
+    // `blog_not_found`), creates the `article_jobs` row. No tokens
+    // consumed yet.
+    const queued = await queueGenerateArticleIdeas({
       blogId,
       teamId,
       userId: user.id,
@@ -112,6 +132,45 @@ export async function generateIdeasManual(
       client: admin,
     });
 
+    // Phase 2: start the workflow unless one is already in flight for
+    // this blog. `alreadyQueued = true` means a previous click is
+    // still being processed — re-firing the workflow would target the
+    // same job id (consume is idempotent), but the second workflow
+    // would race the first one's writes and double-insert ideas.
+    let workflowRunId: string | null = null;
+    if (!queued.alreadyQueued) {
+      try {
+        const run = await start(generateIdeasWorkflow, [
+          {
+            jobId: queued.jobId,
+            blogId,
+            teamId,
+            projectId,
+            userId: user.id,
+            triggerSource: "manual",
+            brief: input.brief ?? null,
+            count: queued.count,
+          },
+        ]);
+        workflowRunId =
+          (run as { id?: string; runId?: string }).id ??
+          (run as { id?: string; runId?: string }).runId ??
+          null;
+      } catch (err) {
+        // Best effort: if the workflow runner is unreachable we leave
+        // the job in `pending` so an operator can retry by re-running
+        // the workflow with the same job id. The UI shows a friendly
+        // error and the user can click Generate Ideas again later
+        // (which will hit the idempotency check and re-enqueue).
+        const message =
+          err instanceof Error ? err.message : "Could not start workflow.";
+        return {
+          data: null,
+          error: `Could not start the idea-generation workflow: ${message}`,
+        };
+      }
+    }
+
     revalidatePath(
       `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/ideas`,
     );
@@ -119,10 +178,12 @@ export async function generateIdeasManual(
 
     return {
       data: {
-        jobId: result.jobId,
-        creditsUsed: result.creditsUsed,
-        model: result.model,
-        ideasGenerated: result.ideas.length,
+        jobId: queued.jobId,
+        blogId: queued.blogId,
+        count: queued.count,
+        status: queued.status,
+        alreadyQueued: queued.alreadyQueued,
+        workflowRunId,
       },
       error: null,
     };
@@ -132,7 +193,6 @@ export async function generateIdeasManual(
     }
     const message =
       err instanceof Error ? err.message : "Could not generate ideas.";
-    // Translate the orchestration's typed errors into friendlier UI text.
     if (message === "blog_not_found") {
       return { data: null, error: "Blog not found." };
     }
