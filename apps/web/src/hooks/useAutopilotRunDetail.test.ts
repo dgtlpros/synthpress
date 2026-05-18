@@ -42,6 +42,7 @@ describe("useAutopilotRunDetail", () => {
       detail: null,
       isLoading: false,
       error: null,
+      refetch: expect.any(Function),
     });
   });
 
@@ -208,5 +209,87 @@ describe("useAutopilotRunDetail", () => {
     });
 
     expect(result.current.detail).toMatchObject({ run: { id: "r2" } });
+  });
+
+  // ---------------------------------------------------------------
+  // refetch() — re-runs the fetch for the same runId
+  // ---------------------------------------------------------------
+  describe("refetch", () => {
+    it("re-runs the fetch when called (same runId)", async () => {
+      mockedFetch.mockResolvedValue({
+        data: { run: { id: "r1" }, jobs: [], articles: [], ideas: [] },
+        error: null,
+      } as never);
+
+      const { result } = renderHook(() =>
+        useAutopilotRunDetail({
+          teamId: "t1",
+          projectId: "p1",
+          blogId: "b1",
+          runId: "r1",
+        }),
+      );
+      await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        result.current.refetch();
+      });
+      await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    });
+
+    it("flips back to isLoading=true synchronously during a refetch", async () => {
+      mockedFetch.mockResolvedValueOnce({
+        data: { run: { id: "r1" }, jobs: [], articles: [], ideas: [] },
+        error: null,
+      } as never);
+
+      const { result } = renderHook(() =>
+        useAutopilotRunDetail({
+          teamId: "t1",
+          projectId: "p1",
+          blogId: "b1",
+          runId: "r1",
+        }),
+      );
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      let resolveRefetch: (v: never) => void = () => {};
+      mockedFetch.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveRefetch = res as never;
+          }),
+      );
+
+      act(() => {
+        result.current.refetch();
+      });
+
+      expect(result.current.isLoading).toBe(true);
+      // Drain the pending refetch so React Testing Library's
+      // cleanup doesn't warn about state updates on an unmounted
+      // root.
+      await act(async () => {
+        resolveRefetch({
+          data: { run: { id: "r1" }, jobs: [], articles: [], ideas: [] },
+          error: null,
+        } as never);
+      });
+    });
+
+    it("is a no-op when runId is null (no fetch fires)", () => {
+      const { result } = renderHook(() =>
+        useAutopilotRunDetail({
+          teamId: "t1",
+          projectId: "p1",
+          blogId: "b1",
+          runId: null,
+        }),
+      );
+      act(() => {
+        result.current.refetch();
+      });
+      expect(mockedFetch).not.toHaveBeenCalled();
+    });
   });
 });

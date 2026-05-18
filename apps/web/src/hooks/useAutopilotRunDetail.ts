@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAutopilotRunDetail } from "@/actions/autopilot";
 import type { BlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
 
@@ -21,6 +21,16 @@ export interface UseAutopilotRunDetailResult {
   isLoading: boolean;
   /** Server-action error message, surfaced verbatim to the drawer. */
   error: string | null;
+  /**
+   * Imperative re-fetch. Bumps an internal nonce so the existing
+   * `useEffect` fires again with the same `runId` — needed after
+   * mutations like the WordPress draft retry, where the server
+   * has new job output + run counters to surface but the drawer
+   * is still pointing at the same run.
+   *
+   * No-op when `runId === null` (the hook is idle).
+   */
+  refetch: () => void;
 }
 
 interface FetchState {
@@ -56,6 +66,13 @@ export function useAutopilotRunDetail({
   runId,
 }: UseAutopilotRunDetailInput): UseAutopilotRunDetailResult {
   const [state, setState] = useState<FetchState>(IDLE);
+  // Nonce-driven refetch: bumping `reloadNonce` adds a dependency
+  // that's not part of the run's identity but still triggers the
+  // load effect. Cheaper than a `useCallback`-of-fetcher pattern
+  // and keeps cancellation logic (the `cancelled` flag) in one
+  // place. Mutation callers do `refetch()` after a successful
+  // server action.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   /* eslint-disable react-hooks/set-state-in-effect --
    * The synchronous `setState({ isLoading: true })` is intentional:
@@ -83,13 +100,22 @@ export function useAutopilotRunDetail({
     return () => {
       cancelled = true;
     };
-  }, [teamId, projectId, blogId, runId]);
+  }, [teamId, projectId, blogId, runId, reloadNonce]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  const refetch = useCallback(() => {
+    // Guard mirrors the effect's `if (!runId) return` so an
+    // accidental `refetch()` against a closed drawer is a no-op
+    // rather than triggering a spurious load when the drawer
+    // re-opens.
+    if (runId === null) return;
+    setReloadNonce((n) => n + 1);
+  }, [runId]);
 
   // Derive the idle return for `runId === null` without syncing it
   // into state. The internal `state` may still hold the previous
   // run's payload while the drawer animates closed; returning IDLE
   // here keeps the drawer's view-model honest.
-  if (runId === null) return IDLE;
-  return state;
+  if (runId === null) return { ...IDLE, refetch };
+  return { ...state, refetch };
 }

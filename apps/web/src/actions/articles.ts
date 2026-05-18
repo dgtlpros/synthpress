@@ -17,6 +17,12 @@ import {
   updateArticleWordPressDraft,
 } from "@/services/wordpress-publish-service";
 import { PUBLISH_ARTICLE_ERROR_COPY } from "@/lib/wordpress-publish-error-copy";
+import {
+  retryAutopilotJobWordPressDraft,
+  RETRY_ERROR_COPY,
+  RetryAutopilotWpDraftError,
+} from "@/services/autopilot-wordpress-retry-service";
+import type { AutopilotWordPressPublishResult } from "@/services/article-generation-service";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "./workspace";
 
@@ -403,6 +409,121 @@ export async function clearArticleWordPressLink(
       data: null,
       error:
         err instanceof Error ? err.message : "Could not clear WordPress link.",
+    };
+  }
+}
+
+// ============================================================================
+// Autopilot WordPress draft retry (v12)
+// ============================================================================
+
+/**
+ * Result returned to the drawer's retry hook. `wpPublish` is the
+ * new payload now living in `article_jobs.output.wpPublish` —
+ * echoed back so the UI can reflect the outcome without a full
+ * detail refetch (though the connector still refetches to also
+ * pull the updated run-level counters).
+ */
+export interface RetryAutopilotWordPressDraftResult {
+  jobId: string;
+  wpPublish: AutopilotWordPressPublishResult;
+}
+
+/**
+ * Manual retry of a single autopilot WordPress draft send.
+ *
+ * This is the recovery path for autopilot runs whose `wpPublish`
+ * landed at `failed` or `skipped_no_connection`. It does NOT
+ * regenerate the article, does NOT consume AI tokens, and does
+ * NOT re-pick images — it only re-POSTs the existing
+ * `content_markdown` to WordPress and persists the new outcome
+ * on the same `article_jobs` row.
+ *
+ * Permission gate mirrors the other WordPress actions
+ * (`manage_blog`). Run-membership of the job is enforced inside
+ * the service (`input.autopilotRunId === runId`) so a stale UI
+ * can't ask us to retry a job belonging to a different run.
+ *
+ * Friendly error mapping:
+ *   * Service-side validation → `RETRY_ERROR_COPY[code]`
+ *   * Downstream WordPress publish errors are NOT thrown — they
+ *     come back as `wpPublish.status === "failed"` with the
+ *     friendly warning already inlined by the service.
+ */
+export async function retryAutopilotWordPressDraftSend(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  runId: string,
+  articleJobId: string,
+): Promise<ActionResult<RetryAutopilotWordPressDraftResult>> {
+  if (!runId) {
+    return { data: null, error: "Run id is required." };
+  }
+  if (!articleJobId) {
+    return { data: null, error: "Article job id is required." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { data: blog } = await admin
+      .from("blogs")
+      .select("id")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (!blog) {
+      return { data: null, error: "Blog not found." };
+    }
+
+    const result = await retryAutopilotJobWordPressDraft({
+      runId,
+      blogId,
+      jobId: articleJobId,
+      client: admin,
+    });
+
+    // Revalidate the blog settings page (recent runs + counters)
+    // and the post detail page (its WordPress card now reads as
+    // already-sent on success). The drawer itself refetches via
+    // the connector, but revalidating still flushes any RSC
+    // payload caches keyed on these paths.
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/settings`,
+    );
+
+    return {
+      data: { jobId: articleJobId, wpPublish: result.wpPublish },
+      error: null,
+    };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) {
+      return { data: null, error: err.code };
+    }
+    if (err instanceof RetryAutopilotWpDraftError) {
+      return { data: null, error: RETRY_ERROR_COPY[err.code] };
+    }
+    // Defensive: the service either returns wpPublish.failed
+    // inline OR throws RetryAutopilotWpDraftError. Any other
+    // thrown value is a bug; surface its message verbatim so we
+    // notice rather than hide it behind a generic copy line.
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err.message
+          : "Could not retry the WordPress draft send.",
     };
   }
 }

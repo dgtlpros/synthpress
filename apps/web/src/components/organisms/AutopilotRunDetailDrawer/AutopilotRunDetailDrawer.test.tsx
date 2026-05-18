@@ -294,6 +294,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
         open
         detail={makeDetail()}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     expect(screen.queryByText("WordPress drafts")).not.toBeInTheDocument();
@@ -316,6 +318,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
           }),
         })}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     expect(screen.getByText("WordPress drafts")).toBeInTheDocument();
@@ -345,6 +349,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
           }),
         })}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     const alert = screen.getByTestId("autopilot-run-wp-failed-warning");
@@ -365,6 +371,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
           }),
         })}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     const warn = screen.getByTestId("autopilot-run-wp-skipped-warning");
@@ -390,6 +398,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
           }),
         })}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     expect(
@@ -411,6 +421,8 @@ describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
           }),
         })}
         onClose={vi.fn()}
+        isLoading={false}
+        error={null}
       />,
     );
     expect(
@@ -1497,6 +1509,262 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
     );
     expect(
       screen.queryByText("Image picker warnings"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// WordPress draft retry button (v12)
+// ============================================================================
+
+describe("AutopilotRunDetailDrawer — WordPress retry button", () => {
+  /**
+   * Builds a job stub keyed by id, with a `wpPublish` outcome of
+   * the given status. Article id is hardcoded — every retry test
+   * needs one set.
+   */
+  function makeJob(
+    id: string,
+    status: "failed" | "skipped_no_connection" | "draft_created" | "already_sent",
+    overrides: Record<string, unknown> = {},
+  ) {
+    return {
+      id,
+      type: "generate_article",
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      input: { autopilotRunId: "run-1" },
+      output: {
+        wpPublish:
+          status === "draft_created"
+            ? { status, wpPostId: 1, wpPostUrl: "https://x" }
+            : status === "already_sent"
+              ? { status, wpPostId: 1, wpPostUrl: "https://x" }
+              : { status, warning: "stub" },
+      },
+      articleId: "art-1",
+      articleIdeaId: "idea-1",
+      createdAt: "2026-05-11T08:00:30Z",
+      startedAt: "2026-05-11T08:00:30Z",
+      completedAt: "2026-05-11T08:01:00Z",
+      ...overrides,
+    };
+  }
+
+  it("renders the retry button for jobs whose wpPublish.status is 'failed'", () => {
+    const onRetry = vi.fn();
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({ jobs: [makeJob("job-fail", "failed")] })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={onRetry}
+      />,
+    );
+    const btn = screen.getByTestId("autopilot-job-job-fail-wp-retry");
+    expect(btn).toHaveTextContent("Retry WordPress draft");
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("renders the retry button for jobs whose wpPublish.status is 'skipped_no_connection'", () => {
+    const onRetry = vi.fn();
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [makeJob("job-skip", "skipped_no_connection")],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={onRetry}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-skip-wp-retry"),
+    ).toBeInTheDocument();
+  });
+
+  it("does NOT render the retry button for draft_created or already_sent jobs", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            makeJob("job-ok", "draft_created"),
+            makeJob("job-already", "already_sent"),
+          ],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-ok-wp-retry"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("autopilot-job-job-already-wp-retry"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the retry button when wpPublish is missing entirely", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              ...makeJob("job-nowp", "failed"),
+              output: { creditsUsed: 5 }, // no wpPublish
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-nowp-wp-retry"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the retry button when the job has no article id", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [{ ...makeJob("job-noart", "failed"), articleId: null }],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-noart-wp-retry"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the retry button entirely when onRetryWordPressDraft is not supplied (read-only viewers)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({ jobs: [makeJob("job-r", "failed")] })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-r-wp-retry"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("calls onRetryWordPressDraft with the job id when clicked", () => {
+    const onRetry = vi.fn();
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({ jobs: [makeJob("job-r", "failed")] })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={onRetry}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("autopilot-job-job-r-wp-retry"));
+    expect(onRetry).toHaveBeenCalledWith("job-r");
+  });
+
+  it("shows the loading state + disables the active row when retryingJobId matches", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({ jobs: [makeJob("job-r", "failed")] })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+        retryingJobId="job-r"
+      />,
+    );
+    const btn = screen.getByTestId("autopilot-job-job-r-wp-retry");
+    expect(btn).toHaveTextContent("Retrying…");
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("disables all other rows' retry buttons while one row is retrying", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            makeJob("job-a", "failed"),
+            makeJob("job-b", "failed"),
+          ],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+        retryingJobId="job-a"
+      />,
+    );
+    const a = screen.getByTestId("autopilot-job-job-a-wp-retry");
+    const b = screen.getByTestId("autopilot-job-job-b-wp-retry");
+    expect(a).toHaveTextContent("Retrying…");
+    expect(b).toHaveTextContent("Retry WordPress draft");
+    expect(b).toBeDisabled();
+  });
+
+  it("renders a per-row error message from retryErrorByJobId with role=alert", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({ jobs: [makeJob("job-r", "failed")] })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+        retryErrorByJobId={{ "job-r": "Connect WordPress before retrying." }}
+      />,
+    );
+    const alert = screen.getByTestId("autopilot-job-job-r-wp-retry-error");
+    expect(alert).toHaveTextContent("Connect WordPress before retrying.");
+    expect(alert).toHaveAttribute("role", "alert");
+  });
+
+  it("does not render an error message for rows whose id isn't in retryErrorByJobId", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            makeJob("job-a", "failed"),
+            makeJob("job-b", "failed"),
+          ],
+        })}
+        isLoading={false}
+        error={null}
+        onRetryWordPressDraft={vi.fn()}
+        retryErrorByJobId={{ "job-a": "boom" }}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-a-wp-retry-error"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("autopilot-job-job-b-wp-retry-error"),
     ).not.toBeInTheDocument();
   });
 });

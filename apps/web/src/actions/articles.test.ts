@@ -53,6 +53,35 @@ vi.mock("@/services/wordpress-publish-service", () => {
   };
 });
 
+vi.mock("@/services/autopilot-wordpress-retry-service", () => {
+  class RetryAutopilotWpDraftError extends Error {
+    code: string;
+    constructor(code: string) {
+      super(`retry_autopilot_wp_draft_error:${code}`);
+      this.code = code;
+    }
+  }
+  return {
+    retryAutopilotJobWordPressDraft: vi.fn(),
+    RetryAutopilotWpDraftError,
+    RETRY_ERROR_COPY: {
+      job_not_found: "We couldn't find the article job to retry.",
+      job_blog_mismatch:
+        "That job belongs to a different blog. Reload and try again.",
+      job_run_mismatch:
+        "That job belongs to a different autopilot run. Reload and try again.",
+      job_missing_article_id:
+        "That job never produced an article, so there's nothing to send to WordPress.",
+      job_not_retryable:
+        "That job's WordPress send is not in a retryable state.",
+      article_not_found: "The article for that job no longer exists.",
+      article_missing_content:
+        "The article has no content to send to WordPress yet.",
+      no_wp_connection: "Connect WordPress before retrying the draft send.",
+    },
+  };
+});
+
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -72,11 +101,16 @@ import {
 import {
   clearArticleWordPressLink,
   publishArticleToWordPressLiveAction,
+  retryAutopilotWordPressDraftSend,
   sendArticleToWordPressDraft,
   updateArticle,
   updateArticleWordPressDraftAction,
 } from "./articles";
 import { PUBLISH_ARTICLE_ERROR_COPY } from "@/lib/wordpress-publish-error-copy";
+import {
+  RetryAutopilotWpDraftError,
+  retryAutopilotJobWordPressDraft,
+} from "@/services/autopilot-wordpress-retry-service";
 
 const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
@@ -87,6 +121,7 @@ const mockedPublish = vi.mocked(publishArticleToWordPressDraft);
 const mockedUpdateDraft = vi.mocked(updateArticleWordPressDraft);
 const mockedPublishLive = vi.mocked(publishArticleToWordPressLive);
 const mockedClear = vi.mocked(clearWordPressLink);
+const mockedRetry = vi.mocked(retryAutopilotJobWordPressDraft);
 
 function makeAuthedClient(user: { id: string } | null = { id: "u1" }) {
   return {
@@ -859,5 +894,259 @@ describe("clearArticleWordPressLink", () => {
 
     const result = await clearArticleWordPressLink("t1", "p1", "b1", "a1");
     expect(result.error).toBe("Could not clear WordPress link.");
+  });
+});
+
+// ============================================================================
+// retryAutopilotWordPressDraftSend (v12)
+// ============================================================================
+
+describe("retryAutopilotWordPressDraftSend", () => {
+  // Convenience: the action only inspects `data.wpPublish` shape
+  // for echoing back, so a minimal stub is fine here.
+  const SUCCESS_RETURN = {
+    wpPublish: {
+      attempted: true,
+      status: "draft_created",
+      wpPostId: 7,
+      wpPostUrl: "https://example.com/?p=7",
+    },
+  } as const;
+
+  beforeEach(() => {
+    mockedRetry.mockResolvedValue(SUCCESS_RETURN as never);
+  });
+
+  it("rejects calls without a run id", async () => {
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "",
+      "job-1",
+    );
+    expect(result.error).toBe("Run id is required.");
+    expect(mockedRetry).not.toHaveBeenCalled();
+  });
+
+  it("rejects calls without an article job id", async () => {
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "",
+    );
+    expect(result.error).toBe("Article job id is required.");
+    expect(mockedRetry).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated callers", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient(null) as never);
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.error).toBe("You must be signed in.");
+    expect(mockedAssertCan).not.toHaveBeenCalled();
+    expect(mockedRetry).not.toHaveBeenCalled();
+  });
+
+  it("checks manage_blog permission before doing any work", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedAssertCan.mockRejectedValueOnce(
+      new TeamPermissionError("forbidden", "manage_blog", "member"),
+    );
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.error).toBe("forbidden");
+    expect(mockedAssertCan).toHaveBeenCalledWith(
+      "t1",
+      "u1",
+      "manage_blog",
+      client,
+    );
+    expect(mockedRetry).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the blog does not belong to the project", async () => {
+    const { client } = makeAdminWithBlog(null);
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.error).toBe("Blog not found.");
+    expect(mockedRetry).not.toHaveBeenCalled();
+  });
+
+  it("forwards run + blog + job to the service and returns the new wpPublish on success", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+
+    expect(mockedRetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        blogId: "b1",
+        jobId: "job-1",
+        client,
+      }),
+    );
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({
+      jobId: "job-1",
+      wpPublish: SUCCESS_RETURN.wpPublish,
+    });
+  });
+
+  it("revalidates the blog landing page + the blog settings page on success", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs/b1",
+    );
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs/b1/settings",
+    );
+  });
+
+  it("maps a RetryAutopilotWpDraftError to friendly copy from RETRY_ERROR_COPY", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRetry.mockRejectedValueOnce(
+      new RetryAutopilotWpDraftError("no_wp_connection"),
+    );
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(
+      "Connect WordPress before retrying the draft send.",
+    );
+  });
+
+  it("maps every RetryAutopilotWpDraftError code to copy without throwing", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const codes = [
+      "job_not_found",
+      "job_blog_mismatch",
+      "job_run_mismatch",
+      "job_missing_article_id",
+      "job_not_retryable",
+      "article_not_found",
+      "article_missing_content",
+      "no_wp_connection",
+    ] as const;
+    for (const code of codes) {
+      mockedRetry.mockRejectedValueOnce(
+        new RetryAutopilotWpDraftError(code),
+      );
+      const result = await retryAutopilotWordPressDraftSend(
+        "t1",
+        "p1",
+        "b1",
+        "run-1",
+        "job-1",
+      );
+      expect(result.data).toBeNull();
+      expect(typeof result.error).toBe("string");
+      expect(result.error!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("surfaces a generic Error.message verbatim when the service throws something unrecognized (defensive)", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRetry.mockRejectedValueOnce(new Error("supabase exploded"));
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("supabase exploded");
+  });
+
+  it("falls back to a default message when the service throws a non-Error value (defensive)", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRetry.mockRejectedValueOnce("not-an-error" as never);
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Could not retry the WordPress draft send.");
+  });
+
+  it("returns the new wpPublish payload even when the service captured a downstream WP failure (failed status)", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedRetry.mockResolvedValueOnce({
+      wpPublish: {
+        attempted: true,
+        status: "failed",
+        warning: "WordPress rejected the request.",
+      },
+    } as never);
+
+    const result = await retryAutopilotWordPressDraftSend(
+      "t1",
+      "p1",
+      "b1",
+      "run-1",
+      "job-1",
+    );
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({
+      jobId: "job-1",
+      wpPublish: { status: "failed" },
+    });
   });
 });

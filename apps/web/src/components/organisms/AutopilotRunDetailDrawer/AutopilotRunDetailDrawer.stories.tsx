@@ -301,3 +301,38 @@ export const WithWordPressDraftMixedOutcomes: Story = {
     },
   },
 };
+
+/**
+ * Failed WP-publish job with the retry button wired. The button
+ * reads "Retry WordPress draft" and dispatches `onRetryWordPress
+ * Draft(jobId)` — the connector wraps that into the
+ * `retryAutopilotWordPressDraftSend` server action.
+ */
+export const WithWordPressDraftRetryAvailable: Story = {
+  args: {
+    ...WithWordPressDraftFailed.args,
+    onRetryWordPressDraft: (jobId: string) => {
+      console.log("retry clicked", jobId);
+    },
+  },
+};
+
+/** Retry in flight — the active row spinner + "Retrying…" copy. */
+export const WithWordPressDraftRetryInFlight: Story = {
+  args: {
+    ...WithWordPressDraftFailed.args,
+    onRetryWordPressDraft: () => {},
+    retryingJobId: "job-1",
+  },
+};
+
+/** Retry returned an error — inline `role="alert"` message under the row. */
+export const WithWordPressDraftRetryError: Story = {
+  args: {
+    ...WithWordPressDraftFailed.args,
+    onRetryWordPressDraft: () => {},
+    retryErrorByJobId: {
+      "job-1": "Connect WordPress before retrying the draft send.",
+    },
+  },
+};

@@ -14,6 +14,7 @@ import {
   IdeaStatusBadge,
   type IdeaStatus,
 } from "@/components/atoms/IdeaStatusBadge";
+import { Button } from "@/components/atoms/Button";
 import { Spinner } from "@/components/atoms/Spinner";
 import type { BlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
 
@@ -53,6 +54,28 @@ export interface AutopilotRunDetailDrawerProps {
    * marked auto-paused. Optional.
    */
   automationSettingsHref?: string;
+  /**
+   * Invoked when the user clicks "Retry WordPress draft" on a
+   * per-job row. Omit to hide the retry buttons entirely (e.g.
+   * read-only viewers, Storybook stories). The connector is
+   * responsible for plumbing this to the `retryAutopilotWordPress
+   * DraftSend` server action + refetching the drawer's data.
+   */
+  onRetryWordPressDraft?: (jobId: string) => void;
+  /**
+   * The job whose retry is currently in flight. Drives the button
+   * loading state + disables every other row's retry button so we
+   * don't accept a second click while the first is still landing.
+   * `null` when no retry is in flight.
+   */
+  retryingJobId?: string | null;
+  /**
+   * Map of `jobId → friendly error message` from the last retry
+   * attempt against that job. Rendered inline under the row.
+   * Only the rows whose ids appear here show an error — the
+   * absence of a key means "no error to report".
+   */
+  retryErrorByJobId?: Record<string, string>;
   className?: string;
 }
 
@@ -96,6 +119,9 @@ export function AutopilotRunDetailDrawer({
   error,
   postsHref,
   automationSettingsHref,
+  onRetryWordPressDraft,
+  retryingJobId,
+  retryErrorByJobId,
   className,
 }: AutopilotRunDetailDrawerProps) {
   return (
@@ -127,6 +153,9 @@ export function AutopilotRunDetailDrawer({
           detail={detail}
           postsHref={postsHref}
           automationSettingsHref={automationSettingsHref}
+          onRetryWordPressDraft={onRetryWordPressDraft}
+          retryingJobId={retryingJobId ?? null}
+          retryErrorByJobId={retryErrorByJobId ?? {}}
         />
       ) : (
         <p className="py-6 text-center text-sm text-muted">No run selected.</p>
@@ -139,10 +168,16 @@ function DetailBody({
   detail,
   postsHref,
   automationSettingsHref,
+  onRetryWordPressDraft,
+  retryingJobId,
+  retryErrorByJobId,
 }: {
   detail: BlogAutopilotRunDetail;
   postsHref?: string;
   automationSettingsHref?: string;
+  onRetryWordPressDraft?: (jobId: string) => void;
+  retryingJobId: string | null;
+  retryErrorByJobId: Record<string, string>;
 }) {
   const { run, jobs, articles, ideas } = detail;
   const output = readObject(run.output);
@@ -461,6 +496,47 @@ function DetailBody({
                     >
                       View WordPress draft →
                     </a>
+                  ) : null}
+                  {/* Retry button for failed / skipped WordPress
+                      draft sends. Only rendered when:
+                        * the connector wired `onRetryWordPressDraft`
+                        * we have an article id to retry against
+                        * the prior outcome was `failed` or
+                          `skipped_no_connection`
+                      One in-flight retry at a time: `retryingJobId`
+                      both shows the spinner on the active row AND
+                      disables every other row's retry to avoid
+                      racing two retries against the same blog. */}
+                  {onRetryWordPressDraft &&
+                  job.articleId &&
+                  wpPublish &&
+                  (wpPublish.status === "failed" ||
+                    wpPublish.status === "skipped_no_connection") ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      loading={retryingJobId === job.id}
+                      disabled={
+                        retryingJobId !== null && retryingJobId !== job.id
+                      }
+                      onClick={() => onRetryWordPressDraft(job.id)}
+                      className="self-start"
+                      data-testid={`autopilot-job-${job.id}-wp-retry`}
+                    >
+                      {retryingJobId === job.id
+                        ? "Retrying…"
+                        : "Retry WordPress draft"}
+                    </Button>
+                  ) : null}
+                  {retryErrorByJobId[job.id] ? (
+                    <p
+                      className="text-xs text-error"
+                      role="alert"
+                      data-testid={`autopilot-job-${job.id}-wp-retry-error`}
+                    >
+                      {retryErrorByJobId[job.id]}
+                    </p>
                   ) : null}
                   {job.errorMessage ? (
                     <p className="text-xs text-error" role="alert">
