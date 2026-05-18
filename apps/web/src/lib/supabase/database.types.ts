@@ -400,6 +400,11 @@ export type Database = {
           trigger_source: string
           triggered_by_user_id: string | null
           updated_at: string
+          wp_drafts_already_sent: number
+          wp_drafts_created: number
+          wp_drafts_expected: number
+          wp_drafts_failed: number
+          wp_drafts_skipped: number
         }
         Insert: {
           articles_completed?: number
@@ -424,6 +429,11 @@ export type Database = {
           trigger_source?: string
           triggered_by_user_id?: string | null
           updated_at?: string
+          wp_drafts_already_sent?: number
+          wp_drafts_created?: number
+          wp_drafts_expected?: number
+          wp_drafts_failed?: number
+          wp_drafts_skipped?: number
         }
         Update: {
           articles_completed?: number
@@ -448,6 +458,11 @@ export type Database = {
           trigger_source?: string
           triggered_by_user_id?: string | null
           updated_at?: string
+          wp_drafts_already_sent?: number
+          wp_drafts_created?: number
+          wp_drafts_expected?: number
+          wp_drafts_failed?: number
+          wp_drafts_skipped?: number
         }
         Relationships: [
           {

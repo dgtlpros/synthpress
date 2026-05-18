@@ -25,6 +25,19 @@ export interface AutopilotRunRowData {
   articlesFailed: number;
   tokensSpent: number;
   tokensRefunded: number;
+  /**
+   * WordPress draft auto-send counters. Rolled up from per-job
+   * `output.wpPublish` by `syncAutopilotRunWordPressDraftCounters`.
+   * All default to 0 when no autopilot WP-draft attempts happened
+   * (or when the autopilot blog isn't configured to auto-send).
+   * The metric line below only renders WP fields when
+   * `wpDraftsExpected > 0`, so legacy runs stay visually clean.
+   */
+  wpDraftsExpected: number;
+  wpDraftsCreated: number;
+  wpDraftsAlreadySent: number;
+  wpDraftsSkipped: number;
+  wpDraftsFailed: number;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -150,7 +163,9 @@ export function AutopilotRunRow({
     run.articlesCompleted > 0 ||
     run.articlesFailed > 0 ||
     run.tokensSpent > 0 ||
-    run.tokensRefunded > 0;
+    run.tokensRefunded > 0 ||
+    run.wpDraftsExpected > 0;
+  const wpDraftSummary = buildWpDraftSummary(run);
 
   // The full body of the row — same content regardless of
   // clickability; just rendered inside a <button> when onSelect
@@ -198,6 +213,14 @@ export function AutopilotRunRow({
           ) : null}
           {run.tokensRefunded > 0 ? (
             <span className="text-warning">{run.tokensRefunded} refunded</span>
+          ) : null}
+          {wpDraftSummary ? (
+            <span
+              className={wpDraftSummary.tone}
+              data-testid={`autopilot-run-${run.id}-wp-draft-summary`}
+            >
+              {wpDraftSummary.text}
+            </span>
           ) : null}
         </p>
       ) : null}
@@ -258,4 +281,65 @@ export function AutopilotRunRow({
       )}
     </li>
   );
+}
+
+/**
+ * Single-line summary of the four `wp_drafts_*` counters for the
+ * recent-runs metric row. Returns `null` when nothing was
+ * attempted (wpDraftsExpected === 0) so legacy / non-autopilot
+ * runs render no WP fragment.
+ *
+ * Wording priority (most useful signal first):
+ *   * Any failures              → "N/M WordPress drafts created · K failed"
+ *                                  or "K WordPress drafts failed" when
+ *                                  nothing succeeded.
+ *   * None created + some skipped due to no connection
+ *                                → "WordPress not connected"
+ *   * Otherwise, join the
+ *     created / already-sent pair → "N WordPress drafts created · K already sent"
+ *
+ * `tone` is the Tailwind text-color token to apply — errors stay
+ * red, warnings stay amber, success stays muted (the metric line's
+ * default).
+ *
+ * Invariant (held by `syncAutopilotRunWordPressDraftCounters`):
+ *   expected = created + alreadySent + skipped + failed
+ * — so "expected > 0 with all four buckets at 0" is impossible
+ * in practice; we don't bother handling it.
+ */
+function buildWpDraftSummary(
+  run: AutopilotRunRowData,
+): { text: string; tone: string } | null {
+  if (run.wpDraftsExpected <= 0) return null;
+
+  if (run.wpDraftsFailed > 0) {
+    if (run.wpDraftsCreated === 0) {
+      return {
+        text: `${run.wpDraftsFailed} WordPress drafts failed`,
+        tone: "text-error",
+      };
+    }
+    return {
+      text: `${run.wpDraftsCreated}/${run.wpDraftsExpected} WordPress drafts created · ${run.wpDraftsFailed} failed`,
+      tone: "text-error",
+    };
+  }
+
+  // No failures. If nothing was created but some were skipped due
+  // to a missing connection, lead with that — it's actionable.
+  if (run.wpDraftsCreated === 0 && run.wpDraftsSkipped > 0) {
+    return { text: "WordPress not connected", tone: "text-warning" };
+  }
+
+  // Some combination of created + already_sent, no failures.
+  const parts: string[] = [];
+  if (run.wpDraftsCreated > 0) {
+    parts.push(`${run.wpDraftsCreated} WordPress drafts created`);
+  }
+  if (run.wpDraftsAlreadySent > 0) {
+    parts.push(`${run.wpDraftsAlreadySent} already sent`);
+  }
+  /* v8 ignore next 3 -- invariant guarantees parts.length > 0 here; defensive only */
+  if (parts.length === 0) return null;
+  return { text: parts.join(" · "), tone: "text-muted" };
 }

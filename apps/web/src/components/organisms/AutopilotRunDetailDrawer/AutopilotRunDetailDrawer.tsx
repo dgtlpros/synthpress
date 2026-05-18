@@ -246,6 +246,67 @@ function DetailBody({
         </dl>
       </Section>
 
+      {/* WordPress draft counters — only renders when autopilot
+          tried to send at least one article to WordPress. Keeps
+          the drawer quiet for legacy runs / runs on blogs without
+          the autoSendToWordPressDraft setting enabled. */}
+      {run.wp_drafts_expected > 0 ? (
+        <Section title="WordPress drafts">
+          <dl
+            className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3"
+            data-testid="autopilot-run-wp-summary"
+          >
+            <Counter
+              label="Expected"
+              value={run.wp_drafts_expected}
+            />
+            <Counter
+              label="Drafts created"
+              value={run.wp_drafts_created}
+            />
+            <Counter
+              label="Already sent"
+              value={run.wp_drafts_already_sent}
+            />
+            <Counter
+              label="Skipped"
+              value={run.wp_drafts_skipped}
+              tone={run.wp_drafts_skipped > 0 ? "warning" : undefined}
+            />
+            <Counter
+              label="Failed"
+              value={run.wp_drafts_failed}
+              tone={run.wp_drafts_failed > 0 ? "error" : undefined}
+            />
+          </dl>
+
+          {/* Plain-language explainers for the two states that
+              warrant operator attention. Per the v11 spec we lead
+              with failures; skipped-no-connection is a softer
+              warning. Rendered as separate paragraphs so each
+              gets its own screen-reader announcement. */}
+          {run.wp_drafts_failed > 0 ? (
+            <p
+              className="mt-2 text-sm text-error"
+              role="alert"
+              data-testid="autopilot-run-wp-failed-warning"
+            >
+              Some articles could not be sent to WordPress drafts.
+              Check the article job rows below.
+            </p>
+          ) : null}
+          {run.wp_drafts_skipped > 0 ? (
+            <p
+              className="mt-2 text-sm text-warning"
+              data-testid="autopilot-run-wp-skipped-warning"
+            >
+              Some WordPress draft sends were skipped because
+              WordPress was not connected.
+            </p>
+          ) : null}
+        </Section>
+      ) : null}
+
       {/* Reason / error */}
       {run.error_message ? (
         <Section title="Failure">
@@ -315,6 +376,8 @@ function DetailBody({
                 ? articlesById.get(job.articleId)
                 : undefined;
               const refunded = readObject(job.output)?.refunded === true;
+              const imageWarnings = readImageWarnings(job.output);
+              const wpPublish = readWpPublish(job.output);
               return (
                 <li
                   key={job.id}
@@ -336,7 +399,69 @@ function DetailBody({
                     {refunded ? (
                       <span className="text-xs text-warning">· Refunded</span>
                     ) : null}
+                    {imageWarnings.length > 0 ? (
+                      <span
+                        className="text-xs text-warning"
+                        data-testid={`autopilot-job-${job.id}-image-warnings-badge`}
+                      >
+                        · {imageWarnings.length}{" "}
+                        {imageWarnings.length === 1
+                          ? "image warning"
+                          : "image warnings"}
+                      </span>
+                    ) : null}
+                    {wpPublish ? (
+                      <span
+                        className={cn(
+                          "text-xs",
+                          wpPublishBadgeTone(wpPublish.status),
+                        )}
+                        data-testid={`autopilot-job-${job.id}-wp-badge`}
+                      >
+                        · {WP_PUBLISH_BADGE_COPY[wpPublish.status]}
+                      </span>
+                    ) : null}
                   </div>
+                  {imageWarnings.length > 0 ? (
+                    <details
+                      className="rounded-[var(--sp-radius-sm)] border border-warning/30 bg-warning/5 px-2 py-1"
+                      data-testid={`autopilot-job-${job.id}-image-warnings`}
+                    >
+                      <summary className="cursor-pointer select-none text-xs font-medium text-warning">
+                        Image picker warnings
+                      </summary>
+                      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-foreground">
+                        {imageWarnings.map((w, i) => (
+                          <li key={`${job.id}-warning-${i}`}>{w}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                  {wpPublish && wpPublish.warning ? (
+                    <p
+                      className={cn(
+                        "text-xs",
+                        wpPublish.status === "failed"
+                          ? "text-error"
+                          : "text-warning",
+                      )}
+                      role={wpPublish.status === "failed" ? "alert" : undefined}
+                      data-testid={`autopilot-job-${job.id}-wp-warning`}
+                    >
+                      {wpPublish.warning}
+                    </p>
+                  ) : null}
+                  {wpPublish?.wpPostUrl ? (
+                    <a
+                      href={wpPublish.wpPostUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-medium text-brand-blue hover:underline"
+                      data-testid={`autopilot-job-${job.id}-wp-link`}
+                    >
+                      View WordPress draft →
+                    </a>
+                  ) : null}
                   {job.errorMessage ? (
                     <p className="text-xs text-error" role="alert">
                       {job.errorMessage}
@@ -525,6 +650,99 @@ function readObject(v: unknown): Record<string, unknown> | null {
     return v as Record<string, unknown>;
   }
   return null;
+}
+
+/**
+ * Pulls `output.imageSummary.warnings` off a job row, defensively.
+ * Returns `[]` when:
+ *   * `output` is missing / not an object (legacy v6 jobs)
+ *   * `imageSummary` is missing (jobs from before v7)
+ *   * `warnings` isn't an array (forward-compat against shape drift)
+ *   * any individual warning isn't a string (filtered out)
+ *
+ * The autopilot picker emits a structured `string[]` here; legacy
+ * jobs predating image-picker integration simply produce no badge.
+ */
+function readImageWarnings(output: unknown): string[] {
+  const out = readObject(output);
+  if (!out) return [];
+  const summary = readObject(out.imageSummary);
+  if (!summary) return [];
+  const warnings = summary.warnings;
+  if (!Array.isArray(warnings)) return [];
+  return warnings.filter((w): w is string => typeof w === "string");
+}
+
+/**
+ * Recognized `output.wpPublish.status` values. Mirrors the union
+ * the article-generation service writes — listing them here keeps
+ * the drawer's badge-copy lookup typed + rejects unknown values
+ * defensively (returns `null` from `readWpPublish` for forward-
+ * compat against schema drift).
+ */
+type WpPublishStatus =
+  | "draft_created"
+  | "already_sent"
+  | "skipped_no_connection"
+  | "failed";
+
+interface WpPublishDetail {
+  status: WpPublishStatus;
+  warning: string | null;
+  wpPostId: number | null;
+  wpPostUrl: string | null;
+}
+
+const WP_PUBLISH_BADGE_COPY: Record<WpPublishStatus, string> = {
+  draft_created: "Draft sent to WordPress",
+  already_sent: "WordPress draft already existed",
+  skipped_no_connection: "WordPress not connected",
+  failed: "WordPress draft send failed",
+};
+
+const WP_PUBLISH_KNOWN_STATUSES: ReadonlySet<string> = new Set([
+  "draft_created",
+  "already_sent",
+  "skipped_no_connection",
+  "failed",
+]);
+
+/**
+ * Tones (Tailwind text-color tokens) per status. Success states
+ * use `text-muted` to keep the row visually quiet — the happy
+ * path shouldn't compete for attention with the article title.
+ * Failure / skip surface as warning/error.
+ */
+function wpPublishBadgeTone(status: WpPublishStatus): string {
+  if (status === "failed") return "text-error";
+  if (status === "skipped_no_connection") return "text-warning";
+  return "text-muted";
+}
+
+/**
+ * Extracts the `output.wpPublish` payload defensively. Returns
+ * `null` when:
+ *   * `output` is missing / not an object
+ *   * `wpPublish` is missing (article wasn't an autopilot
+ *     auto-send target)
+ *   * `wpPublish.status` is unknown (forward-compat)
+ *
+ * `warning` / `wpPostId` / `wpPostUrl` are optional on the
+ * source shape; we read them with type-guarded fallbacks.
+ */
+function readWpPublish(output: unknown): WpPublishDetail | null {
+  const out = readObject(output);
+  if (!out) return null;
+  const wp = readObject(out.wpPublish);
+  if (!wp) return null;
+  if (typeof wp.status !== "string") return null;
+  if (!WP_PUBLISH_KNOWN_STATUSES.has(wp.status)) return null;
+  return {
+    status: wp.status as WpPublishStatus,
+    warning: typeof wp.warning === "string" ? wp.warning : null,
+    wpPostId: typeof wp.wpPostId === "number" ? wp.wpPostId : null,
+    wpPostUrl: typeof wp.wpPostUrl === "string" ? wp.wpPostUrl : null,
+  };
 }
 
 function readNumber(v: unknown): number {

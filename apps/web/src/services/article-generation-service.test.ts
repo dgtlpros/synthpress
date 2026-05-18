@@ -10,6 +10,43 @@ vi.mock("@/lib/ai/provider", () => ({
   IDEA_DEFAULT_COUNT: 10,
 }));
 
+// Mock the image picker so we can drive its return value per test.
+// Defaults to a healthy "no images picked + no warnings" result so
+// existing tests that don't care about image-picker output behave
+// like the v5 service (no extra side effects).
+vi.mock("./article-image-picker-service", () => ({
+  pickImagesForArticle: vi.fn(),
+}));
+
+// Mock the WordPress publish surface so the autopilot auto-send
+// gate tests can drive `hasBlogWordPressConnection` and
+// `publishArticleToWordPressDraft` without touching the WP REST
+// path. The default state below makes existing tests behave like
+// v9 (no auto-send because triggerSource defaults to "workflow",
+// publishing.autoSendToWordPressDraft defaults to false).
+// Mock the autopilot-run counter sync so we can drive its return
+// value + failure mode without touching the run-row DB plumbing.
+vi.mock("./blog-autopilot-run-service", () => ({
+  syncAutopilotRunWordPressDraftCounters: vi.fn(),
+}));
+
+vi.mock("./wordpress-publish-service", () => {
+  class PublishArticleError extends Error {
+    code: string;
+    details?: string;
+    constructor(code: string, details?: string) {
+      super(`publish_article_error:${code}`);
+      this.code = code;
+      this.details = details;
+    }
+  }
+  return {
+    PublishArticleError,
+    hasBlogWordPressConnection: vi.fn(),
+    publishArticleToWordPressDraft: vi.fn(),
+  };
+});
+
 vi.mock("./team-billing-service", () => ({
   consumeTeamTokens: vi.fn(),
   refundTeamTokens: vi.fn(),
@@ -18,6 +55,13 @@ vi.mock("./team-billing-service", () => ({
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateArticleDraft, generateIdeas } from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
+import { pickImagesForArticle } from "./article-image-picker-service";
+import {
+  hasBlogWordPressConnection,
+  PublishArticleError,
+  publishArticleToWordPressDraft,
+} from "./wordpress-publish-service";
+import { syncAutopilotRunWordPressDraftCounters } from "./blog-autopilot-run-service";
 import {
   ARTICLE_IDEA_STATUSES,
   ARTICLE_JOB_STATUSES,
@@ -54,8 +98,23 @@ const mockedGenerateIdeas = vi.mocked(generateIdeas);
 const mockedGenerateArticleDraft = vi.mocked(generateArticleDraft);
 const mockedConsumeTeamTokens = vi.mocked(consumeTeamTokens);
 const mockedRefundTeamTokens = vi.mocked(refundTeamTokens);
+const mockedPickImages = vi.mocked(pickImagesForArticle);
+const mockedHasWpConnection = vi.mocked(hasBlogWordPressConnection);
+const mockedPublishWpDraft = vi.mocked(publishArticleToWordPressDraft);
+const mockedSyncWpCounters = vi.mocked(syncAutopilotRunWordPressDraftCounters);
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
+
+// Default picker return: no images picked, no warnings. Tests
+// that need to exercise the image-summary path override per-test
+// via `mockedPickImages.mockResolvedValueOnce(...)`.
+const DEFAULT_IMAGE_SUMMARY = {
+  providerId: "unsplash",
+  featuredSelected: false,
+  sectionsFound: 0,
+  sectionImagesSelected: 0,
+  warnings: [],
+};
 
 // ---- Mock Supabase chain helpers ----------------------------------------
 
@@ -117,6 +176,27 @@ function makeClient(table: Record<string, ChainResult<unknown>>): MockClient {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+  // Image picker default: no-op. Tests that exercise the
+  // image-summary path override per-test.
+  mockedPickImages.mockResolvedValue(DEFAULT_IMAGE_SUMMARY);
+  // WP auto-send defaults: connection present + draft creation
+  // succeeds. Most tests never hit these (their gate fails before
+  // we get there); the auto-send describe block uses them directly.
+  mockedHasWpConnection.mockResolvedValue(true);
+  mockedPublishWpDraft.mockResolvedValue({
+    wpPostId: 42,
+    wpPostUrl: "https://example.com/?p=42",
+    status: "draft",
+  });
+  // Counter sync default: no-op success. Tests that exercise the
+  // counter-sync path override per-test.
+  mockedSyncWpCounters.mockResolvedValue({
+    expected: 0,
+    created: 0,
+    alreadySent: 0,
+    skipped: 0,
+    failed: 0,
+  });
 });
 
 // ============================================================================
@@ -2057,6 +2137,13 @@ function makeArticleOrchestrationClient(opts?: {
   insertArticleError?: { message: string };
   updateArticleError?: { message: string };
   ideaMissing?: boolean;
+  /**
+   * Override the blog's `settings` jsonb. Defaults to a minimal
+   * identity block (which the normalizer fills out with defaults).
+   * Tests that exercise the v8 image-picker gates pass a custom
+   * `{ media: { autoPickImages, imageProvider } }` here.
+   */
+  blogSettings?: Record<string, unknown>;
 }): MockClient {
   const blogRow = {
     id: "b1",
@@ -2064,7 +2151,8 @@ function makeArticleOrchestrationClient(opts?: {
     description: "A workflow blog",
     slug: "acme",
     project_id: "p1",
-    settings: { identity: { audience: "engineers" } },
+    settings:
+      opts?.blogSettings ?? { identity: { audience: "engineers" } },
   };
   const projectRow = { id: "p1", name: "Default", team_id: "t1" };
   const teamRow = { id: "t1", name: "Acme team" };
@@ -2095,35 +2183,34 @@ function makeArticleOrchestrationClient(opts?: {
         ? { data: null, error: opts.insertArticleError }
         : { data: { id: "article-X" }, error: null },
     );
-  // The post-AI update chain ends with .eq() — we need to control that
-  // resolved value too. Default it to success unless overridden.
-  client.__chains.articles!.eq = vi.fn(function (this: {
-    __chain: typeof client.__chains.articles;
-  }) {
-    return client.__chains.articles!;
-  }) as never;
-  // The articles update().eq() resolves at the .eq() terminal. Replace
-  // it with a mock that accepts the chained calls and resolves on the
-  // 2nd call (the update after AI). For simplicity we leave .eq
-  // returning the chain (mockReturnThis) and rely on update being a
-  // thenable via the chain's update mock — but supabase actually
-  // resolves on the .eq() that terminates the update. To keep the
-  // mocks clean we replace .eq for articles with a counter-based mock.
-  let articlesEqCallCount = 0;
-  client.__chains.articles!.eq = vi.fn(() => {
-    articlesEqCallCount += 1;
-    // First .eq follows insert(...).select(...).single() which already
-    // returned. Second .eq is the post-AI update terminal.
-    if (articlesEqCallCount === 1) {
-      return Promise.resolve(
-        opts?.updateArticleError
-          ? { data: null, error: opts.updateArticleError }
-          : { data: null, error: null },
-      ) as never;
+
+  // Articles chain is used by three distinct query shapes:
+  //   1. `.insert(...).select("id").single()` — placeholder insert
+  //      (resolves via `single` above).
+  //   2. `.update(...).eq("id", x)` — post-AI update; resolves at
+  //      the first `.eq()` after a `.update()`.
+  //   3. `.select(...).eq("id", x).eq("blog_id", y).maybeSingle()`
+  //      — autopilot WP-draft idempotency read; resolves at
+  //      `.maybeSingle()`.
+  //
+  // We make `eq` chainable (returns the chain) AND make the chain
+  // itself thenable (awaiting it resolves to the update result).
+  // That lets `.update().eq()` (single eq, awaited) AND
+  // `.select().eq().eq().maybeSingle()` both work without per-call
+  // counters.
+  const articleUpdateResult = opts?.updateArticleError
+    ? { data: null, error: opts.updateArticleError }
+    : { data: null, error: null };
+  client.__chains.articles!.eq = vi.fn(() => client.__chains.articles!);
+  (
+    client.__chains.articles as unknown as {
+      then: PromiseLike<unknown>["then"];
     }
-    // Subsequent .eq calls (failArticleAndJob path) — always succeed.
-    return Promise.resolve({ data: null, error: null }) as never;
-  }) as never;
+  ).then = ((onFulfilled, onRejected) =>
+    Promise.resolve(articleUpdateResult).then(
+      onFulfilled,
+      onRejected,
+    )) as PromiseLike<unknown>["then"];
 
   return client;
 }
@@ -3251,6 +3338,741 @@ describe("runGenerateArticleFromIdeaJob", () => {
     });
 
     expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Image picker integration (v6 → v7)
+  // -------------------------------------------------------------------------
+  describe("image picker integration", () => {
+    it("calls pickImagesForArticle with the article + blog ids after the draft saves", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          articleId: "article-1",
+          blogId: "b1",
+          client,
+        }),
+      );
+    });
+
+    it("transitions current_step → 'picking_images' before the picker runs", async () => {
+      const client = makeArticleOrchestrationClient();
+      // Capture the order of `current_step` writes by snapshotting
+      // the article_jobs update payloads in call order.
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      const stepWrites = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .filter((u) => "current_step" in u)
+        .map((u) => u.current_step);
+      // Picker runs between saving_article and logging_usage.
+      // `completeArticleJob` also writes `current_step = 'completed'`
+      // at the end so the tray flips to "Article ready for review".
+      expect(stepWrites).toEqual([
+        "loading_context",
+        "writing_article",
+        "saving_article",
+        "picking_images",
+        "logging_usage",
+        "completed",
+      ]);
+    });
+
+    it("appends the picker summary to article_jobs.output on completion", async () => {
+      mockedPickImages.mockResolvedValueOnce({
+        providerId: "unsplash",
+        featuredSelected: true,
+        sectionsFound: 3,
+        sectionImagesSelected: 2,
+        warnings: ['Skipped section "FAQ": no results.'],
+      });
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      // Find the article_jobs.update call that wrote `output`
+      // (the completion write — only `completeArticleJob` writes
+      // `output` on this code path).
+      const completionUpdate = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completionUpdate).toBeDefined();
+      expect(completionUpdate!.output).toMatchObject({
+        imageSummary: {
+          providerId: "unsplash",
+          featuredSelected: true,
+          sectionsFound: 3,
+          sectionImagesSelected: 2,
+          warnings: ['Skipped section "FAQ": no results.'],
+        },
+      });
+      // Token usage fields still present alongside imageSummary.
+      expect(completionUpdate!.output).toMatchObject({
+        model: expect.any(String),
+        creditsUsed: expect.any(Number),
+      });
+    });
+
+    it("still completes the article job successfully when the picker returns only warnings", async () => {
+      mockedPickImages.mockResolvedValueOnce({
+        providerId: "unsplash",
+        featuredSelected: false,
+        sectionsFound: 0,
+        sectionImagesSelected: 0,
+        warnings: ['Image provider "unsplash" is not available (missing_access_key).'],
+      });
+      const client = makeArticleOrchestrationClient();
+      const result = await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      // Article still landed `ready_for_review`.
+      expect(result.status).toBe("ready_for_review");
+      // Tokens were NOT refunded.
+      expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+    });
+
+    it("does NOT refund tokens when the picker throws unexpectedly (best-effort posture)", async () => {
+      mockedPickImages.mockRejectedValueOnce(new Error("rate limit"));
+      const client = makeArticleOrchestrationClient();
+      const result = await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      // The article generation succeeded — the picker exception
+      // was swallowed by the defensive try/catch in the
+      // orchestrator. No refund, status is ready_for_review.
+      expect(result.status).toBe("ready_for_review");
+      expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+      // The completion output still carries an imageSummary —
+      // synthesized by the defensive catch.
+      const completionUpdate = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completionUpdate!.output).toMatchObject({
+        imageSummary: {
+          featuredSelected: false,
+          warnings: [expect.stringMatching(/rate limit/i)],
+        },
+      });
+    });
+
+    it("calls the picker for autopilot-triggered runs too (same job function)", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        // Same job function the autopilot scheduler invokes.
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPickImages).toHaveBeenCalledOnce();
+    });
+
+    it("passes settings.media.imageProvider through to the picker", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: { media: { imageProvider: "unsplash" } },
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).toHaveBeenCalledWith(
+        expect.objectContaining({ providerId: "unsplash" }),
+      );
+    });
+
+    it("SKIPS the picker when settings.media.autoPickImages is false", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: { media: { autoPickImages: false } },
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).not.toHaveBeenCalled();
+      // Completion output still carries a synthetic imageSummary.
+      const completionUpdate = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completionUpdate!.output).toMatchObject({
+        imageSummary: {
+          providerId: "unsplash", // default
+          featuredSelected: false,
+          sectionsFound: 0,
+          sectionImagesSelected: 0,
+          warnings: [],
+        },
+      });
+    });
+
+    it("SKIPS the picker when settings.media.imageProvider is 'none' (even if autoPickImages=true)", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: {
+          media: { autoPickImages: true, imageProvider: "none" },
+        },
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).not.toHaveBeenCalled();
+      const completionUpdate = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completionUpdate!.output).toMatchObject({
+        imageSummary: { providerId: "none" },
+      });
+    });
+
+    it("article still completes successfully when image picking is skipped (no refund)", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: { media: { autoPickImages: false } },
+      });
+      const result = await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(result.status).toBe("ready_for_review");
+      expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Autopilot WordPress draft auto-send (v10)
+  // -------------------------------------------------------------------------
+  describe("autopilot WP-draft auto-send", () => {
+    /**
+     * Builds the settings shape that passes EVERY auto-send gate:
+     * autopilot trigger + autopilot mode + enabled + requireReview
+     * off + autoSendToWordPressDraft on. Individual tests override
+     * one field at a time to verify each gate independently.
+     */
+    function passingSettings(
+      overrides: Partial<Record<string, unknown>> = {},
+    ): Record<string, unknown> {
+      return {
+        identity: { audience: "engineers" },
+        automation: {
+          mode: "autopilot",
+          enabled: true,
+          requireReview: false,
+          ...(typeof overrides.automation === "object" &&
+          overrides.automation !== null
+            ? (overrides.automation as Record<string, unknown>)
+            : {}),
+        },
+        publishing: {
+          autoSendToWordPressDraft: true,
+          ...(typeof overrides.publishing === "object" &&
+          overrides.publishing !== null
+            ? (overrides.publishing as Record<string, unknown>)
+            : {}),
+        },
+      };
+    }
+
+    it("does NOT auto-send when triggerSource is 'manual'", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).not.toHaveProperty("wpPublish");
+    });
+
+    it("does NOT auto-send when triggerSource is 'workflow' (default)", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        // triggerSource omitted → defaults to 'workflow'
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+    });
+
+    it("does NOT auto-send when automation.mode !== 'autopilot'", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings({
+          automation: { mode: "manual", enabled: true, requireReview: false },
+        }),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+    });
+
+    it("does NOT auto-send when automation.enabled is false", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings({
+          automation: { mode: "autopilot", enabled: false, requireReview: false },
+        }),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+    });
+
+    it("does NOT auto-send when automation.requireReview is true (user wants to review)", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings({
+          automation: { mode: "autopilot", enabled: true, requireReview: true },
+        }),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+    });
+
+    it("does NOT auto-send when publishing.autoSendToWordPressDraft is false", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings({
+          publishing: { autoSendToWordPressDraft: false },
+        }),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+    });
+
+    it("emits skipped_no_connection warning when WordPress is not connected", async () => {
+      mockedHasWpConnection.mockResolvedValueOnce(false);
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      // We checked the connection, but did NOT attempt the publish.
+      expect(mockedHasWpConnection).toHaveBeenCalledOnce();
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        wpPublish: {
+          attempted: false,
+          status: "skipped_no_connection",
+          warning: expect.stringMatching(/connect a wordpress/i),
+        },
+      });
+    });
+
+    it("sends the draft when ALL gates pass + connection present + no existing post", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      // The idempotency read pulls article {wp_post_id, wp_post_url}.
+      // Default chain returns {id: "article-X"} — no wp_post_id →
+      // proceeds to publish.
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      expect(mockedPublishWpDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          articleId: "article-1",
+          blogId: "b1",
+          client,
+        }),
+      );
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        wpPublish: {
+          attempted: true,
+          status: "draft_created",
+          wpPostId: 42,
+          wpPostUrl: "https://example.com/?p=42",
+        },
+      });
+    });
+
+    it("transitions current_step → 'sending_to_wordpress' before the publish call", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      const steps = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .filter((u) => "current_step" in u)
+        .map((u) => u.current_step);
+      expect(steps).toEqual([
+        "loading_context",
+        "writing_article",
+        "saving_article",
+        "picking_images",
+        "logging_usage",
+        "sending_to_wordpress",
+        "completed",
+      ]);
+    });
+
+    it("skips the publish call when wp_post_id is already set (idempotency)", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      // Override the articles.maybeSingle to return an existing
+      // wp_post_id on the idempotency read. The default chain's
+      // maybeSingle returns the placeholder insert row; we extend
+      // it with a second-call return for the WP idempotency read.
+      client.__chains.articles!.maybeSingle = vi
+        .fn()
+        // Existing wp_post_id present → already_sent path.
+        .mockResolvedValueOnce({
+          data: {
+            wp_post_id: 7,
+            wp_post_url: "https://example.com/?p=7",
+          },
+          error: null,
+        });
+
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+
+      expect(mockedHasWpConnection).toHaveBeenCalledOnce();
+      expect(mockedPublishWpDraft).not.toHaveBeenCalled();
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        wpPublish: {
+          attempted: false,
+          status: "already_sent",
+          wpPostId: 7,
+          wpPostUrl: "https://example.com/?p=7",
+        },
+      });
+    });
+
+    it("idempotency: preserves wp_post_url=null when the existing article row has no URL", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      // Existing wp_post_id present but wp_post_url is null (rare —
+      // WP echoed back an id without `link` on the original send).
+      client.__chains.articles!.maybeSingle = vi.fn().mockResolvedValueOnce({
+        data: { wp_post_id: 7, wp_post_url: null },
+        error: null,
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        wpPublish: {
+          status: "already_sent",
+          wpPostId: 7,
+          wpPostUrl: null,
+        },
+      });
+    });
+
+    it("records a failed status with friendly copy on PublishArticleError (no token refund)", async () => {
+      mockedPublishWpDraft.mockRejectedValueOnce(
+        new PublishArticleError("wp_request_failed"),
+      );
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      const result = await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      // Article generation still succeeded.
+      expect(result.status).toBe("ready_for_review");
+      expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+      // wpPublish carries the failure.
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        wpPublish: {
+          attempted: true,
+          status: "failed",
+          warning: expect.stringMatching(/wordpress rejected/i),
+        },
+      });
+    });
+
+    it("preserves the existing imageSummary alongside wpPublish in the output payload", async () => {
+      mockedPickImages.mockResolvedValueOnce({
+        providerId: "unsplash",
+        featuredSelected: true,
+        sectionsFound: 2,
+        sectionImagesSelected: 2,
+        warnings: [],
+      });
+      const client = makeArticleOrchestrationClient({
+        blogSettings: passingSettings(),
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        client: client as never,
+      });
+      const completion = client.__chains
+        .article_jobs!.update.mock.calls.map((c) => c[0])
+        .find((u) => "output" in u);
+      expect(completion!.output).toMatchObject({
+        imageSummary: { featuredSelected: true, sectionImagesSelected: 2 },
+        wpPublish: { status: "draft_created" },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Autopilot run counter sync (v11)
+  // -------------------------------------------------------------------------
+  describe("autopilot WP-draft counter sync", () => {
+    it("calls syncAutopilotRunWordPressDraftCounters with the run id from jobInputPatch", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        jobInputPatch: { autopilotRunId: "run-xyz" },
+        client: client as never,
+      });
+      expect(mockedSyncWpCounters).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: "run-xyz",
+          blogId: "b1",
+          client,
+        }),
+      );
+    });
+
+    it("does NOT call counter sync when jobInputPatch is omitted (legacy / manual flow)", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedSyncWpCounters).not.toHaveBeenCalled();
+    });
+
+    it("does NOT call counter sync when jobInputPatch.autopilotRunId is missing or non-string", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        // Patch present but autopilotRunId is the wrong type.
+        jobInputPatch: { autopilotRunId: 42 as never },
+        client: client as never,
+      });
+      expect(mockedSyncWpCounters).not.toHaveBeenCalled();
+    });
+
+    it("does NOT call counter sync when jobInputPatch.autopilotRunId is empty string", async () => {
+      const client = makeArticleOrchestrationClient();
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        jobInputPatch: { autopilotRunId: "" },
+        client: client as never,
+      });
+      expect(mockedSyncWpCounters).not.toHaveBeenCalled();
+    });
+
+    it("does NOT fail the article job when counter sync throws (best-effort)", async () => {
+      mockedSyncWpCounters.mockRejectedValueOnce(
+        new Error("sync exploded"),
+      );
+      const client = makeArticleOrchestrationClient();
+      const result = await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "autopilot",
+        jobInputPatch: { autopilotRunId: "run-xyz" },
+        client: client as never,
+      });
+      // Article still completed.
+      expect(result.status).toBe("ready_for_review");
+      // No token refund.
+      expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+      // Counter sync was attempted.
+      expect(mockedSyncWpCounters).toHaveBeenCalled();
+    });
   });
 });
 

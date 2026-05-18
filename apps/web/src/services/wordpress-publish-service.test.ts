@@ -15,6 +15,7 @@ import {
   buildWordPressMediaEndpoint,
   buildWordPressPostsEndpoint,
   clearWordPressLink,
+  hasBlogWordPressConnection,
   PublishArticleError,
   publishArticleToWordPressDraft,
   publishArticleToWordPressLive,
@@ -1311,6 +1312,68 @@ describe("clearWordPressLink", () => {
     await expect(
       clearWordPressLink({ articleId: "a1", blogId: "b1", client }),
     ).rejects.toMatchObject({ message: "boom" });
+  });
+});
+
+// ============================================================================
+// hasBlogWordPressConnection
+// ============================================================================
+
+describe("hasBlogWordPressConnection", () => {
+  it("returns true when all three WP credential fields are non-empty", async () => {
+    const { client } = makeClient();
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(true);
+  });
+
+  it("returns false when the blog row is missing entirely", async () => {
+    const { client } = makeClient({ blog: null });
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
+  });
+
+  it("returns false when wp_url is missing", async () => {
+    const { client } = makeClient({
+      blog: { wp_url: null, wp_username: "u", wp_app_password: "p" },
+    });
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
+  });
+
+  it("returns false when wp_username is missing", async () => {
+    const { client } = makeClient({
+      blog: { wp_url: "https://x.com", wp_username: null, wp_app_password: "p" },
+    });
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
+  });
+
+  it("returns false when wp_app_password is missing", async () => {
+    const { client } = makeClient({
+      blog: {
+        wp_url: "https://x.com",
+        wp_username: "u",
+        wp_app_password: null,
+      },
+    });
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
+  });
+
+  it("returns false when any credential is whitespace-only (treated as empty)", async () => {
+    const { client } = makeClient({
+      blog: { wp_url: "   ", wp_username: "u", wp_app_password: "p" },
+    });
+    expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
+  });
+
+  it("falls back to the admin client when none is passed", async () => {
+    const { client } = makeClient();
+    mockedCreateAdmin.mockReturnValue(client);
+    await hasBlogWordPressConnection("b1");
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+
+  it("propagates Supabase SELECT errors as-is", async () => {
+    const { client } = makeClient({ blogError: { message: "denied" } });
+    await expect(
+      hasBlogWordPressConnection("b1", client),
+    ).rejects.toMatchObject({ message: "denied" });
   });
 });
 

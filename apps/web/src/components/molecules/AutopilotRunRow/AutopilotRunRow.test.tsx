@@ -18,6 +18,11 @@ function makeRun(
     articlesFailed: 0,
     tokensSpent: 5,
     tokensRefunded: 0,
+    wpDraftsExpected: 0,
+    wpDraftsCreated: 0,
+    wpDraftsAlreadySent: 0,
+    wpDraftsSkipped: 0,
+    wpDraftsFailed: 0,
     createdAt: new Date("2026-05-11T08:00:00Z").toISOString(),
     startedAt: new Date("2026-05-11T08:00:01Z").toISOString(),
     completedAt: new Date("2026-05-11T08:01:00Z").toISOString(),
@@ -484,5 +489,123 @@ describe("AutopilotRunRow", () => {
     );
     expect(screen.getByText("boom")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // WordPress draft counters (v11)
+  // -------------------------------------------------------------------------
+  describe("WordPress draft summary", () => {
+    it("renders nothing when wpDraftsExpected is 0 (legacy / no auto-send)", () => {
+      render(<AutopilotRunRow run={makeRun({ id: "wp-zero" })} />);
+      expect(
+        screen.queryByTestId("autopilot-run-wp-zero-wp-draft-summary"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders 'N WordPress drafts created' when all expected attempts succeeded", () => {
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-ok",
+            wpDraftsExpected: 3,
+            wpDraftsCreated: 3,
+          })}
+        />,
+      );
+      const el = screen.getByTestId("autopilot-run-wp-ok-wp-draft-summary");
+      expect(el).toHaveTextContent("3 WordPress drafts created");
+      expect(el).toHaveClass("text-muted");
+    });
+
+    it("renders 'N/M WordPress drafts created · K failed' on partial failure (red)", () => {
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-mix",
+            wpDraftsExpected: 5,
+            wpDraftsCreated: 3,
+            wpDraftsFailed: 2,
+          })}
+        />,
+      );
+      const el = screen.getByTestId("autopilot-run-wp-mix-wp-draft-summary");
+      expect(el).toHaveTextContent(
+        "3/5 WordPress drafts created · 2 failed",
+      );
+      expect(el).toHaveClass("text-error");
+    });
+
+    it("renders 'M WordPress drafts failed' (red) when nothing succeeded", () => {
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-allfail",
+            wpDraftsExpected: 2,
+            wpDraftsCreated: 0,
+            wpDraftsFailed: 2,
+          })}
+        />,
+      );
+      const el = screen.getByTestId(
+        "autopilot-run-wp-allfail-wp-draft-summary",
+      );
+      expect(el).toHaveTextContent("2 WordPress drafts failed");
+      expect(el).toHaveClass("text-error");
+    });
+
+    it("renders 'WordPress not connected' (amber) when all attempts were skipped + nothing created", () => {
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-noconn",
+            wpDraftsExpected: 4,
+            wpDraftsSkipped: 4,
+          })}
+        />,
+      );
+      const el = screen.getByTestId(
+        "autopilot-run-wp-noconn-wp-draft-summary",
+      );
+      expect(el).toHaveTextContent("WordPress not connected");
+      expect(el).toHaveClass("text-warning");
+    });
+
+    it("renders 'N created · K already sent' when both buckets are non-zero", () => {
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-mixedok",
+            wpDraftsExpected: 4,
+            wpDraftsCreated: 2,
+            wpDraftsAlreadySent: 2,
+          })}
+        />,
+      );
+      const el = screen.getByTestId(
+        "autopilot-run-wp-mixedok-wp-draft-summary",
+      );
+      expect(el).toHaveTextContent("2 WordPress drafts created · 2 already sent");
+    });
+
+    it("renders only the 'already sent' fragment when nothing new was created (no failures, no skips)", () => {
+      // Exercises the branch where created=0 but alreadySent>0 —
+      // reachable when autopilot re-runs over a backlog whose
+      // articles were already pushed in a prior tick.
+      render(
+        <AutopilotRunRow
+          run={makeRun({
+            id: "wp-allold",
+            wpDraftsExpected: 2,
+            wpDraftsCreated: 0,
+            wpDraftsAlreadySent: 2,
+          })}
+        />,
+      );
+      const el = screen.getByTestId(
+        "autopilot-run-wp-allold-wp-draft-summary",
+      );
+      expect(el).toHaveTextContent("2 already sent");
+      expect(el).not.toHaveTextContent("created");
+    });
   });
 });

@@ -26,7 +26,9 @@ describe("getActiveJobLabel — generate_article", () => {
     ["loading_context", "Preparing article…", 15],
     ["writing_article", "Writing article…", 45],
     ["saving_article", "Saving draft…", 75],
+    ["picking_images", "Choosing images…", 85],
     ["logging_usage", "Finalizing…", 90],
+    ["sending_to_wordpress", "Sending to WordPress draft…", 95],
     ["completed", "Article ready for review", 100],
   ])("maps processing step %s → %s @ %d%%", (step, expectedLabel, pct) => {
     const label = getActiveJobLabel({
@@ -81,6 +83,195 @@ describe("getActiveJobLabel — generate_article", () => {
       isActive: false,
       progressPercent: 100,
     });
+  });
+
+  it("maps completed with image warnings → 'Completed with N image warnings' subtitle", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        model: "claude",
+        imageSummary: {
+          providerId: "unsplash",
+          warnings: [
+            "Skipped section X: no results.",
+            "Skipped section Y: rate limit.",
+          ],
+        },
+      },
+    });
+    expect(label.label).toBe("Article ready for review");
+    expect(label.detail).toBe("Completed with 2 image warnings");
+    expect(label.variant).toBe("success");
+  });
+
+  it("singularizes the image-warnings subtitle when there's exactly one", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { imageSummary: { warnings: ["only one"] } },
+    });
+    expect(label.detail).toBe("Completed with 1 image warning");
+  });
+
+  it("does NOT add an image-warnings subtitle when warnings is empty", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { imageSummary: { warnings: [] } },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT add an image-warnings subtitle for legacy completed jobs (no imageSummary)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { model: "claude", tokens: 1234 },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT add an image-warnings subtitle for completed IDEA jobs (image picker doesn't run)", () => {
+    const label = getActiveJobLabel({
+      type: "generate_ideas",
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      // Idea jobs never write imageSummary, but defensively the
+      // label should ignore it even if it were present (the image
+      // picker isn't part of the idea workflow).
+      output: { imageSummary: { warnings: ["should be ignored"] } },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT add an image-warnings subtitle when imageSummary.warnings is malformed (not an array)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { imageSummary: { warnings: "oops" } },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT add an image-warnings subtitle when imageSummary is malformed (not an object)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { imageSummary: 42 },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("subtitles 'WordPress draft send failed' when wpPublish.status === 'failed'", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        wpPublish: { status: "failed", warning: "WordPress rejected request." },
+      },
+    });
+    expect(label.detail).toBe("WordPress draft send failed");
+    expect(label.variant).toBe("success");
+  });
+
+  it("subtitles 'WordPress not connected' when wpPublish.status === 'skipped_no_connection'", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { wpPublish: { status: "skipped_no_connection" } },
+    });
+    expect(label.detail).toBe("WordPress not connected");
+  });
+
+  it("does NOT add a subtitle for wpPublish.status === 'draft_created' (happy path)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        wpPublish: { status: "draft_created", wpPostId: 7, wpPostUrl: null },
+      },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT add a subtitle for wpPublish.status === 'already_sent'", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        wpPublish: { status: "already_sent", wpPostId: 7, wpPostUrl: null },
+      },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("combines image + WordPress warnings into a single 'Completed with warnings' subtitle", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: {
+        imageSummary: { warnings: ["bad pick"] },
+        wpPublish: { status: "failed", warning: "WP rejected." },
+      },
+    });
+    expect(label.detail).toBe("Completed with warnings");
+  });
+
+  it("ignores wpPublish on idea jobs (image picker + WP send don't run for ideas)", () => {
+    const label = getActiveJobLabel({
+      type: "generate_ideas",
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { wpPublish: { status: "failed", warning: "irrelevant" } },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT subtitle when wpPublish is malformed (not an object)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { wpPublish: 42 },
+    });
+    expect(label.detail).toBeNull();
+  });
+
+  it("does NOT subtitle when wpPublish.status is an unknown value (forward-compat)", () => {
+    const label = getActiveJobLabel({
+      type: ARTICLE_TYPE,
+      status: "completed",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { wpPublish: { status: "some_future_status" } },
+    });
+    expect(label.detail).toBeNull();
   });
 
   it("maps failed (no refund) → Generation failed @ 100%", () => {

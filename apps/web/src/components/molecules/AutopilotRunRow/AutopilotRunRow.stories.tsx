@@ -1,10 +1,28 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { AutopilotRunRow } from "./AutopilotRunRow";
+import { AutopilotRunRow, type AutopilotRunRowData } from "./AutopilotRunRow";
 
 const NOW = new Date("2026-05-11T08:30:00Z").toISOString();
 const TWO_MIN_AGO = new Date("2026-05-11T08:28:00Z").toISOString();
 const THIRTY_MIN_AGO = new Date("2026-05-11T08:00:00Z").toISOString();
 const TWO_HOURS_AGO = new Date("2026-05-11T06:30:00Z").toISOString();
+
+// All-zero defaults for the WP-draft counters. Most stories
+// inherit these (so the WP fragment is silent) and only the
+// "WordPress drafts ..." stories override.
+const WP_DRAFT_DEFAULTS = {
+  wpDraftsExpected: 0,
+  wpDraftsCreated: 0,
+  wpDraftsAlreadySent: 0,
+  wpDraftsSkipped: 0,
+  wpDraftsFailed: 0,
+} satisfies Pick<
+  AutopilotRunRowData,
+  | "wpDraftsExpected"
+  | "wpDraftsCreated"
+  | "wpDraftsAlreadySent"
+  | "wpDraftsSkipped"
+  | "wpDraftsFailed"
+>;
 
 const meta = {
   title: "Molecules/AutopilotRunRow",
@@ -41,6 +59,7 @@ export const CompletedScheduled: Story = {
       articlesFailed: 0,
       tokensSpent: 15,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: TWO_MIN_AGO,
       startedAt: TWO_MIN_AGO,
       completedAt: NOW,
@@ -63,6 +82,7 @@ export const CompletedManualWithIdeas: Story = {
       articlesFailed: 0,
       tokensSpent: 1,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: THIRTY_MIN_AGO,
       startedAt: THIRTY_MIN_AGO,
       completedAt: THIRTY_MIN_AGO,
@@ -95,6 +115,7 @@ export const CompletedAutoApprovedHandsOff: Story = {
       articlesFailed: 0,
       tokensSpent: 16,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: TWO_MIN_AGO,
       startedAt: TWO_MIN_AGO,
       completedAt: NOW,
@@ -117,6 +138,7 @@ export const SkippedDailyCap: Story = {
       articlesFailed: 0,
       tokensSpent: 0,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: TWO_HOURS_AGO,
       startedAt: TWO_HOURS_AGO,
       completedAt: TWO_HOURS_AGO,
@@ -140,6 +162,7 @@ export const Failed: Story = {
       articlesFailed: 0,
       tokensSpent: 0,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: THIRTY_MIN_AGO,
       startedAt: THIRTY_MIN_AGO,
       completedAt: THIRTY_MIN_AGO,
@@ -162,9 +185,106 @@ export const Processing: Story = {
       articlesFailed: 0,
       tokensSpent: 10,
       tokensRefunded: 0,
+      ...WP_DRAFT_DEFAULTS,
       createdAt: NOW,
       startedAt: NOW,
       completedAt: null,
+    },
+  },
+};
+
+/**
+ * All autopilot articles cleanly landed in WordPress as drafts —
+ * the happy path. The WP fragment renders muted alongside the
+ * other counters.
+ */
+export const WordPressDraftsAllCreated: Story = {
+  args: {
+    run: {
+      id: "r6",
+      status: "completed",
+      triggerSource: "cron",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { reason: "ok" },
+      ideasGenerated: 3,
+      articlesStarted: 3,
+      articlesCompleted: 3,
+      articlesFailed: 0,
+      tokensSpent: 24,
+      tokensRefunded: 0,
+      wpDraftsExpected: 3,
+      wpDraftsCreated: 3,
+      wpDraftsAlreadySent: 0,
+      wpDraftsSkipped: 0,
+      wpDraftsFailed: 0,
+      createdAt: TWO_MIN_AGO,
+      startedAt: TWO_MIN_AGO,
+      completedAt: NOW,
+    },
+  },
+};
+
+/**
+ * Partial WP-draft success — some drafts went through, some
+ * failed (e.g. WordPress 500ed mid-send). The fragment turns
+ * red and reads "3/5 WordPress drafts created · 2 failed".
+ */
+export const WordPressDraftsPartialFailure: Story = {
+  args: {
+    run: {
+      id: "r7",
+      status: "completed",
+      triggerSource: "cron",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { reason: "ok" },
+      ideasGenerated: 5,
+      articlesStarted: 5,
+      articlesCompleted: 5,
+      articlesFailed: 0,
+      tokensSpent: 40,
+      tokensRefunded: 0,
+      wpDraftsExpected: 5,
+      wpDraftsCreated: 3,
+      wpDraftsAlreadySent: 0,
+      wpDraftsSkipped: 0,
+      wpDraftsFailed: 2,
+      createdAt: TWO_MIN_AGO,
+      startedAt: TWO_MIN_AGO,
+      completedAt: NOW,
+    },
+  },
+};
+
+/**
+ * The blog flipped on autopilot WP-draft sending without first
+ * connecting WordPress. All attempts skipped, no drafts created.
+ * Lead with an actionable "WordPress not connected".
+ */
+export const WordPressNotConnected: Story = {
+  args: {
+    run: {
+      id: "r8",
+      status: "completed",
+      triggerSource: "cron",
+      currentStep: "completed",
+      errorMessage: null,
+      output: { reason: "ok" },
+      ideasGenerated: 2,
+      articlesStarted: 2,
+      articlesCompleted: 2,
+      articlesFailed: 0,
+      tokensSpent: 16,
+      tokensRefunded: 0,
+      wpDraftsExpected: 2,
+      wpDraftsCreated: 0,
+      wpDraftsAlreadySent: 0,
+      wpDraftsSkipped: 2,
+      wpDraftsFailed: 0,
+      createdAt: TWO_MIN_AGO,
+      startedAt: TWO_MIN_AGO,
+      completedAt: NOW,
     },
   },
 };

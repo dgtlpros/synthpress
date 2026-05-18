@@ -47,6 +47,15 @@ export interface BlogSettingsTabsProps {
    * server action.
    */
   onSave: (next: BlogSettingsTabsValue) => void | Promise<void>;
+  /**
+   * `true` iff the blog has all three WordPress credential fields
+   * stored. Computed in the parent server component so we don't
+   * re-query Supabase from the tabs. Today only the Publishing
+   * tab uses this — the "auto-send to WP draft" toggle disables
+   * itself + shows a helper line when the connection is missing.
+   * Defaults to `false` if omitted (legacy callers).
+   */
+  hasWordPressConnection?: boolean;
   className?: string;
 }
 
@@ -69,6 +78,7 @@ export function BlogSettingsTabs({
   error,
   saveSuccess,
   onSave,
+  hasWordPressConnection = false,
   className,
 }: BlogSettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("general");
@@ -165,6 +175,7 @@ export function BlogSettingsTabs({
             <PublishingTab
               value={value.settings.publishing}
               onChange={(p) => patchSettings("publishing", p)}
+              hasWordPressConnection={hasWordPressConnection}
             />
           </TabsContent>
 
@@ -273,19 +284,38 @@ function ToggleField({
   description,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   description: string;
   checked: boolean;
   onChange: (next: boolean) => void;
+  /**
+   * When `true`, the underlying `<Toggle>` is non-interactive (the
+   * browser ignores click + keyboard) and the row dims to half
+   * opacity. Used by the autopilot-WP-draft toggle when the blog
+   * has no WordPress connection — the description text swaps to a
+   * "Connect WordPress first" hint at the call site.
+   */
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4",
+        disabled ? "opacity-60" : null,
+      )}
+    >
       <div className="space-y-0.5">
         <p className="text-sm font-medium text-foreground">{label}</p>
         <p className="text-xs text-muted">{description}</p>
       </div>
-      <Toggle checked={checked} onChange={onChange} aria-label={label} />
+      <Toggle
+        checked={checked}
+        onChange={onChange}
+        aria-label={label}
+        disabled={disabled}
+      />
     </div>
   );
 }
@@ -1130,9 +1160,11 @@ function AutomationTab({
 function PublishingTab({
   value,
   onChange,
+  hasWordPressConnection,
 }: {
   value: BlogSettings["publishing"];
   onChange: (p: Partial<BlogSettings["publishing"]>) => void;
+  hasWordPressConnection: boolean;
 }) {
   return (
     <>
@@ -1223,6 +1255,25 @@ function PublishingTab({
           onChange={(updateExistingPosts) => onChange({ updateExistingPosts })}
         />
       </Section>
+
+      <Section
+        title="Autopilot delivery"
+        description="What should happen with articles after autopilot generates them?"
+      >
+        <ToggleField
+          label="Automatically send autopilot articles to WordPress drafts"
+          description={
+            hasWordPressConnection
+              ? "When enabled, autopilot-generated articles are sent to WordPress as drafts after generation. They will not be published live."
+              : "Connect WordPress before enabling automatic draft sending."
+          }
+          checked={value.autoSendToWordPressDraft}
+          onChange={(autoSendToWordPressDraft) =>
+            onChange({ autoSendToWordPressDraft })
+          }
+          disabled={!hasWordPressConnection}
+        />
+      </Section>
     </>
   );
 }
@@ -1241,6 +1292,35 @@ function MediaTab({
       title="Featured image & media"
       description="What images should ship with each post?"
     >
+      {/* Autopilot image-picker controls live at the top of the
+          tab because they're what users reach for first (and what
+          they want to disable when picks aren't landing on-brand).
+          The legacy AI-image toggles below are kept for the
+          future AI-generated-image PR but don't drive any
+          behavior today. */}
+      <ToggleField
+        label="Automatically choose images for AI-generated articles"
+        description="When enabled, SynthPress picks a featured image and section images from the selected image provider. You can still replace them before publishing."
+        checked={value.autoPickImages}
+        onChange={(autoPickImages) => onChange({ autoPickImages })}
+      />
+      <Field label="Image provider" htmlFor="media-image-provider">
+        <Select
+          id="media-image-provider"
+          value={value.imageProvider}
+          onChange={(e) =>
+            onChange({
+              imageProvider: e.target
+                .value as BlogSettings["media"]["imageProvider"],
+            })
+          }
+          options={[
+            { value: "unsplash", label: "Unsplash" },
+            { value: "none", label: "None (manual picks only)" },
+          ]}
+        />
+      </Field>
+
       <ToggleField
         label="Generate a featured image"
         description="Generate one image per post and attach it as the featured image."

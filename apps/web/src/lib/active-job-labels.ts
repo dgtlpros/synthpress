@@ -67,7 +67,20 @@ const ARTICLE_STEP_MAP: Record<string, StepMapping> = {
   loading_context: { label: "Preparing article…", progressPercent: 15 },
   writing_article: { label: "Writing article…", progressPercent: 45 },
   saving_article: { label: "Saving draft…", progressPercent: 75 },
+  // Image-picker step runs after the draft is saved but before
+  // usage logging. Slotted between `saving_article` (75 %) and
+  // `logging_usage` (90 %) so the progress bar always moves
+  // forward — never backward — as the workflow advances.
+  picking_images: { label: "Choosing images…", progressPercent: 85 },
   logging_usage: { label: "Finalizing…", progressPercent: 90 },
+  // Autopilot-only step (gated on blog settings + WordPress
+  // connection). Slotted between `logging_usage` (90 %) and
+  // `completed` (100 %) so the bar stays monotonic regardless of
+  // whether auto-send runs.
+  sending_to_wordpress: {
+    label: "Sending to WordPress draft…",
+    progressPercent: 95,
+  },
   completed: { label: "Article ready for review", progressPercent: 100 },
 };
 
@@ -102,6 +115,82 @@ function isObjectLike(v: Json | null | undefined): v is Record<string, Json> {
 function readRefunded(output: Json | null | undefined): boolean {
   if (!isObjectLike(output)) return false;
   return output.refunded === true;
+}
+
+/**
+ * Counts the image-picker warnings stored in
+ * `output.imageSummary.warnings` (written by
+ * `runGenerateArticleFromIdeaJob`'s v7 image-picker step). Returns 0
+ * when:
+ *   * `output` is missing / not an object
+ *   * `imageSummary` is missing (legacy jobs from before v7)
+ *   * `warnings` isn't an array (forward-compat against shape drift)
+ *
+ * Used to render the `Completed with N image warning(s)` subtitle
+ * on the active-jobs tray row so users notice incomplete picks
+ * without opening the autopilot run drawer.
+ */
+function readImageWarningCount(output: Json | null | undefined): number {
+  if (!isObjectLike(output)) return 0;
+  const summary = output.imageSummary;
+  if (!isObjectLike(summary)) return 0;
+  const warnings = summary.warnings;
+  if (!Array.isArray(warnings)) return 0;
+  return warnings.length;
+}
+
+/**
+ * Did the autopilot WordPress-draft auto-send step emit a warning?
+ *
+ * Returns the warning kind (`'failed'` | `'skipped_no_connection'`)
+ * when the job's `output.wpPublish` carries a non-success status
+ * that the user should know about. Returns `null` for the normal
+ * success / skip-no-action cases (auto-send not configured, draft
+ * already existed, draft created successfully).
+ *
+ * Same defensive shape-checks as image warnings — legacy jobs
+ * (pre-auto-send) have no `wpPublish` and return `null`.
+ */
+type WpPublishWarning = "failed" | "skipped_no_connection";
+function readWpPublishWarning(
+  output: Json | null | undefined,
+): WpPublishWarning | null {
+  if (!isObjectLike(output)) return null;
+  const wp = output.wpPublish;
+  if (!isObjectLike(wp)) return null;
+  if (wp.status === "failed") return "failed";
+  if (wp.status === "skipped_no_connection") return "skipped_no_connection";
+  return null;
+}
+
+/**
+ * Renders the `Completed with …` subtitle for the active-jobs
+ * tray row. Combines image-picker warnings + WordPress auto-send
+ * warnings into a single line:
+ *
+ *   - Neither → `null` (no subtitle).
+ *   - Only image warnings → `"Completed with N image warning(s)"`.
+ *   - Only WP warning → `"WordPress draft send failed"` /
+ *     `"WordPress not connected"`.
+ *   - Both → `"Completed with warnings"` (keeps the row to one
+ *     line; the autopilot run drawer surfaces the per-warning
+ *     detail when the user wants it).
+ */
+function buildCompletedDetail(
+  imageWarnings: number,
+  wpWarning: WpPublishWarning | null,
+): string | null {
+  const hasImage = imageWarnings > 0;
+  const hasWp = wpWarning !== null;
+  if (!hasImage && !hasWp) return null;
+  if (hasImage && hasWp) return "Completed with warnings";
+  if (hasImage) {
+    return `Completed with ${imageWarnings} image ${imageWarnings === 1 ? "warning" : "warnings"}`;
+  }
+  // wpWarning only.
+  return wpWarning === "failed"
+    ? "WordPress draft send failed"
+    : "WordPress not connected";
 }
 
 function trimDetail(detail: string | null | undefined): string | null {
@@ -162,11 +251,24 @@ export function getActiveJobLabel(input: JobLabelInput): ActiveJobLabel {
   }
 
   if (input.status === "completed") {
+    // For article jobs, surface a soft warning subtitle for the
+    // two post-generation best-effort steps that can each have
+    // their own warnings: image picker + autopilot WP-draft send.
+    // Idea jobs never run either step so always get null detail.
+    const imageWarnings = isIdeaJob(input.type)
+      ? 0
+      : readImageWarningCount(input.output);
+    const wpWarning = isIdeaJob(input.type)
+      ? null
+      : readWpPublishWarning(input.output);
     return {
       label: isIdeaJob(input.type)
         ? "Ideas ready for review"
         : "Article ready for review",
-      detail: null,
+      // Subtitle priority: when BOTH kinds of warning exist, show
+      // the combined "Completed with warnings" so the row stays
+      // one line; otherwise pick the specific message.
+      detail: buildCompletedDetail(imageWarnings, wpWarning),
       variant: "success",
       isActive: false,
       progressPercent: 100,

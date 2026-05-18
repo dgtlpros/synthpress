@@ -576,6 +576,67 @@ describe("BlogSettingsTabs", () => {
     expect(v.settings.publishing.updateExistingPosts).toBe(true);
   });
 
+  it("Publishing tab renders the autopilot WP-draft toggle DISABLED when no WordPress connection", () => {
+    render(
+      <BlogSettingsTabs
+        initialValue={makeValue()}
+        onSave={vi.fn()}
+        // hasWordPressConnection omitted → default false
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
+    const toggle = screen.getByRole("switch", {
+      name: /Automatically send autopilot articles to WordPress drafts/,
+    });
+    expect(toggle).toBeDisabled();
+    expect(
+      screen.getByText(
+        /Connect WordPress before enabling automatic draft sending/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("Publishing tab ENABLES the autopilot WP-draft toggle when WordPress is connected", () => {
+    render(
+      <BlogSettingsTabs
+        initialValue={makeValue()}
+        onSave={vi.fn()}
+        hasWordPressConnection
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
+    const toggle = screen.getByRole("switch", {
+      name: /Automatically send autopilot articles to WordPress drafts/,
+    });
+    expect(toggle).not.toBeDisabled();
+    expect(
+      screen.getByText(
+        /When enabled, autopilot-generated articles are sent to WordPress as drafts/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("toggling auto-send-to-WP ON emits autoSendToWordPressDraft=true in the payload", () => {
+    const onSave = vi.fn();
+    render(
+      <BlogSettingsTabs
+        initialValue={makeValue()}
+        onSave={onSave}
+        hasWordPressConnection
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: /Automatically send autopilot articles to WordPress drafts/,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      onSave.mock.calls[0][0].settings.publishing.autoSendToWordPressDraft,
+    ).toBe(true);
+  });
+
   // ─── Media tab ───────────────────────────────────────────────────────────
 
   it("edits Media tab fields and toggles", () => {
@@ -606,6 +667,48 @@ describe("BlogSettingsTabs", () => {
     expect(v.settings.media.imageSource).toBe("manual_upload");
     expect(v.settings.media.defaultImageDimensions).toBe("800x600");
     expect(v.settings.media.imageStylePrompt).toBe("Soft pastels");
+  });
+
+  it("Media tab renders the autopilot image picker controls with defaults", () => {
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    const autoPick = screen.getByRole("switch", {
+      name: /Automatically choose images for AI-generated articles/,
+    });
+    expect(autoPick).toBeInTheDocument();
+    // Default = on.
+    expect(autoPick).toHaveAttribute("aria-checked", "true");
+    const providerSelect = screen.getByLabelText(
+      /Image provider/,
+    ) as HTMLSelectElement;
+    expect(providerSelect.value).toBe("unsplash");
+    // Provider dropdown only carries the two v1 options.
+    const options = Array.from(providerSelect.options).map((o) => o.value);
+    expect(options).toEqual(["unsplash", "none"]);
+  });
+
+  it("toggling auto-pick OFF + saving emits autoPickImages=false in the payload", () => {
+    const onSave = vi.fn();
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: /Automatically choose images for AI-generated articles/,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onSave.mock.calls[0][0].settings.media.autoPickImages).toBe(false);
+  });
+
+  it("changing the image provider dropdown emits imageProvider=<value>", () => {
+    const onSave = vi.fn();
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    fireEvent.change(screen.getByLabelText(/Image provider/), {
+      target: { value: "none" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onSave.mock.calls[0][0].settings.media.imageProvider).toBe("none");
   });
 
   // ─── Advanced tab ────────────────────────────────────────────────────────

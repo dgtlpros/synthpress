@@ -208,6 +208,79 @@ describe("loadBlogSettings", () => {
     expect(DEFAULT_BLOG_SETTINGS.automation.pausedMessage).toBeNull();
   });
 
+  it("defaults autopilot image picker to ON with Unsplash", () => {
+    expect(DEFAULT_BLOG_SETTINGS.media.autoPickImages).toBe(true);
+    expect(DEFAULT_BLOG_SETTINGS.media.imageProvider).toBe("unsplash");
+  });
+
+  it("defaults autopilot WordPress draft send to OFF (opt-in posture)", () => {
+    expect(DEFAULT_BLOG_SETTINGS.publishing.autoSendToWordPressDraft).toBe(
+      false,
+    );
+  });
+
+  it("normalizes valid publishing.autoSendToWordPressDraft", () => {
+    const out = loadBlogSettings({
+      publishing: { autoSendToWordPressDraft: true },
+    });
+    expect(out.publishing.autoSendToWordPressDraft).toBe(true);
+  });
+
+  it("falls back to default when publishing.autoSendToWordPressDraft is the wrong type", () => {
+    const out = loadBlogSettings({
+      publishing: { autoSendToWordPressDraft: "yes" },
+    } as never);
+    expect(out.publishing.autoSendToWordPressDraft).toBe(false);
+  });
+
+  it("preserves the rest of publishing when only autoSendToWordPressDraft is supplied", () => {
+    const out = loadBlogSettings({
+      publishing: { autoSendToWordPressDraft: true },
+    });
+    expect(out.publishing.autoSendToWordPressDraft).toBe(true);
+    expect(out.publishing.defaultDestination).toBe(
+      DEFAULT_BLOG_SETTINGS.publishing.defaultDestination,
+    );
+    expect(out.publishing.uploadFeaturedImage).toBe(
+      DEFAULT_BLOG_SETTINGS.publishing.uploadFeaturedImage,
+    );
+  });
+
+  it("normalizes valid media.autoPickImages + media.imageProvider", () => {
+    const out = loadBlogSettings({
+      media: { autoPickImages: false, imageProvider: "none" },
+    });
+    expect(out.media.autoPickImages).toBe(false);
+    expect(out.media.imageProvider).toBe("none");
+  });
+
+  it("falls back to defaults when media.imageProvider is an unknown value", () => {
+    const out = loadBlogSettings({
+      media: { imageProvider: "midjourney" },
+    });
+    expect(out.media.imageProvider).toBe("unsplash");
+  });
+
+  it("falls back to defaults when media.autoPickImages is the wrong type", () => {
+    const out = loadBlogSettings({
+      media: { autoPickImages: "yes" },
+    } as never);
+    expect(out.media.autoPickImages).toBe(true);
+  });
+
+  it("preserves the rest of media when only the new keys are supplied", () => {
+    const out = loadBlogSettings({
+      media: { autoPickImages: false },
+    });
+    expect(out.media.autoPickImages).toBe(false);
+    // Other keys keep their defaults.
+    expect(out.media.imageProvider).toBe(DEFAULT_BLOG_SETTINGS.media.imageProvider);
+    expect(out.media.imageSource).toBe(DEFAULT_BLOG_SETTINGS.media.imageSource);
+    expect(out.media.generateAltText).toBe(
+      DEFAULT_BLOG_SETTINGS.media.generateAltText,
+    );
+  });
+
   it("preserves explicit null pause-metadata values (means: not paused)", () => {
     const out = loadBlogSettings({
       automation: {

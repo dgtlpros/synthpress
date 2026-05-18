@@ -241,6 +241,33 @@ async function loadBlogConnection(
   return data ?? null;
 }
 
+/**
+ * Returns `true` iff the blog has all three WordPress credential
+ * fields stored AND non-empty (after trim). Used by the autopilot
+ * draft-send gate as a cheap pre-check: avoids loading + parsing
+ * the article + body just to discover there's nothing to publish
+ * against. The publish service itself also throws
+ * `no_wp_connection` in this case — this helper just lets callers
+ * branch earlier with a typed result.
+ *
+ * Reads use the supplied client (so RLS-bound page reads work) or
+ * fall back to the admin client (so the workflow path can use a
+ * service-role connection).
+ */
+export async function hasBlogWordPressConnection(
+  blogId: string,
+  client?: Client,
+): Promise<boolean> {
+  const supabase = client ?? createAdminClient();
+  const row = await loadBlogConnection(blogId, supabase);
+  if (!row) return false;
+  return Boolean(
+    row.wp_url?.trim() &&
+      row.wp_username?.trim() &&
+      row.wp_app_password?.trim(),
+  );
+}
+
 interface ArticleForPublish {
   id: string;
   title: string;

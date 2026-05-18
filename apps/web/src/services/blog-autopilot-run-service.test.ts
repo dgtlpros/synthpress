@@ -10,10 +10,13 @@ import {
   BLOG_AUTOPILOT_RUN_STEPS,
   BLOG_AUTOPILOT_RUN_TRIGGER_SOURCES,
   completeBlogAutopilotRun,
+  countWordPressDraftOutcomes,
   createBlogAutopilotRun,
   failBlogAutopilotRun,
   getBlogAutopilotRunDetail,
   listBlogAutopilotRunsForBlog,
+  setBlogAutopilotRunWordPressDraftCounters,
+  syncAutopilotRunWordPressDraftCounters,
   updateBlogAutopilotRunStatus,
 } from "./blog-autopilot-run-service";
 
@@ -1285,5 +1288,383 @@ describe("getBlogAutopilotRunDetail", () => {
     expect(out!.jobs).toEqual([]);
     expect(out!.articles).toEqual([]);
     expect(out!.ideas).toEqual([]);
+  });
+});
+
+// ============================================================================
+// WordPress draft counters (v11)
+// ============================================================================
+
+describe("countWordPressDraftOutcomes", () => {
+  it("returns zero counts for an empty list", () => {
+    expect(countWordPressDraftOutcomes([])).toEqual({
+      expected: 0,
+      created: 0,
+      alreadySent: 0,
+      skipped: 0,
+      failed: 0,
+    });
+  });
+
+  it("tallies every known status into the right bucket", () => {
+    const counts = countWordPressDraftOutcomes([
+      { output: { wpPublish: { status: "draft_created" } } },
+      { output: { wpPublish: { status: "draft_created" } } },
+      { output: { wpPublish: { status: "already_sent" } } },
+      { output: { wpPublish: { status: "skipped_no_connection" } } },
+      { output: { wpPublish: { status: "failed" } } },
+    ]);
+    expect(counts).toEqual({
+      expected: 5,
+      created: 2,
+      alreadySent: 1,
+      skipped: 1,
+      failed: 1,
+    });
+  });
+
+  it("ignores rows whose output is null (legacy / manual jobs)", () => {
+    const counts = countWordPressDraftOutcomes([
+      { output: null },
+      { output: { wpPublish: { status: "draft_created" } } },
+    ]);
+    expect(counts.expected).toBe(1);
+    expect(counts.created).toBe(1);
+  });
+
+  it("ignores rows whose output is not an object (forward-compat)", () => {
+    const counts = countWordPressDraftOutcomes([
+      { output: "oops" as never },
+      { output: 42 as never },
+      { output: [1, 2, 3] as never },
+      { output: { wpPublish: { status: "draft_created" } } },
+    ]);
+    expect(counts.created).toBe(1);
+    expect(counts.expected).toBe(1);
+  });
+
+  it("ignores rows whose wpPublish is missing (e.g. picker-only output, gate-skip cases)", () => {
+    const counts = countWordPressDraftOutcomes([
+      {
+        output: {
+          model: "claude-x",
+          imageSummary: { warnings: [] },
+        },
+      },
+    ]);
+    expect(counts).toEqual({
+      expected: 0,
+      created: 0,
+      alreadySent: 0,
+      skipped: 0,
+      failed: 0,
+    });
+  });
+
+  it("ignores rows whose wpPublish is malformed (not an object / array / wrong status type)", () => {
+    const counts = countWordPressDraftOutcomes([
+      { output: { wpPublish: null } },
+      { output: { wpPublish: [1, 2] } },
+      { output: { wpPublish: { status: 42 } } },
+      { output: { wpPublish: { status: "draft_created" } } },
+    ]);
+    expect(counts.created).toBe(1);
+    expect(counts.expected).toBe(1);
+  });
+
+  it("ignores unknown wpPublish.status values (silent forward-compat for v12+ statuses)", () => {
+    const counts = countWordPressDraftOutcomes([
+      { output: { wpPublish: { status: "some_future_status" } } },
+      { output: { wpPublish: { status: "draft_created" } } },
+    ]);
+    expect(counts.created).toBe(1);
+    expect(counts.expected).toBe(1);
+  });
+});
+
+/**
+ * Builds a client whose chain resolves via `then` (not `maybeSingle`
+ * / `limit`). The WP-draft counter helpers do `await
+ * supabase.from(...).update(...).eq(...)` — they don't terminate
+ * at `.maybeSingle()` or `.limit()`, so the chain itself needs to
+ * be thenable. Used by the `setBlogAutopilotRunWordPressDraftCounters`
+ * tests below.
+ */
+function makeUpdateClient(result: ChainResult<unknown>): MockClient {
+  const chain = makeChain(result);
+  (chain as unknown as PromiseLike<ChainResult<unknown>>).then = ((
+    onFulfilled: ((value: ChainResult<unknown>) => unknown) | null | undefined,
+    onRejected: ((reason: unknown) => unknown) | null | undefined,
+  ) => Promise.resolve(result).then(onFulfilled, onRejected)) as never;
+  const client = {
+    from: vi.fn(() => chain),
+    __chain: chain,
+  };
+  return client as unknown as MockClient;
+}
+
+describe("setBlogAutopilotRunWordPressDraftCounters", () => {
+  it("UPDATEs the wp_drafts_* columns to absolute values", async () => {
+    const client = makeUpdateClient({ data: null, error: null });
+    await setBlogAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      counters: {
+        expected: 5,
+        created: 3,
+        alreadySent: 1,
+        skipped: 0,
+        failed: 1,
+      },
+      client: client as never,
+    });
+    expect(client.__chain.update).toHaveBeenCalledWith({
+      wp_drafts_expected: 5,
+      wp_drafts_created: 3,
+      wp_drafts_already_sent: 1,
+      wp_drafts_skipped: 0,
+      wp_drafts_failed: 1,
+    });
+    expect(client.__chain.eq).toHaveBeenCalledWith("id", "run-1");
+  });
+
+  it("propagates Supabase UPDATE errors as-is", async () => {
+    const client = makeUpdateClient({
+      data: null,
+      error: { message: "denied" },
+    });
+    await expect(
+      setBlogAutopilotRunWordPressDraftCounters({
+        runId: "run-1",
+        counters: {
+          expected: 0,
+          created: 0,
+          alreadySent: 0,
+          skipped: 0,
+          failed: 0,
+        },
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "denied" });
+  });
+
+  it("falls back to the admin client when none is supplied", async () => {
+    const client = makeUpdateClient({ data: null, error: null });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+    await setBlogAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      counters: {
+        expected: 0,
+        created: 0,
+        alreadySent: 0,
+        skipped: 0,
+        failed: 0,
+      },
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+});
+
+describe("syncAutopilotRunWordPressDraftCounters", () => {
+  /**
+   * Two-table mock: `article_jobs` resolves the SELECT for jobs;
+   * `blog_autopilot_runs` resolves the UPDATE write. Each
+   * `from(table)` call gets its own chain so the SELECT's
+   * terminal (the chain's then-able shape) doesn't collide with
+   * the UPDATE's terminal.
+   */
+  function makeTwoTableClient(opts: {
+    jobs: ChainResult<unknown>;
+    update: ChainResult<unknown>;
+  }) {
+    const jobsChain = makeChain(opts.jobs);
+    const runUpdateChain = makeChain(opts.update);
+    // Both chains terminate via `await chain` (no .single / .maybeSingle).
+    type ThenCb = (
+      onFulfilled: ((value: ChainResult<unknown>) => unknown) | null | undefined,
+      onRejected: ((reason: unknown) => unknown) | null | undefined,
+    ) => unknown;
+    (jobsChain as unknown as PromiseLike<unknown>).then = ((
+      onFulfilled,
+      onRejected,
+    ) =>
+      Promise.resolve(opts.jobs).then(onFulfilled, onRejected)) as ThenCb as never;
+    (runUpdateChain as unknown as PromiseLike<unknown>).then = ((
+      onFulfilled,
+      onRejected,
+    ) =>
+      Promise.resolve(opts.update).then(
+        onFulfilled,
+        onRejected,
+      )) as ThenCb as never;
+    return {
+      from: vi.fn((table: string) => {
+        if (table === "article_jobs") return jobsChain;
+        if (table === "blog_autopilot_runs") return runUpdateChain;
+        throw new Error(`unexpected table: ${table}`);
+      }),
+      __jobsChain: jobsChain,
+      __runChain: runUpdateChain,
+    };
+  }
+
+  it("reads jobs filtered by blog_id + input->>autopilotRunId, tallies, writes absolute counters, returns them", async () => {
+    const client = makeTwoTableClient({
+      jobs: {
+        data: [
+          { output: { wpPublish: { status: "draft_created" } } },
+          { output: { wpPublish: { status: "draft_created" } } },
+          { output: { wpPublish: { status: "already_sent" } } },
+          { output: { wpPublish: { status: "skipped_no_connection" } } },
+          { output: { wpPublish: { status: "failed" } } },
+          { output: { model: "claude" } }, // no wpPublish → ignored
+        ],
+        error: null,
+      },
+      update: { data: null, error: null },
+    });
+
+    const counters = await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(counters).toEqual({
+      expected: 5,
+      created: 2,
+      alreadySent: 1,
+      skipped: 1,
+      failed: 1,
+    });
+
+    // Filter args.
+    expect(client.__jobsChain.eq).toHaveBeenCalledWith("blog_id", "blog-1");
+    expect(client.__jobsChain.eq).toHaveBeenCalledWith(
+      "input->>autopilotRunId",
+      "run-1",
+    );
+
+    // Absolute write hit blog_autopilot_runs with the right shape.
+    expect(client.__runChain.update).toHaveBeenCalledWith({
+      wp_drafts_expected: 5,
+      wp_drafts_created: 2,
+      wp_drafts_already_sent: 1,
+      wp_drafts_skipped: 1,
+      wp_drafts_failed: 1,
+    });
+    expect(client.__runChain.eq).toHaveBeenCalledWith("id", "run-1");
+  });
+
+  it("treats a null PostgREST data array as empty (defensive) + still writes zero counters", async () => {
+    // PostgREST normally returns `[]` for an empty SELECT, but
+    // the `?? []` guard means a stray `null` won't blow up the
+    // counter sync.
+    const client = makeTwoTableClient({
+      jobs: { data: null, error: null },
+      update: { data: null, error: null },
+    });
+
+    const counters = await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(counters).toEqual({
+      expected: 0,
+      created: 0,
+      alreadySent: 0,
+      skipped: 0,
+      failed: 0,
+    });
+  });
+
+  it("writes all zeros + returns zero counters when no jobs exist", async () => {
+    const client = makeTwoTableClient({
+      jobs: { data: [], error: null },
+      update: { data: null, error: null },
+    });
+
+    const counters = await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(counters).toEqual({
+      expected: 0,
+      created: 0,
+      alreadySent: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(client.__runChain.update).toHaveBeenCalledWith({
+      wp_drafts_expected: 0,
+      wp_drafts_created: 0,
+      wp_drafts_already_sent: 0,
+      wp_drafts_skipped: 0,
+      wp_drafts_failed: 0,
+    });
+  });
+
+  it("is idempotent — same job set → same counters, even when called multiple times", async () => {
+    const sameJobs = [
+      { output: { wpPublish: { status: "draft_created" } } },
+      { output: { wpPublish: { status: "failed" } } },
+    ];
+    const client = makeTwoTableClient({
+      jobs: { data: sameJobs, error: null },
+      update: { data: null, error: null },
+    });
+
+    const first = await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+    const second = await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+    expect(first).toEqual(second);
+    expect(first).toEqual({
+      expected: 2,
+      created: 1,
+      alreadySent: 0,
+      skipped: 0,
+      failed: 1,
+    });
+  });
+
+  it("propagates jobs-query errors as-is", async () => {
+    const client = makeTwoTableClient({
+      jobs: { data: null, error: { message: "jobs query broke" } },
+      update: { data: null, error: null },
+    });
+
+    await expect(
+      syncAutopilotRunWordPressDraftCounters({
+        runId: "run-1",
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "jobs query broke" });
+    // No write attempted.
+    expect(client.__runChain.update).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the admin client when none is supplied", async () => {
+    const client = makeTwoTableClient({
+      jobs: { data: [], error: null },
+      update: { data: null, error: null },
+    });
+    mockedCreateAdmin.mockReturnValueOnce(client as never);
+
+    await syncAutopilotRunWordPressDraftCounters({
+      runId: "run-1",
+      blogId: "blog-1",
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
   });
 });

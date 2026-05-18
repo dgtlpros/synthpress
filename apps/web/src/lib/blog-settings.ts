@@ -52,6 +52,18 @@ export type BlogImageSource =
   | "manual_upload"
   | "none";
 
+/**
+ * Which image provider the autopilot picker uses for newly-generated
+ * articles. Distinct from `BlogImageSource` (which is legacy / for
+ * the old "where does the bytes come from" axis) — this enum is the
+ * id passed to `getImageProvider(...)` in the image-provider
+ * registry. Today `'unsplash'` is the only real adapter; `'none'`
+ * disables automatic picking entirely (users still pick manually
+ * from the editor). New providers slot in by adding a value here +
+ * a registry entry — no other call sites change.
+ */
+export type BlogImageProvider = "unsplash" | "none";
+
 export type BlogAutomationMode = "manual" | "autopilot";
 
 export type BlogContentFreshness =
@@ -166,6 +178,23 @@ export interface BlogPublishingSettings {
   defaultAuthor: string;
   uploadFeaturedImage: boolean;
   updateExistingPosts: boolean;
+  /**
+   * When `true` AND all other autopilot gates pass
+   * (`automation.mode === 'autopilot'`,
+   * `automation.enabled === true`,
+   * `automation.requireReview === false`,
+   * `triggerSource === 'autopilot'`, WordPress connection is
+   * present), the article-generation workflow sends the saved
+   * article to WordPress as a draft right after image picking.
+   * Default: `false` — safe posture so existing autopilot blogs
+   * don't surprise users by publishing on their behalf.
+   *
+   * Live auto-publish is intentionally NOT exposed; this v1
+   * always sends as a draft. WordPress publish failures never
+   * fail the article-generation job — they emit a warning in
+   * `article_jobs.output.wpPublish` instead.
+   */
+  autoSendToWordPressDraft: boolean;
 }
 
 export interface BlogMediaSettings {
@@ -175,6 +204,20 @@ export interface BlogMediaSettings {
   generateAltText: boolean;
   defaultImageDimensions: string;
   includeInlineImages: boolean;
+  /**
+   * Run the autopilot image picker after every AI-generated article.
+   * When `false`, the article lands `ready_for_review` without
+   * automatic picks — users can still pick images by hand in the
+   * editor. Default: `true`.
+   */
+  autoPickImages: boolean;
+  /**
+   * Which provider the autopilot picker queries. `'none'` is
+   * functionally identical to `autoPickImages = false` but kept as
+   * a separate axis so users can leave auto-pick on while they
+   * shop for a different provider. Default: `'unsplash'`.
+   */
+  imageProvider: BlogImageProvider;
 }
 
 export interface BlogAdvancedSettings {
@@ -268,6 +311,10 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
     defaultAuthor: "",
     uploadFeaturedImage: true,
     updateExistingPosts: false,
+    // Off by default: opt-in posture for auto-send so existing
+    // autopilot blogs don't ship drafts to WordPress without
+    // explicit consent.
+    autoSendToWordPressDraft: false,
   },
   media: {
     generateFeaturedImage: false,
@@ -276,6 +323,11 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
     generateAltText: true,
     defaultImageDimensions: "1200x630",
     includeInlineImages: false,
+    // Autopilot picker defaults on with Unsplash. Existing blogs
+    // (rows without these keys in `settings.media`) inherit the
+    // same posture via the normalizer's fallback.
+    autoPickImages: true,
+    imageProvider: "unsplash",
   },
   advanced: {
     customSystemPrompt: "",
@@ -420,6 +472,10 @@ const IMAGE_SOURCES = [
   "manual_upload",
   "none",
 ] as const satisfies readonly BlogImageSource[];
+const IMAGE_PROVIDERS = [
+  "unsplash",
+  "none",
+] as const satisfies readonly BlogImageProvider[];
 const AUTOMATION_MODES = [
   "manual",
   "autopilot",
@@ -676,6 +732,11 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         "updateExistingPosts",
         d.publishing.updateExistingPosts,
       ),
+      autoSendToWordPressDraft: pickBoolean(
+        publishing,
+        "autoSendToWordPressDraft",
+        d.publishing.autoSendToWordPressDraft,
+      ),
     },
     media: {
       generateFeaturedImage: pickBoolean(
@@ -708,6 +769,17 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         media,
         "includeInlineImages",
         d.media.includeInlineImages,
+      ),
+      autoPickImages: pickBoolean(
+        media,
+        "autoPickImages",
+        d.media.autoPickImages,
+      ),
+      imageProvider: pickEnum(
+        media,
+        "imageProvider",
+        IMAGE_PROVIDERS,
+        d.media.imageProvider,
       ),
     },
     advanced: {

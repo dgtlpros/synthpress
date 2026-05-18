@@ -659,3 +659,155 @@ function toIsoOrNull(value: Date | string | null | undefined): string | null {
   if (value instanceof Date) return value.toISOString();
   return value;
 }
+
+// ============================================================================
+// WordPress draft counters (v11)
+// ============================================================================
+
+/**
+ * Absolute counters written by `syncAutopilotRunWordPressDraftCounters`
+ * onto the `wp_drafts_*` columns of `blog_autopilot_runs`. Mirrors
+ * the column names + the per-job `output.wpPublish.status` taxonomy
+ * (`draft_created` / `already_sent` / `skipped_no_connection` /
+ * `failed`). `expected` is the sum of the four — derived rather
+ * than predicted so the rollup stays purely post-hoc + idempotent.
+ */
+export interface AutopilotRunWordPressDraftCounters {
+  expected: number;
+  created: number;
+  alreadySent: number;
+  skipped: number;
+  failed: number;
+}
+
+/**
+ * Writes absolute WP-draft counter values to the run row. Unlike
+ * the additive `countersDelta` path used by the scheduler, this is
+ * a single-shot UPDATE — recomputing the counts and overwriting is
+ * what makes the sync helper idempotent. Useful when called
+ * directly from a future admin "reconcile" tool too.
+ */
+export async function setBlogAutopilotRunWordPressDraftCounters(input: {
+  runId: string;
+  counters: AutopilotRunWordPressDraftCounters;
+  client?: Client;
+}): Promise<void> {
+  const supabase = input.client ?? createAdminClient();
+  const update: TablesUpdate<"blog_autopilot_runs"> = {
+    wp_drafts_expected: input.counters.expected,
+    wp_drafts_created: input.counters.created,
+    wp_drafts_already_sent: input.counters.alreadySent,
+    wp_drafts_skipped: input.counters.skipped,
+    wp_drafts_failed: input.counters.failed,
+  };
+  const { error } = await supabase
+    .from("blog_autopilot_runs")
+    .update(update)
+    .eq("id", input.runId);
+  if (error) throw error;
+}
+
+/**
+ * Recomputes WP-draft counters for `runId` by walking every
+ * article job whose `input.autopilotRunId === runId` and reading
+ * `output.wpPublish.status` defensively. Writes the result via
+ * {@link setBlogAutopilotRunWordPressDraftCounters}.
+ *
+ * Idempotent — recomputing always produces the same answer for a
+ * given snapshot of `article_jobs.output`. Safe to call from:
+ *   * `runGenerateArticleFromIdeaJob` after each job completes
+ *     (the typical hook — keeps counters fresh as autopilot
+ *     finishes each draft send).
+ *   * A future reconcile job after a workflow failure / restart.
+ *
+ * Robust to:
+ *   * `output` not being an object (legacy / manual jobs).
+ *   * `wpPublish` missing entirely (jobs whose gates didn't apply).
+ *   * `wpPublish.status` being unknown (forward-compat against
+ *     a future status added in v12+ — it's silently ignored).
+ *   * Job rows whose `input.autopilotRunId` is wrong-type / missing.
+ *
+ * Returns the computed counters so callers can log them /
+ * surface them without re-reading.
+ */
+export async function syncAutopilotRunWordPressDraftCounters(input: {
+  runId: string;
+  blogId: string;
+  client?: Client;
+}): Promise<AutopilotRunWordPressDraftCounters> {
+  const supabase = input.client ?? createAdminClient();
+
+  // Pull every article job linked to this run. We filter on the
+  // jsonb path because the scheduler stamps the run id under
+  // `input.autopilotRunId` (camelCase) — the same key
+  // `getBlogAutopilotRunDetail` reads from.
+  //
+  // `blog_id` is in the WHERE clause as a defense-in-depth check
+  // — RLS already restricts service-role reads to nothing-cross-
+  // tenant, but pinning the blog stops a stray test fixture from
+  // double-counting another blog's jobs.
+  const { data: jobRows, error } = await supabase
+    .from("article_jobs")
+    .select("output")
+    .eq("blog_id", input.blogId)
+    .eq("input->>autopilotRunId", input.runId);
+  if (error) throw error;
+
+  const counters = countWordPressDraftOutcomes(jobRows ?? []);
+  await setBlogAutopilotRunWordPressDraftCounters({
+    runId: input.runId,
+    counters,
+    client: supabase,
+  });
+  return counters;
+}
+
+/**
+ * Pure aggregator — pulled out so the sync helper's DB plumbing
+ * + the counting logic can be tested independently. Walks a list
+ * of `{output: Json | null}` rows and tallies known
+ * `wpPublish.status` values. Unknown / missing entries are
+ * silently ignored.
+ *
+ * Exported for tests + future admin tooling; not part of the
+ * service's public "do work" surface.
+ */
+export function countWordPressDraftOutcomes(
+  rows: Array<{ output: Json | null }>,
+): AutopilotRunWordPressDraftCounters {
+  let created = 0;
+  let alreadySent = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const status = readWpPublishStatus(row.output);
+    if (status === "draft_created") created += 1;
+    else if (status === "already_sent") alreadySent += 1;
+    else if (status === "skipped_no_connection") skipped += 1;
+    else if (status === "failed") failed += 1;
+    // Unknown / missing → silently ignored.
+  }
+  return {
+    expected: created + alreadySent + skipped + failed,
+    created,
+    alreadySent,
+    skipped,
+    failed,
+  };
+}
+
+/**
+ * Defensive read of `output.wpPublish.status`. Returns `null`
+ * when the jsonb path doesn't lead to a known status string —
+ * keeps the caller pure (string-only switch) and shields against
+ * malformed legacy rows.
+ */
+function readWpPublishStatus(output: Json | null): string | null {
+  if (output === null || typeof output !== "object" || Array.isArray(output)) {
+    return null;
+  }
+  const wp = (output as Record<string, Json>).wpPublish;
+  if (wp === null || typeof wp !== "object" || Array.isArray(wp)) return null;
+  const status = (wp as Record<string, Json>).status;
+  return typeof status === "string" ? status : null;
+}

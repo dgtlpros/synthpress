@@ -34,7 +34,7 @@ export default async function BlogSettingsPage({
   const { data: blog } = await supabase
     .from("blogs")
     .select(
-      "id, name, description, niche, keywords, ai_prompt_template, settings",
+      "id, name, description, niche, keywords, ai_prompt_template, settings, wp_url, wp_username, wp_app_password",
     )
     .eq("id", blogId)
     .eq("project_id", projectId)
@@ -43,6 +43,15 @@ export default async function BlogSettingsPage({
   if (!blog) notFound();
 
   const settings = loadBlogSettings(blog.settings);
+  // Derive the WordPress connection presence boolean here (server
+  // component) so the Publishing tab can gate its "auto-send to WP
+  // draft" toggle without re-querying Supabase from the client. We
+  // never expose the password — only the boolean.
+  const hasWordPressConnection = Boolean(
+    blog.wp_url?.trim() &&
+      blog.wp_username?.trim() &&
+      blog.wp_app_password?.trim(),
+  );
   const autopilotEnabled =
     settings.automation.mode === "autopilot" && settings.automation.enabled;
 
@@ -70,6 +79,11 @@ export default async function BlogSettingsPage({
     articlesFailed: row.articles_failed,
     tokensSpent: row.tokens_spent,
     tokensRefunded: row.tokens_refunded,
+    wpDraftsExpected: row.wp_drafts_expected,
+    wpDraftsCreated: row.wp_drafts_created,
+    wpDraftsAlreadySent: row.wp_drafts_already_sent,
+    wpDraftsSkipped: row.wp_drafts_skipped,
+    wpDraftsFailed: row.wp_drafts_failed,
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -93,6 +107,7 @@ export default async function BlogSettingsPage({
         projectId={projectId}
         blogId={blogId}
         initialValue={initialValue}
+        hasWordPressConnection={hasWordPressConnection}
       />
 
       <BlogAutopilotPanelConnector

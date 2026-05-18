@@ -24,6 +24,17 @@ import {
   generateIdeas,
 } from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
+import {
+  pickImagesForArticle,
+  type PickImagesForArticleResult,
+} from "./article-image-picker-service";
+import {
+  hasBlogWordPressConnection,
+  PublishArticleError,
+  publishArticleToWordPressDraft,
+} from "./wordpress-publish-service";
+import { PUBLISH_ARTICLE_ERROR_COPY } from "@/lib/wordpress-publish-error-copy";
+import { syncAutopilotRunWordPressDraftCounters } from "./blog-autopilot-run-service";
 
 /**
  * Reusable building blocks for the AI generation pipeline.
@@ -81,7 +92,9 @@ export const ARTICLE_JOB_STEPS = [
   "generating_outline",
   "writing_article",
   "saving_article",
+  "picking_images",
   "logging_usage",
+  "sending_to_wordpress",
   "completed",
 ] as const;
 export type ArticleJobStep = (typeof ARTICLE_JOB_STEPS)[number];
@@ -1696,6 +1709,65 @@ export async function runGenerateArticleFromIdeaJob(
       .eq("id", input.articleId);
     if (updateArticleErr) throw updateArticleErr;
 
+    // Best-effort image selection. Runs AFTER the draft is saved
+    // (so the picker can read the freshly-written body for H2
+    // extraction) and BEFORE `logging_usage` (so the image
+    // summary lands in the same `output` payload as token usage).
+    //
+    // CRITICAL: `pickImagesForArticle` is documented as
+    // never-throws. The outer try wraps the helper anyway so a
+    // future regression can't accidentally pull the article
+    // generation into the refund branch — image-picker failures
+    // are pure UX nits, not billing events. Tokens were consumed
+    // for the LLM work, which already succeeded; refunding on an
+    // Unsplash rate-limit would be the wrong trade-off.
+    //
+    // Gate on the blog's `settings.media.autoPickImages` +
+    // `settings.media.imageProvider` (loaded into `ctx.settings`
+    // up top via `getBlogGenerationContext`). Either OFF / `none`
+    // short-circuits to a synthetic empty summary so the
+    // completion `output` still carries a structured
+    // `imageSummary` field (consumers + future debug tooling
+    // can rely on its presence regardless of the setting).
+    await updateArticleJobStatus({
+      jobId: input.jobId,
+      currentStep: "picking_images",
+      client: supabase,
+    });
+    const mediaSettings = ctx.settings.media;
+    const autopilotImagesEnabled =
+      mediaSettings.autoPickImages && mediaSettings.imageProvider !== "none";
+    let imageSummary: PickImagesForArticleResult;
+    if (!autopilotImagesEnabled) {
+      imageSummary = {
+        providerId: mediaSettings.imageProvider,
+        featuredSelected: false,
+        sectionsFound: 0,
+        sectionImagesSelected: 0,
+        warnings: [],
+      };
+    } else {
+      try {
+        imageSummary = await pickImagesForArticle({
+          articleId: input.articleId,
+          blogId: input.blogId,
+          providerId: mediaSettings.imageProvider,
+          client: supabase,
+        });
+        /* v8 ignore start -- defensive: pickImagesForArticle never throws by contract; this catch is a future-regression guard so an image bug can't accidentally refund tokens */
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        imageSummary = {
+          providerId: mediaSettings.imageProvider,
+          featuredSelected: false,
+          sectionsFound: 0,
+          sectionImagesSelected: 0,
+          warnings: [`Image selection threw unexpectedly: ${message}`],
+        };
+      }
+      /* v8 ignore stop */
+    }
+
     await updateArticleJobStatus({
       jobId: input.jobId,
       currentStep: "logging_usage",
@@ -1722,6 +1794,25 @@ export async function runGenerateArticleFromIdeaJob(
       client: supabase,
     });
 
+    // Best-effort autopilot WordPress draft auto-send. Runs AFTER
+    // image picking + usage logging so an auto-send failure can't
+    // leave token usage un-logged. Gated on `triggerSource`,
+    // automation/publishing settings, and the presence of a
+    // WordPress connection — see `maybeSendAutopilotWordPressDraft`
+    // for the full gate matrix.
+    //
+    // CRITICAL: like the image picker, this step never fails the
+    // article job. WordPress can be unreachable, rate-limited, or
+    // the user might delete the credentials between cron runs —
+    // none of those should refund tokens or roll back the saved
+    // article. The helper always returns a structured result that
+    // becomes `output.wpPublish`.
+    const wpPublishResult = await maybeSendAutopilotWordPressDraft({
+      input,
+      ctx,
+      supabase,
+    });
+
     await completeArticleJob({
       jobId: input.jobId,
       articleId: input.articleId,
@@ -1734,9 +1825,50 @@ export async function runGenerateArticleFromIdeaJob(
         cachedWriteTokens: draft.cachedWriteTokens,
         wordCount: draft.wordCount,
         creditsUsed,
+        // Image-picker summary lives in the same `output` payload
+        // so a future support-debug surface (or autopilot run
+        // detail drawer) can show which images were picked vs
+        // skipped without a second query.
+        imageSummary: {
+          providerId: imageSummary.providerId,
+          featuredSelected: imageSummary.featuredSelected,
+          sectionsFound: imageSummary.sectionsFound,
+          sectionImagesSelected: imageSummary.sectionImagesSelected,
+          warnings: imageSummary.warnings,
+        },
+        // Autopilot WP-draft auto-send result (or `undefined` when
+        // no auto-send was attempted — manual trigger, requireReview
+        // on, or feature flag off). The drawer + tray subtitle
+        // helpers shape-check `output.wpPublish` defensively, so
+        // omitting the key on the "didn't try" path is fine.
+        ...(wpPublishResult ? { wpPublish: wpPublishResult } : {}),
       },
       client: supabase,
     });
+
+    // Best-effort: roll the per-job `wpPublish` outcome up to the
+    // `blog_autopilot_runs.wp_drafts_*` counters so the recent-
+    // runs panel + detail drawer can show "X drafts created · Y
+    // failed" without recomputing on every render. The helper is
+    // absolute-write + idempotent — concurrent autopilot jobs
+    // each running this sync will converge on the same totals.
+    //
+    // CRITICAL: failure here NEVER fails the article job. The
+    // article generation + token consumption + WordPress publish
+    // have all already settled by this point; a counter-sync miss
+    // is a UX nit, not a billing event. Wrapped in try/catch so a
+    // future regression in the sync helper can't drag the
+    // article job into the outer refund branch.
+    const autopilotRunId = readAutopilotRunIdFromJobInputPatch(
+      input.jobInputPatch,
+    );
+    if (autopilotRunId) {
+      await syncAutopilotRunWpDraftCountersBestEffort({
+        runId: autopilotRunId,
+        blogId: input.blogId,
+        client: supabase,
+      });
+    }
 
     return {
       jobId: input.jobId,
@@ -1897,6 +2029,203 @@ export async function generateArticleDraftFromIdea(
  * but the `null` branch is currently unreachable — `runGenerateArticleFromIdeaJob`
  * always receives the queue's article id.
  */
+
+/**
+ * Result shape recorded in `article_jobs.output.wpPublish`. Only
+ * surfaces when the auto-send path actually ran (one of: succeeded,
+ * already had a draft, found no connection, or failed). The
+ * orchestrator returns `null` from {@link maybeSendAutopilotWordPressDraft}
+ * for the "didn't try" cases (manual trigger, requireReview on,
+ * setting off) and the completion payload omits `wpPublish`
+ * entirely in those cases.
+ */
+export type AutopilotWordPressPublishResult =
+  | {
+      attempted: true;
+      status: "draft_created";
+      wpPostId: number;
+      wpPostUrl: string | null;
+    }
+  | {
+      attempted: false;
+      status: "already_sent";
+      wpPostId: number;
+      wpPostUrl: string | null;
+    }
+  | { attempted: false; status: "skipped_no_connection"; warning: string }
+  | { attempted: true; status: "failed"; warning: string };
+
+interface MaybeSendAutopilotWpDraftOpts {
+  input: RunGenerateArticleFromIdeaJobInput;
+  ctx: BlogGenerationContext;
+  supabase: Client;
+}
+
+/**
+ * The autopilot WordPress-draft auto-send step. Returns:
+ *
+ *   * `null` when ANY of the gates fail (manual trigger, autopilot
+ *     mode off, autopilot disabled, requireReview on, setting off).
+ *     The completion `output.wpPublish` key is omitted in this
+ *     case — there's nothing to surface in the UI for "we didn't
+ *     even try."
+ *   * A `{status: 'skipped_no_connection'}` warning when the setting
+ *     is on but the blog has no WordPress credentials. The user
+ *     wanted us to publish — surface that nothing happened.
+ *   * A `{status: 'already_sent'}` result when `articles.wp_post_id`
+ *     is already populated (the article was previously sent —
+ *     workflow retry, manual pre-send, etc.). v1 doesn't update
+ *     existing drafts from the autopilot path; the user can update
+ *     manually from the article detail page.
+ *   * `{status: 'draft_created'}` on success.
+ *   * `{status: 'failed'}` with a user-friendly message on any
+ *     `PublishArticleError`. NEVER throws — the article job
+ *     continues to completion regardless.
+ *
+ * Idempotency: we read `articles.wp_post_id` immediately before the
+ * publish call (NOT from `ctx`, which loaded the row before the
+ * draft was even saved) so a workflow retry that succeeded the
+ * first time short-circuits to `already_sent` instead of creating
+ * a duplicate WP draft.
+ */
+async function maybeSendAutopilotWordPressDraft(
+  opts: MaybeSendAutopilotWpDraftOpts,
+): Promise<AutopilotWordPressPublishResult | null> {
+  const { input, ctx, supabase } = opts;
+
+  // Gate matrix. ANY false short-circuits to "didn't try".
+  if (input.triggerSource !== "autopilot") return null;
+  const auto = ctx.settings.automation;
+  const pub = ctx.settings.publishing;
+  if (auto.mode !== "autopilot") return null;
+  if (!auto.enabled) return null;
+  if (auto.requireReview) return null;
+  if (!pub.autoSendToWordPressDraft) return null;
+
+  await updateArticleJobStatus({
+    jobId: input.jobId,
+    currentStep: "sending_to_wordpress",
+    client: supabase,
+  });
+
+  // Connection presence check. The publish service throws
+  // `no_wp_connection` if missing, but we'd rather emit a typed
+  // `skipped_no_connection` warning than catch a generic
+  // PublishArticleError — easier for the drawer UX.
+  const connected = await hasBlogWordPressConnection(input.blogId, supabase);
+  if (!connected) {
+    return {
+      attempted: false,
+      status: "skipped_no_connection",
+      warning: PUBLISH_ARTICLE_ERROR_COPY.no_wp_connection,
+    };
+  }
+
+  // Idempotency check. Read the freshly-saved article row to see if
+  // `wp_post_id` is already set (workflow retry / manual pre-send).
+  // v1 never auto-updates an existing draft — the user can do that
+  // manually from the article detail page.
+  const { data: existing, error: readErr } = await supabase
+    .from("articles")
+    .select("wp_post_id, wp_post_url")
+    .eq("id", input.articleId)
+    .eq("blog_id", input.blogId)
+    .maybeSingle();
+  /* v8 ignore start -- defensive: article row was just written in this same orchestrator; a read failure here would be a brand-new RLS regression */
+  if (readErr) {
+    return {
+      attempted: false,
+      status: "skipped_no_connection",
+      warning: `Could not check article state: ${readErr.message ?? "unknown error"}`,
+    };
+  }
+  /* v8 ignore stop */
+  if (existing?.wp_post_id) {
+    return {
+      attempted: false,
+      status: "already_sent",
+      wpPostId: existing.wp_post_id,
+      wpPostUrl: existing.wp_post_url ?? null,
+    };
+  }
+
+  // Actually send. Map any `PublishArticleError` to a friendly
+  // string for the UI; never re-throw.
+  try {
+    const result = await publishArticleToWordPressDraft({
+      articleId: input.articleId,
+      blogId: input.blogId,
+      client: supabase,
+    });
+    return {
+      attempted: true,
+      status: "draft_created",
+      wpPostId: result.wpPostId,
+      wpPostUrl: result.wpPostUrl,
+    };
+  } catch (err) {
+    /* v8 ignore next 8 -- defensive: publishArticleToWordPressDraft only throws PublishArticleError; the !instanceof branch is a future-regression guard */
+    if (!(err instanceof PublishArticleError)) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        attempted: true,
+        status: "failed",
+        warning: `WordPress draft send failed: ${message}`,
+      };
+    }
+    return {
+      attempted: true,
+      status: "failed",
+      warning: PUBLISH_ARTICLE_ERROR_COPY[err.code],
+    };
+  }
+}
+
+/**
+ * Extracts `autopilotRunId` (string) from the merged
+ * `jobInputPatch` payload — that's where the workflow stamps it
+ * after computing `workflowMetadata` in `generate-article.ts`.
+ * Returns `null` for any non-string value so a malformed patch
+ * (or a manual run with no `jobInputPatch`) silently skips the
+ * counter-sync hook.
+ *
+ * The autopilot scheduler is the only producer of this key today;
+ * a future caller that wants its own runs counted can pass the
+ * same shape through `jobInputPatch`.
+ */
+function readAutopilotRunIdFromJobInputPatch(
+  patch: Record<string, unknown> | undefined,
+): string | null {
+  if (!patch) return null;
+  const v = patch.autopilotRunId;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * Best-effort wrapper around `syncAutopilotRunWordPressDraftCounters`.
+ * Swallows any error so a counter-sync failure can never refund
+ * tokens or fail the article job. Logs nothing today — operators
+ * can reconcile via the future admin reconciler if a row's
+ * counters look stale (the same helper is safe to re-run).
+ */
+async function syncAutopilotRunWpDraftCountersBestEffort(input: {
+  runId: string;
+  blogId: string;
+  client: Client;
+}): Promise<void> {
+  /* v8 ignore start -- defensive: counter sync is best-effort; any thrown error here would mask a successful article job, so we swallow at the outermost layer */
+  try {
+    await syncAutopilotRunWordPressDraftCounters({
+      runId: input.runId,
+      blogId: input.blogId,
+      client: input.client,
+    });
+  } catch {
+    // Swallow — the article publish itself succeeded.
+  }
+  /* v8 ignore stop */
+}
+
 async function failArticleAndJob(
   client: Client,
   articleId: string | null,

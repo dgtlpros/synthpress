@@ -39,6 +39,11 @@ function makeRun(
     articles_failed: 0,
     tokens_spent: 0,
     tokens_refunded: 0,
+    wp_drafts_expected: 0,
+    wp_drafts_created: 0,
+    wp_drafts_already_sent: 0,
+    wp_drafts_skipped: 0,
+    wp_drafts_failed: 0,
     created_at: NOW,
     updated_at: NOW,
     ...overrides,
@@ -275,6 +280,145 @@ describe("AutopilotRunDetailDrawer — header + summary", () => {
     const label = screen.getByText("Tokens refunded");
     const dd = label.parentElement!.querySelector("dd");
     expect(dd).toHaveClass("text-warning");
+  });
+});
+
+// ============================================================================
+// WordPress draft summary (v11)
+// ============================================================================
+
+describe("AutopilotRunDetailDrawer — WordPress draft summary", () => {
+  it("does NOT render the WordPress drafts section when wp_drafts_expected is 0", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("WordPress drafts")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("autopilot-run-wp-summary"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the 5-counter section when wp_drafts_expected > 0", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail({
+          run: makeRun({
+            wp_drafts_expected: 5,
+            wp_drafts_created: 3,
+            wp_drafts_already_sent: 1,
+            wp_drafts_skipped: 0,
+            wp_drafts_failed: 1,
+          }),
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("WordPress drafts")).toBeInTheDocument();
+    // Each counter is the value's textContent — assert one of each.
+    const section = screen.getByTestId("autopilot-run-wp-summary");
+    expect(within(section).getByText("Expected")).toBeInTheDocument();
+    expect(within(section).getByText("5")).toBeInTheDocument();
+    expect(within(section).getByText("Drafts created")).toBeInTheDocument();
+    expect(within(section).getByText("3")).toBeInTheDocument();
+    expect(within(section).getByText("Already sent")).toBeInTheDocument();
+    // Two `1`s exist (already sent + failed) so assert via dd siblings:
+    const failedLabel = within(section).getByText("Failed");
+    const failedDd = failedLabel.parentElement!.querySelector("dd");
+    expect(failedDd).toHaveTextContent("1");
+    expect(failedDd).toHaveClass("text-error");
+  });
+
+  it("renders the failure warning when wp_drafts_failed > 0", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail({
+          run: makeRun({
+            wp_drafts_expected: 2,
+            wp_drafts_created: 1,
+            wp_drafts_failed: 1,
+          }),
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    const alert = screen.getByTestId("autopilot-run-wp-failed-warning");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent(
+      /Some articles could not be sent to WordPress drafts\./i,
+    );
+  });
+
+  it("renders the skipped warning when wp_drafts_skipped > 0", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail({
+          run: makeRun({
+            wp_drafts_expected: 2,
+            wp_drafts_skipped: 2,
+          }),
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    const warn = screen.getByTestId("autopilot-run-wp-skipped-warning");
+    expect(warn).toHaveTextContent(
+      /Some WordPress draft sends were skipped because WordPress was not connected\./i,
+    );
+    expect(warn).toHaveClass("text-warning");
+    // Skipped-without-failed should NOT render the role=alert paragraph.
+    expect(
+      screen.queryByTestId("autopilot-run-wp-failed-warning"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders BOTH warnings when failed > 0 AND skipped > 0", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail({
+          run: makeRun({
+            wp_drafts_expected: 3,
+            wp_drafts_failed: 1,
+            wp_drafts_skipped: 2,
+          }),
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-run-wp-failed-warning"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("autopilot-run-wp-skipped-warning"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders neither warning on the happy path (all expected → created)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        detail={makeDetail({
+          run: makeRun({
+            wp_drafts_expected: 4,
+            wp_drafts_created: 4,
+          }),
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-run-wp-failed-warning"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("autopilot-run-wp-skipped-warning"),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -686,6 +830,674 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
     expect(screen.getByText("Generate ideas")).toBeInTheDocument();
     expect(screen.getByText("Generate article")).toBeInTheDocument();
     expect(screen.getByText("future_unknown_type")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Image picker warnings (v8 polish)
+  // -------------------------------------------------------------------------
+
+  it("renders the image-warnings badge + collapsible list when imageSummary has warnings", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: {
+                  providerId: "unsplash",
+                  featuredSelected: true,
+                  sectionsFound: 3,
+                  sectionImagesSelected: 2,
+                  warnings: [
+                    'Skipped section "Pricing": no results for "Pricing launch b2b blog" after 3 attempts.',
+                    'Skipped section "FAQ": provider search failed (rate_limited).',
+                  ],
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    // Badge in the row header.
+    expect(
+      screen.getByTestId("autopilot-job-job-1-image-warnings-badge"),
+    ).toHaveTextContent(/2 image warnings/);
+
+    // The expandable `<details>` summary.
+    expect(screen.getByText("Image picker warnings")).toBeInTheDocument();
+
+    // Both warning bodies render.
+    expect(
+      screen.getByText(/Skipped section "Pricing"/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Skipped section "FAQ"/),
+    ).toBeInTheDocument();
+  });
+
+  it("singularizes the badge text when there's exactly one warning", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: {
+                  warnings: ['Skipped section "Pricing": no results.'],
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-image-warnings-badge"),
+    ).toHaveTextContent(/^· 1 image warning$/);
+  });
+
+  it("does NOT render the image-warnings UI when warnings is empty", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: {
+                  warnings: [],
+                  featuredSelected: true,
+                  sectionsFound: 2,
+                  sectionImagesSelected: 2,
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-image-warnings-badge"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Image picker warnings"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the image-warnings UI for legacy jobs (no imageSummary)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: { model: "claude-x", tokens: 1234 },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByText("Image picker warnings"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the image-warnings UI when output is null", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: null,
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByText("Image picker warnings"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("filters non-string warnings defensively (forward-compat)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: {
+                  warnings: ["valid", 42, null, "another valid"],
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    // Badge counts only the two strings.
+    expect(
+      screen.getByTestId("autopilot-job-job-1-image-warnings-badge"),
+    ).toHaveTextContent(/2 image warnings/);
+    expect(screen.getByText("valid")).toBeInTheDocument();
+    expect(screen.getByText("another valid")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Autopilot WordPress draft auto-send (v10)
+  // -------------------------------------------------------------------------
+
+  it("renders 'Draft sent to WordPress' badge + link when wpPublish.status === 'draft_created'", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: true,
+                  status: "draft_created",
+                  wpPostId: 42,
+                  wpPostUrl: "https://example.com/?p=42",
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toHaveTextContent(/Draft sent to WordPress/);
+    const link = screen.getByTestId("autopilot-job-job-1-wp-link");
+    expect(link).toHaveAttribute("href", "https://example.com/?p=42");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("renders 'WordPress draft already existed' badge for status='already_sent'", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: false,
+                  status: "already_sent",
+                  wpPostId: 7,
+                  wpPostUrl: "https://example.com/?p=7",
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toHaveTextContent(/WordPress draft already existed/);
+  });
+
+  it("renders 'WordPress not connected' badge + warning text for status='skipped_no_connection'", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: false,
+                  status: "skipped_no_connection",
+                  warning: "Connect a WordPress site first.",
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toHaveTextContent(/WordPress not connected/);
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-warning"),
+    ).toHaveTextContent(/Connect a WordPress site first/);
+  });
+
+  it("renders 'WordPress draft send failed' badge + error text for status='failed'", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: true,
+                  status: "failed",
+                  warning: "WordPress rejected the request.",
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toHaveTextContent(/WordPress draft send failed/);
+    const warning = screen.getByTestId("autopilot-job-job-1-wp-warning");
+    expect(warning).toHaveTextContent(/WordPress rejected/);
+    expect(warning).toHaveAttribute("role", "alert");
+  });
+
+  it("does NOT render the wp link when wpPostUrl is missing (e.g. WP omitted `link` in the response)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: true,
+                  status: "draft_created",
+                  wpPostId: 42,
+                  wpPostUrl: null,
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-wp-link"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render wpPublish UI for legacy jobs (no wpPublish in output)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: { model: "claude-x" },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-wp-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render wpPublish UI when wpPublish.status is unknown (forward-compat)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: { status: "some_future_status", warning: "x" },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-wp-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render wpPublish UI when wpPublish is malformed (status is not a string)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: { wpPublish: { status: 42 } },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-wp-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders image warnings + wpPublish badge together (combined warning UX)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: { warnings: ["bad pick"] },
+                wpPublish: {
+                  attempted: true,
+                  status: "failed",
+                  warning: "WP boom",
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.getByTestId("autopilot-job-job-1-image-warnings-badge"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toBeInTheDocument();
+  });
+
+  it("does NOT render the wp warning paragraph when status='already_sent' (success path, no warning string)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                wpPublish: {
+                  attempted: false,
+                  status: "already_sent",
+                  wpPostId: 7,
+                  wpPostUrl: null,
+                },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    // Badge present.
+    expect(
+      screen.getByTestId("autopilot-job-job-1-wp-badge"),
+    ).toBeInTheDocument();
+    // No warning paragraph.
+    expect(
+      screen.queryByTestId("autopilot-job-job-1-wp-warning"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the image-warnings UI when imageSummary.warnings is not an array (malformed)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          jobs: [
+            {
+              id: "job-1",
+              type: "generate_article",
+              status: "completed",
+              currentStep: null,
+              errorMessage: null,
+              input: {},
+              output: {
+                imageSummary: { warnings: "oops not an array" },
+              },
+              articleId: null,
+              articleIdeaId: null,
+              createdAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    expect(
+      screen.queryByText("Image picker warnings"),
+    ).not.toBeInTheDocument();
   });
 });
 

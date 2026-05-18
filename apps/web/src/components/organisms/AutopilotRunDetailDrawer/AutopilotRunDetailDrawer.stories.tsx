@@ -47,6 +47,11 @@ const baseRun: BlogAutopilotRunDetail["run"] = {
   articles_failed: 0,
   tokens_spent: 11,
   tokens_refunded: 0,
+  wp_drafts_expected: 0,
+  wp_drafts_created: 0,
+  wp_drafts_already_sent: 0,
+  wp_drafts_skipped: 0,
+  wp_drafts_failed: 0,
   created_at: NOW,
   updated_at: NOW,
 };
@@ -169,6 +174,129 @@ export const PausedAfterFailures: Story = {
           autopilotPaused: true,
           pauseReason: "failure_rate",
         },
+      },
+    },
+  },
+};
+
+export const WithImageWarnings: Story = {
+  args: {
+    ...Loaded.args,
+    detail: {
+      ...Loaded.args!.detail!,
+      jobs: Loaded.args!.detail!.jobs.map((job, i) =>
+        i === 0
+          ? {
+              ...job,
+              output: {
+                ...(job.output as Record<string, unknown>),
+                imageSummary: {
+                  providerId: "unsplash",
+                  featuredSelected: true,
+                  sectionsFound: 4,
+                  sectionImagesSelected: 2,
+                  warnings: [
+                    'Skipped section "Pricing": no results for "Pricing launch b2b blog" after 3 attempts.',
+                    'Skipped section "FAQ": provider search failed (rate_limited).',
+                  ],
+                },
+              },
+            }
+          : job,
+      ),
+    },
+  },
+};
+
+export const WithWordPressDraftSent: Story = {
+  args: {
+    ...Loaded.args,
+    detail: {
+      ...Loaded.args!.detail!,
+      jobs: Loaded.args!.detail!.jobs.map((job, i) =>
+        i === 0
+          ? {
+              ...job,
+              output: {
+                ...(job.output as Record<string, unknown>),
+                wpPublish: {
+                  attempted: true,
+                  status: "draft_created",
+                  wpPostId: 4231,
+                  wpPostUrl: "https://example.com/?p=4231",
+                },
+              },
+            }
+          : job,
+      ),
+    },
+  },
+};
+
+export const WithWordPressDraftFailed: Story = {
+  args: {
+    ...Loaded.args,
+    detail: {
+      ...Loaded.args!.detail!,
+      jobs: Loaded.args!.detail!.jobs.map((job, i) =>
+        i === 0
+          ? {
+              ...job,
+              output: {
+                ...(job.output as Record<string, unknown>),
+                wpPublish: {
+                  attempted: true,
+                  status: "failed",
+                  warning:
+                    "WordPress rejected the request. Check the connection and try again.",
+                },
+              },
+            }
+          : job,
+      ),
+    },
+  },
+};
+
+/**
+ * Run-level WordPress draft summary populated by
+ * `syncAutopilotRunWordPressDraftCounters`. Happy path —
+ * everything autopilot tried landed in WordPress.
+ */
+export const WithWordPressDraftSummary: Story = {
+  args: {
+    ...Loaded.args,
+    detail: {
+      ...Loaded.args!.detail!,
+      run: {
+        ...baseRun,
+        wp_drafts_expected: 5,
+        wp_drafts_created: 5,
+        wp_drafts_already_sent: 0,
+        wp_drafts_skipped: 0,
+        wp_drafts_failed: 0,
+      },
+    },
+  },
+};
+
+/**
+ * Mixed-outcome run — some drafts created, one already sent on a
+ * prior tick, one skipped because WordPress isn't connected, one
+ * failure. Shows BOTH the failure alert and the skipped warning.
+ */
+export const WithWordPressDraftMixedOutcomes: Story = {
+  args: {
+    ...Loaded.args,
+    detail: {
+      ...Loaded.args!.detail!,
+      run: {
+        ...baseRun,
+        wp_drafts_expected: 4,
+        wp_drafts_created: 1,
+        wp_drafts_already_sent: 1,
+        wp_drafts_skipped: 1,
+        wp_drafts_failed: 1,
       },
     },
   },
