@@ -5,9 +5,18 @@ import {
   getAuthUserOncePerResponse,
 } from "@/lib/supabase/server";
 import { getArticleByIdForBlog } from "@/services/article-service";
+import {
+  getActiveImageUploadForArticle,
+  listSectionImageRowsForArticle,
+} from "@/services/article-image-upload-service";
 import { ArticleDetailConnector } from "@/connectors/ArticleDetailConnector";
-import type { ArticleDetailData } from "@/components/organisms/ArticleDetail";
+import type {
+  ArticleDetailData,
+  ArticleFeaturedImageAttribution,
+} from "@/components/organisms/ArticleDetail";
+import type { MarkdownPreviewSectionImage } from "@/components/atoms/MarkdownPreview";
 import type { PostStatus } from "@/components/atoms/PostStatusBadge";
+import type { InitialSectionImage } from "@/hooks/useArticleEdit";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +57,67 @@ export default async function ArticleDetailPage({
   const article = await getArticleByIdForBlog(articleId, blogId, supabase);
   if (!article) notFound();
 
+  // Active attribution row for the current featured image (the
+  // latest `article_image_uploads` row whose `image_url` matches
+  // `featured_image_url`). Read with the user's RLS-bound client so
+  // a member-of-the-blog check happens automatically. Null when the
+  // image was manually pasted (no row) or no featured image is set.
+  const attributionRow = await getActiveImageUploadForArticle(
+    articleId,
+    article.featured_image_url,
+    supabase,
+  );
+
+  const featuredImageAttribution: ArticleFeaturedImageAttribution | null =
+    attributionRow
+      ? {
+          provider: attributionRow.provider,
+          photographerName: attributionRow.photographer_name,
+          photographerProfileUrl: attributionRow.photographer_profile_url,
+          photoUrl: attributionRow.photo_url,
+        }
+      : null;
+
+  // Section-image rows for the article body. Same RLS-bound client
+  // so a non-member of the blog gets an empty list (not an
+  // unauthorized error). We project two related shapes:
+  //   * `sectionImagesByKey` — the renderer map for
+  //     `MarkdownPreview.sectionImagesByKey`. Keyed by `section_key`
+  //     so the H2 renderer can look up by document position.
+  //   * `initialSectionImages` — the controller-hook seed list
+  //     (carries `sortOrder` so the editor renders slots in the
+  //     same order as the body). The connector forwards it to
+  //     `useArticleEdit`.
+  const sectionRows = await listSectionImageRowsForArticle(
+    articleId,
+    supabase,
+  );
+  const sectionImagesByKey: Record<string, MarkdownPreviewSectionImage> = {};
+  const initialSectionImages: InitialSectionImage[] = [];
+  for (const row of sectionRows) {
+    if (!row.section_key) continue;
+    sectionImagesByKey[row.section_key] = {
+      imageUrl: row.image_url,
+      altText: row.alt_text,
+      attribution:
+        row.photographer_name || row.photographer_profile_url || row.photo_url
+          ? {
+              provider: row.provider,
+              photographerName: row.photographer_name,
+              photographerProfileUrl: row.photographer_profile_url,
+              photoUrl: row.photo_url,
+            }
+          : null,
+    };
+    initialSectionImages.push({
+      sectionKey: row.section_key,
+      sectionHeading: row.section_heading ?? "",
+      sortOrder: row.sort_order,
+      imageUrl: row.image_url,
+      altText: row.alt_text,
+    });
+  }
+
   const detail: ArticleDetailData = {
     id: article.id,
     title: article.title,
@@ -64,6 +134,11 @@ export default async function ArticleDetailPage({
     createdAt: article.created_at,
     wpPostId: article.wp_post_id,
     wpPostUrl: article.wp_post_url,
+    featuredImageUrl: article.featured_image_url,
+    featuredImageAlt: article.featured_image_alt,
+    wpFeaturedMediaId: article.wp_featured_media_id,
+    featuredImageAttribution,
+    sectionImagesByKey,
   };
 
   const hasWordPressConnection = Boolean(
@@ -90,6 +165,7 @@ export default async function ArticleDetailPage({
         projectId={projectId}
         blogId={blogId}
         article={detail}
+        initialSectionImages={initialSectionImages}
         hasWordPressConnection={hasWordPressConnection}
         connectionsHref={`${blogBase}/connections`}
       />

@@ -48,11 +48,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import { runAutopilotForBlog } from "@/services/autopilot-scheduler-service";
 import { getBlogAutopilotRunDetail } from "@/services/blog-autopilot-run-service";
-import {
-  AUTOPILOT_ACTION_ERRORS,
-  getAutopilotRunDetail,
-  runAutopilotNow,
-} from "./autopilot";
+import { getAutopilotRunDetail, runAutopilotNow } from "./autopilot";
+import { AUTOPILOT_ACTION_ERRORS } from "./autopilot-errors";
 
 const mockedCreateClient = vi.mocked(createClient);
 const mockedCreateAdmin = vi.mocked(createAdminClient);

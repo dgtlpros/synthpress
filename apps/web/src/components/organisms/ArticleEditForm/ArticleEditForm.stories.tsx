@@ -31,6 +31,8 @@ Start by clarifying the audience.
 
 Build the keyword + topic map.
 `,
+  featuredImageUrl: "",
+  featuredImageAlt: "",
 };
 
 function Interactive(args: Parameters<typeof ArticleEditForm>[0]) {
@@ -71,5 +73,42 @@ export const WithError: Story = {
     onCancel: () => {},
     onSubmit: () => {},
     errorMessage: "Slug must be lowercase letters, numbers, and hyphens only.",
+  },
+};
+
+export const WithSectionImages: Story = {
+  args: {
+    value: initialValue,
+    onChange: () => {},
+    onCancel: () => {},
+    onSubmit: () => {},
+    sectionImages: {
+      "week-1-positioning": {
+        imageUrl:
+          "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1080",
+        altText: "A team whiteboarding positioning",
+      },
+    },
+    onPickSectionImage: () => {},
+    onSectionImageAltChange: () => {},
+    onClearSectionImage: () => {},
+  },
+};
+
+export const SectionImagesEmptyState: Story = {
+  args: {
+    value: {
+      ...initialValue,
+      // No H2 sections in the body → editor shows the empty-state
+      // copy under the Section Images card.
+      contentMarkdown: "# Title\n\nA single paragraph, no H2 sections.\n",
+    },
+    onChange: () => {},
+    onCancel: () => {},
+    onSubmit: () => {},
+    sectionImages: {},
+    onPickSectionImage: () => {},
+    onSectionImageAltChange: () => {},
+    onClearSectionImage: () => {},
   },
 };

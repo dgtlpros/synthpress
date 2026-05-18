@@ -18,6 +18,10 @@ const baseArticle: ArticleDetailData = {
   createdAt: new Date("2026-05-07T14:00:00Z").toISOString(),
   wpPostId: null,
   wpPostUrl: null,
+  featuredImageUrl: null,
+  featuredImageAlt: null,
+  wpFeaturedMediaId: null,
+  featuredImageAttribution: null,
 };
 
 beforeEach(() => {
@@ -167,6 +171,48 @@ describe("ArticleDetail", () => {
     expect(container.firstChild).toHaveClass("custom-cls");
   });
 
+  it("hides the featured image card when no featured image URL is set", () => {
+    render(<ArticleDetail article={baseArticle} />);
+    expect(screen.queryByText(/^Featured image$/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the featured image preview + alt when set, with the 'will upload' badge when wpFeaturedMediaId is null", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAlt: "A photo of a cat",
+          wpFeaturedMediaId: null,
+        }}
+      />,
+    );
+    const img = screen.getByAltText("A photo of a cat") as HTMLImageElement;
+    expect(img.src).toBe("https://example.com/img.jpg");
+    // The `Alt:` label and its value sit in the same paragraph but
+    // different text nodes — query the paragraph and assert its
+    // combined text content.
+    const altParagraph = screen.getByText(/Alt:/i).closest("p")!;
+    expect(altParagraph).toHaveTextContent(/Alt:\s*A photo of a cat/i);
+    expect(screen.getByText(/will upload on next sync/i)).toBeInTheDocument();
+  });
+
+  it("renders the 'Synced to WordPress' badge when wpFeaturedMediaId is set", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAlt: null,
+          wpFeaturedMediaId: 99,
+        }}
+      />,
+    );
+    expect(screen.getByText(/Synced to WordPress/i)).toBeInTheDocument();
+    // No alt text → empty alt attribute on the <img> + a hint to add one.
+    expect(screen.getByText(/No alt text/i)).toBeInTheDocument();
+  });
+
   it("renders 'just now' for updates under a minute old", () => {
     render(
       <ArticleDetail
@@ -223,5 +269,192 @@ describe("ArticleDetail", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: baseArticle.title }),
     ).toBeInTheDocument();
+  });
+
+  // ---------- Featured image attribution ----------
+
+  it("renders an Unsplash attribution line with photographer + Unsplash links", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "unsplash",
+            photographerName: "Annie Spratt",
+            photographerProfileUrl: "https://unsplash.com/@anniespratt",
+            photoUrl: "https://unsplash.com/photos/abc",
+          },
+        }}
+      />,
+    );
+
+    const photographer = screen.getByRole("link", { name: /Annie Spratt/i });
+    expect(photographer).toHaveAttribute(
+      "href",
+      "https://unsplash.com/@anniespratt",
+    );
+    const unsplashLink = screen.getByRole("link", { name: /^Unsplash$/i });
+    expect(unsplashLink).toHaveAttribute(
+      "href",
+      "https://unsplash.com/photos/abc",
+    );
+  });
+
+  it("uses 'the photographer' fallback when name is missing but profile link exists", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "unsplash",
+            photographerName: null,
+            photographerProfileUrl: "https://unsplash.com/@anniespratt",
+            photoUrl: "https://unsplash.com/photos/abc",
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: /the photographer/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders an Unsplash attribution without the profile link when none is provided", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "unsplash",
+            photographerName: "Annie Spratt",
+            photographerProfileUrl: null,
+            photoUrl: "https://unsplash.com/photos/abc",
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("link", { name: /Annie Spratt/i }),
+    ).not.toBeInTheDocument();
+    // Plain text photographer name still rendered.
+    expect(screen.getByText(/Annie Spratt/i)).toBeInTheDocument();
+  });
+
+  it("falls back to https://unsplash.com when photoUrl is missing on an Unsplash row", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "unsplash",
+            photographerName: "Annie Spratt",
+            photographerProfileUrl: "https://unsplash.com/@anniespratt",
+            photoUrl: null,
+          },
+        }}
+      />,
+    );
+    const unsplashLink = screen.getByRole("link", { name: /^Unsplash$/i });
+    expect(unsplashLink).toHaveAttribute("href", "https://unsplash.com");
+  });
+
+  it("renders attribution for a non-Unsplash provider WITHOUT the 'on Unsplash' suffix", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "manual_url",
+            photographerName: "Acme Co",
+            photographerProfileUrl: "https://acme.example.com",
+            photoUrl: null,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /Acme Co/i })).toBeInTheDocument();
+    expect(screen.queryByText(/on Unsplash/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the attribution line when neither photographer name nor profile link is present", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "unsplash",
+            photographerName: null,
+            photographerProfileUrl: null,
+            photoUrl: null,
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByText(/^Photo by/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the attribution line entirely when no attribution row exists", () => {
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: null,
+        }}
+      />,
+    );
+    expect(screen.queryByText(/^Photo by/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ArticleDetail — section images pass-through", () => {
+  it("forwards sectionImagesByKey to MarkdownPreview (renders a figure above the matching H2)", () => {
+    const { container } = render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          contentMarkdown: "## Intro\n\nBody.\n\n## FAQ\n\nMore body.\n",
+          sectionImagesByKey: {
+            intro: {
+              imageUrl: "https://example.com/intro.jpg",
+              altText: "Intro hero",
+              attribution: null,
+            },
+          },
+        }}
+      />,
+    );
+    // Only one section has an image → one figure with the right src.
+    const figures = container.querySelectorAll("figure");
+    expect(figures).toHaveLength(1);
+    expect(figures[0]!.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/intro.jpg",
+    );
+    // Body H2s still render (the article detail card chrome also
+    // contains H2s — assert by name to scope to the body).
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Intro" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "FAQ" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no figures when sectionImagesByKey is undefined (legacy data)", () => {
+    const { container } = render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          contentMarkdown: "## Intro\n\nBody.",
+        }}
+      />,
+    );
+    expect(container.querySelector("figure")).toBeNull();
   });
 });

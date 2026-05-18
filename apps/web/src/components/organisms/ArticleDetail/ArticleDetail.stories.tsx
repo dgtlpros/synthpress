@@ -39,6 +39,10 @@ Build the keyword + topic map.
   createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
   wpPostId: null,
   wpPostUrl: null,
+  featuredImageUrl: null,
+  featuredImageAlt: null,
+  wpFeaturedMediaId: null,
+  featuredImageAttribution: null,
 };
 
 export const Default: Story = {
@@ -68,5 +72,83 @@ export const Generating: Story = {
       status: "generating",
       contentMarkdown: null,
     },
+  },
+};
+
+export const WithFeaturedImage: Story = {
+  args: {
+    article: {
+      ...baseArticle,
+      featuredImageUrl:
+        "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
+      featuredImageAlt: "A laptop on a desk with a warm coffee mug.",
+      wpFeaturedMediaId: 421,
+    },
+    onEdit: () => {},
+  },
+};
+
+export const WithFeaturedImagePendingUpload: Story = {
+  args: {
+    article: {
+      ...baseArticle,
+      featuredImageUrl:
+        "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
+      featuredImageAlt: "A laptop on a desk with a warm coffee mug.",
+      wpFeaturedMediaId: null,
+    },
+    onEdit: () => {},
+  },
+};
+
+export const WithUnsplashAttribution: Story = {
+  args: {
+    article: {
+      ...baseArticle,
+      featuredImageUrl:
+        "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
+      featuredImageAlt: "A laptop on a desk with a warm coffee mug.",
+      wpFeaturedMediaId: 421,
+      featuredImageAttribution: {
+        provider: "unsplash",
+        photographerName: "Annie Spratt",
+        photographerProfileUrl: "https://unsplash.com/@anniespratt",
+        photoUrl: "https://unsplash.com/photos/abc",
+      },
+    },
+    onEdit: () => {},
+  },
+};
+
+export const WithSectionImages: Story = {
+  args: {
+    article: {
+      ...baseArticle,
+      sectionImagesByKey: {
+        "week-1-positioning": {
+          imageUrl:
+            "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
+          altText: "A team whiteboarding positioning",
+          attribution: {
+            provider: "unsplash",
+            photographerName: "Annie Spratt",
+            photographerProfileUrl: "https://unsplash.com/@anniespratt",
+            photoUrl: "https://unsplash.com/photos/abc",
+          },
+        },
+        "week-2-research": {
+          imageUrl:
+            "https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=1200",
+          altText: "Open notebook with handwritten keyword research",
+          attribution: {
+            provider: "unsplash",
+            photographerName: "Patrick Perkins",
+            photographerProfileUrl: "https://unsplash.com/@patrickperkins",
+            photoUrl: "https://unsplash.com/photos/def",
+          },
+        },
+      },
+    },
+    onEdit: () => {},
   },
 };

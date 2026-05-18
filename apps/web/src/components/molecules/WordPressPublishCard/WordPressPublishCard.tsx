@@ -129,6 +129,21 @@ export interface WordPressPublishCardProps {
   justSentPostId?: number | null;
   /** Newly created post URL for the *current* click. */
   justSentPostUrl?: string | null;
+
+  /**
+   * Article-level featured image URL. Drives a small status line on
+   * the card so users see ahead of time whether the next sync will
+   * upload an image. Empty / null means "no featured image" and the
+   * status line is hidden entirely.
+   */
+  featuredImageUrl?: string | null;
+  /**
+   * WordPress attachment id cached on the article (`articles.wp_featured_media_id`).
+   * When set, the card flips the featured-image status line to
+   * "Featured image uploaded to WordPress" — the next sync reuses
+   * the existing attachment rather than re-uploading.
+   */
+  wpFeaturedMediaId?: number | null;
   className?: string;
 }
 
@@ -204,6 +219,32 @@ function publishLiveModalCopy(isAlreadyLive: boolean): {
   };
 }
 
+/**
+ * Tiny status line shown under the main contextual copy when the
+ * article has a featured image. Exists so the user knows ahead of
+ * time whether the next sync will upload the image (no cached
+ * `wp_featured_media_id`) or reuse what's already on WordPress.
+ *
+ * Returns null when there's no featured image so the card stays
+ * compact for unillustrated posts.
+ */
+function featuredImageStatus(
+  featuredImageUrl: string | null | undefined,
+  wpFeaturedMediaId: number | null | undefined,
+): { label: string; tone: "info" | "success" } | null {
+  if (!featuredImageUrl) return null;
+  if (wpFeaturedMediaId !== null && wpFeaturedMediaId !== undefined) {
+    return {
+      label: "Featured image uploaded to WordPress.",
+      tone: "success",
+    };
+  }
+  return {
+    label: "Featured image will be uploaded to WordPress on the next sync.",
+    tone: "info",
+  };
+}
+
 export function WordPressPublishCard({
   hasConnection,
   hasBody,
@@ -223,6 +264,8 @@ export function WordPressPublishCard({
   errorIsRemoteMissing = false,
   justSentPostId,
   justSentPostUrl,
+  featuredImageUrl,
+  wpFeaturedMediaId,
   className,
 }: WordPressPublishCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -245,6 +288,10 @@ export function WordPressPublishCard({
 
   const isAlreadyLive = mode === "published_live";
   const modalCopy = publishLiveModalCopy(isAlreadyLive);
+  const featuredImage = featuredImageStatus(
+    featuredImageUrl,
+    wpFeaturedMediaId,
+  );
 
   // The trigger button itself is disabled when anyActionInFlight,
   // so this handler doesn't need its own guard — disabling at the
@@ -360,6 +407,20 @@ export function WordPressPublishCard({
             create a draft post on your WordPress site.
           </p>
         )}
+
+        {featuredImage ? (
+          <p
+            className={cn(
+              "mt-3 rounded-[var(--sp-radius-md)] border p-2 text-xs",
+              featuredImage.tone === "success"
+                ? "border-success/30 bg-success/10 text-foreground"
+                : "border-border bg-background text-muted",
+            )}
+            data-testid="wp-featured-image-status"
+          >
+            {featuredImage.label}
+          </p>
+        ) : null}
 
         {/* The remote-missing block is itself an alert; we only
             render the inline error region for non-remote-missing

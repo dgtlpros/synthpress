@@ -2,8 +2,21 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildFeaturedImageFilename } from "@/lib/build-featured-image-filename";
 import { markdownToHtml } from "@/lib/markdown-to-html";
 import type { Database, TablesUpdate } from "@/lib/supabase/database.types";
+import {
+  getActiveImageUploadForArticle,
+  listSectionImageRowsForArticle,
+  stampWordPressMediaIdOnImageUpload,
+  type ArticleImageUploadRow,
+} from "./article-image-upload-service";
+import { getImageProvider } from "./image-providers/registry";
+import { ImageSearchError } from "./image-providers/types";
+import { extractArticleSections } from "@/lib/extract-article-sections";
+import type {
+  SectionImageForHtml,
+} from "@/lib/markdown-to-html";
 
 /**
  * WordPress publishing helpers used by the Article detail page.
@@ -125,7 +138,27 @@ export type PublishArticleErrorCode =
   | "wp_post_id_required"
   | "wp_post_not_found"
   | "wp_request_failed"
-  | "wp_invalid_response";
+  | "wp_invalid_response"
+  /** Featured-image fetch from `featured_image_url` failed (network / non-2xx). */
+  | "image_fetch_failed"
+  /** The fetched featured image had a non-image Content-Type. */
+  | "image_invalid_content_type"
+  /** WordPress rejected the `POST /wp/v2/media` upload. */
+  | "wp_media_upload_failed"
+  /** WordPress returned a 200 but a payload missing `id`. */
+  | "wp_invalid_media_response"
+  /**
+   * Same four classes as the featured-image codes above, but raised
+   * from the section-image upload path. Kept distinct so the
+   * friendly UI copy can say "a section image" instead of "the
+   * featured image" — the failure surface is the same shape but the
+   * recovery action differs (user can clear the bad slot from the
+   * editor + re-publish).
+   */
+  | "section_image_fetch_failed"
+  | "section_image_invalid_content_type"
+  | "section_image_upload_failed"
+  | "section_image_invalid_response";
 
 export class PublishArticleError extends Error {
   readonly code: PublishArticleErrorCode;
@@ -154,6 +187,20 @@ export function buildWordPressPostsEndpoint(
   const trimmed = siteUrl.trim().replace(/\/+$/, "");
   const base = `${trimmed}/wp-json/wp/v2/posts`;
   return wpPostId ? `${base}/${wpPostId}` : base;
+}
+
+/**
+ * Same shape as {@link buildWordPressPostsEndpoint} but for the
+ * media (`/wp-json/wp/v2/media`) endpoint. Pass an `id` for the
+ * single-resource path (used by the alt-text PUT after upload).
+ */
+export function buildWordPressMediaEndpoint(
+  siteUrl: string,
+  mediaId?: number,
+): string {
+  const trimmed = siteUrl.trim().replace(/\/+$/, "");
+  const base = `${trimmed}/wp-json/wp/v2/media`;
+  return mediaId ? `${base}/${mediaId}` : base;
 }
 
 /**
@@ -201,8 +248,13 @@ interface ArticleForPublish {
   excerpt: string;
   content_markdown: string | null;
   meta_description: string | null;
+  /** Used (alongside title + alt) to build SEO-friendly upload filenames. */
+  target_keyword: string | null;
   blog_id: string;
   wp_post_id: number | null;
+  featured_image_url: string | null;
+  featured_image_alt: string | null;
+  wp_featured_media_id: number | null;
 }
 
 async function loadArticleForPublish(
@@ -213,7 +265,7 @@ async function loadArticleForPublish(
   const { data, error } = await client
     .from("articles")
     .select(
-      "id, blog_id, title, slug, excerpt, content_markdown, meta_description, wp_post_id",
+      "id, blog_id, title, slug, excerpt, content_markdown, meta_description, target_keyword, wp_post_id, featured_image_url, featured_image_alt, wp_featured_media_id",
     )
     .eq("id", articleId)
     .eq("blog_id", blogId)
@@ -243,12 +295,22 @@ interface WordPressPayload extends Record<string, unknown> {
   status: "draft" | "publish";
   excerpt: string;
   slug?: string;
+  /**
+   * WordPress attachment id of the featured image. Only set when the
+   * article has a `wp_featured_media_id` (cached from a previous
+   * upload, or freshly uploaded by `ensureFeaturedMediaUploaded`).
+   * WordPress accepts `0` as "no featured image" but we omit the key
+   * entirely when no image is configured so we don't accidentally
+   * blow away a remote-set featured image on update.
+   */
+  featured_media?: number;
 }
 
 function buildWordPressPayload(
   article: ArticleForPublish,
   html: string,
   status: "draft" | "publish",
+  featuredMediaId: number | null,
 ): WordPressPayload {
   const payload: WordPressPayload = {
     title: article.title,
@@ -258,6 +320,9 @@ function buildWordPressPayload(
   };
   if (article.slug && article.slug.trim()) {
     payload.slug = article.slug.trim();
+  }
+  if (featuredMediaId !== null) {
+    payload.featured_media = featuredMediaId;
   }
   return payload;
 }
@@ -388,7 +453,66 @@ async function syncArticleToWordPress(
     throw new PublishArticleError("wp_post_id_required");
   }
 
-  const html = await markdownToHtml(article.content_markdown);
+  const auth = buildBasicAuthHeader(wpUsername, wpAppPassword);
+
+  // Lazy featured-image upload. Three cases:
+  //   * No featured image URL → skip; payload omits `featured_media`.
+  //   * Featured image URL + cached `wp_featured_media_id` → reuse the
+  //     existing attachment id. NO upload, NO bytes over the wire.
+  //   * Featured image URL but no cached id → upload now via
+  //     `POST /wp/v2/media`, stamp `wp_featured_media_id` on the row,
+  //     then include the new id in the post payload.
+  // The upload call may throw image-related PublishArticleErrors
+  // (image_fetch_failed, image_invalid_content_type,
+  // wp_media_upload_failed, wp_invalid_media_response) — we let
+  // them propagate so the caller's UI surfaces the friendly copy.
+  const featuredMediaId = await ensureFeaturedMediaUploaded({
+    article,
+    wpUrl,
+    auth,
+    fetchImpl,
+    client,
+  });
+
+  // Section-image upload. Three steps:
+  //   1. Load every `article_image_uploads` row with
+  //      `role = 'section'` for this article.
+  //   2. Drop orphan rows whose `section_key` is no longer in the
+  //      saved body (parser is the source of truth for "what
+  //      section keys exist now"). Orphans MUST NOT be uploaded —
+  //      shipping a published post with images that can't be
+  //      injected anywhere would burn WordPress media slots.
+  //   3. For each surviving row, reuse the cached `wp_media_id` or
+  //      upload now. Failures throw a section-prefixed
+  //      `PublishArticleError` so the UI says "a section image" in
+  //      the friendly copy. Stamping + provider download tracking
+  //      are best-effort and don't fail the publish.
+  // The resulting `sectionImagesByKey` map is handed to
+  // `markdownToHtml` so the injector renders a `<figure>` above
+  // each matching H2 in the published HTML.
+  const allSectionRows = await listSectionImageRowsForArticle(
+    article.id,
+    client,
+  );
+  const savedSectionKeys = new Set(
+    extractArticleSections(article.content_markdown).map((s) => s.sectionKey),
+  );
+  const liveSectionRows = allSectionRows.filter(
+    (row) => row.section_key && savedSectionKeys.has(row.section_key),
+  );
+  const sectionUploadResults = await ensureSectionMediaUploaded({
+    article,
+    sectionRows: liveSectionRows,
+    wpUrl,
+    auth,
+    fetchImpl,
+    client,
+  });
+  const sectionImagesByKey = buildSectionImagesByKey(sectionUploadResults);
+
+  const html = await markdownToHtml(article.content_markdown, {
+    sectionImagesByKey,
+  });
   if (!html.trim()) {
     // Sanitizer ate every byte (e.g. body was nothing but `<script>`
     // tags). Treat it the same as an empty body — we won't push a
@@ -398,7 +522,12 @@ async function syncArticleToWordPress(
 
   const wpStatus: "draft" | "publish" =
     mode === "publish_live" ? "publish" : "draft";
-  const payload = buildWordPressPayload(article, html, wpStatus);
+  const payload = buildWordPressPayload(
+    article,
+    html,
+    wpStatus,
+    featuredMediaId,
+  );
 
   const method: "POST" | "PUT" = mode === "create_draft" ? "POST" : "PUT";
   // `requiresExistingPost === true` ⇒ `wp_post_id` is non-null
@@ -409,7 +538,6 @@ async function syncArticleToWordPress(
     wpUrl,
     requiresExistingPost ? (article.wp_post_id as number) : undefined,
   );
-  const auth = buildBasicAuthHeader(wpUsername, wpAppPassword);
 
   const wpResponse = await performWordPressRequest(
     endpoint,
@@ -548,4 +676,687 @@ export async function clearWordPressLink(input: {
     .eq("id", input.articleId)
     .eq("blog_id", input.blogId);
   if (error) throw error;
+}
+
+// ============================================================================
+// Featured-image upload (POST/PUT /wp/v2/media)
+// ============================================================================
+
+export interface UploadMediaToWordPressInput {
+  blogId: string;
+  /**
+   * Public URL of the source image. Fetched server-side, validated
+   * as an `image/*` content-type, then streamed to WordPress.
+   */
+  imageUrl: string;
+  /** Accessible alt text. Optional; persisted on the WP media row if provided. */
+  altText?: string | null;
+  /**
+   * Filename WordPress sees in the `Content-Disposition` header.
+   * Defaults to the last path segment of `imageUrl`, or
+   * `featured-image` if we can't infer one.
+   */
+  filename?: string;
+  fetchImpl?: typeof fetch;
+  client?: Client;
+}
+
+export interface UploadMediaToWordPressResult {
+  mediaId: number;
+  /** Public URL of the uploaded media (`source_url`). May be null. */
+  sourceUrl: string | null;
+  /** Echo of the alt text we tried to set (may have been null). */
+  altText: string | null;
+}
+
+/**
+ * Minimum shape of the WordPress REST `POST /wp/v2/media` 201 we
+ * care about. WordPress returns dozens of fields; we only read
+ * these.
+ */
+interface WordPressMediaResponse {
+  id: number;
+  source_url?: string | null;
+  alt_text?: string | null;
+}
+
+/**
+ * Public helper: fetches an image by URL, validates it's an image,
+ * and uploads it to WordPress as a media attachment. Optionally
+ * sets `alt_text` via a follow-up PUT (WordPress doesn't accept
+ * alt text on the original `multipart/form-data` POST in older WP
+ * versions — the safe path is upload → patch).
+ *
+ * Used by:
+ *   * `syncArticleToWordPress` (lazy upload during publish/update)
+ *   * Future autopilot publishing
+ *   * Future inline-image uploads (with a different filename/path)
+ *
+ * Does NOT touch `articles.wp_featured_media_id` — the caller
+ * decides whether to cache the result. Keeps this helper reusable
+ * for non-featured uploads later.
+ */
+export async function uploadMediaToWordPress(
+  input: UploadMediaToWordPressInput,
+): Promise<UploadMediaToWordPressResult> {
+  const client = input.client ?? createAdminClient();
+  const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+
+  const blog = await loadBlogConnection(input.blogId, client);
+  if (!blog) {
+    throw new PublishArticleError("blog_not_found");
+  }
+  const wpUrl = blog.wp_url?.trim();
+  const wpUsername = blog.wp_username?.trim();
+  const wpAppPassword = blog.wp_app_password ?? "";
+  if (!wpUrl || !wpUsername || !wpAppPassword) {
+    throw new PublishArticleError("no_wp_connection");
+  }
+  const auth = buildBasicAuthHeader(wpUsername, wpAppPassword);
+
+  return uploadMediaToWordPressWithAuth({
+    wpUrl,
+    auth,
+    imageUrl: input.imageUrl,
+    altText: input.altText ?? null,
+    filename: input.filename,
+    fetchImpl,
+  });
+}
+
+interface UploadMediaWithAuthInput {
+  wpUrl: string;
+  auth: string;
+  imageUrl: string;
+  altText: string | null;
+  /** Explicit filename override; wins over `filenameContext` when set. */
+  filename?: string;
+  /**
+   * SEO-friendly filename hints used when no explicit `filename` is
+   * provided. We can only build the filename AFTER we've fetched the
+   * image (we need the actual content-type to pick the extension), so
+   * the publish path passes its source-of-truth fields here and the
+   * inner uploader runs `buildFeaturedImageFilename` with them.
+   */
+  filenameContext?: {
+    articleTitle?: string | null;
+    targetKeyword?: string | null;
+    featuredImageAlt?: string | null;
+  };
+  fetchImpl: typeof fetch;
+}
+
+/**
+ * The shared upload path used by both the public helper and the
+ * publish flow's lazy uploader. Skips the connection lookup since
+ * the publish path already has it loaded.
+ */
+async function uploadMediaToWordPressWithAuth(
+  input: UploadMediaWithAuthInput,
+): Promise<UploadMediaToWordPressResult> {
+  // 1. Fetch the source image. Network errors and non-2xx responses
+  // both map to image_fetch_failed — the user gets one friendly
+  // message either way ("we couldn't reach the image URL").
+  let imageRes: Response;
+  try {
+    imageRes = await input.fetchImpl(input.imageUrl);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "network_error";
+    throw new PublishArticleError("image_fetch_failed", message);
+  }
+  if (!imageRes.ok) {
+    throw new PublishArticleError(
+      "image_fetch_failed",
+      `${imageRes.status} ${imageRes.statusText}`,
+    );
+  }
+
+  const contentType = imageRes.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new PublishArticleError(
+      "image_invalid_content_type",
+      contentType || "missing",
+    );
+  }
+
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await imageRes.arrayBuffer();
+    /* v8 ignore start -- defensive: arrayBuffer() rarely throws after a successful fetch */
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "arraybuffer_failed";
+    throw new PublishArticleError("image_fetch_failed", message);
+  }
+  /* v8 ignore stop */
+
+  // Filename priority:
+  //   1. Caller-supplied `filename` (e.g. an explicit override from
+  //      the public `uploadMediaToWordPress` API).
+  //   2. SEO-friendly filename built from the article context + the
+  //      content-type we just learned from the fetch.
+  //   3. Old URL-derived filename (kept as a fallback for callers
+  //      that don't pass any context — e.g. future inline-image
+  //      uploads where the article-level fields don't apply).
+  let filename: string;
+  if (input.filename) {
+    filename = input.filename;
+  } else if (input.filenameContext) {
+    filename = buildFeaturedImageFilename({
+      articleTitle: input.filenameContext.articleTitle,
+      targetKeyword: input.filenameContext.targetKeyword,
+      featuredImageAlt: input.filenameContext.featuredImageAlt,
+      contentType,
+    });
+  } else {
+    filename = deriveFilename(input.imageUrl, contentType);
+  }
+
+  // 2. POST to /wp/v2/media. We send the raw bytes (NOT
+  // multipart/form-data) — WordPress accepts either, and raw bytes
+  // give us byte-stable Content-Length without a multipart boundary
+  // dance in Node's fetch.
+  const mediaEndpoint = buildWordPressMediaEndpoint(input.wpUrl);
+  let uploadRes: Response;
+  try {
+    uploadRes = await input.fetchImpl(mediaEndpoint, {
+      method: "POST",
+      headers: {
+        Authorization: input.auth,
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(filename)}"`,
+        Accept: "application/json",
+      },
+      body: bytes,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "network_error";
+    throw new PublishArticleError("wp_media_upload_failed", message);
+  }
+
+  if (!uploadRes.ok) {
+    let body = "";
+    try {
+      body = (await uploadRes.text()).slice(0, 500);
+    } catch {
+      // Body is optional context.
+    }
+    throw new PublishArticleError(
+      "wp_media_upload_failed",
+      `${uploadRes.status} ${uploadRes.statusText}${body ? ` ${body}` : ""}`,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await uploadRes.json();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "invalid_json";
+    throw new PublishArticleError("wp_invalid_media_response", message);
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !isPositiveInteger((parsed as { id?: unknown }).id)
+  ) {
+    throw new PublishArticleError(
+      "wp_invalid_media_response",
+      "missing or invalid `id`",
+    );
+  }
+  const mediaResponse = parsed as WordPressMediaResponse;
+  const sourceUrl =
+    typeof mediaResponse.source_url === "string" && mediaResponse.source_url
+      ? mediaResponse.source_url
+      : null;
+
+  // 3. Optionally PUT the alt text. We do this even if WP echoed
+  // `alt_text` back from the original POST — older WP versions
+  // ignore alt_text on multipart/raw uploads, so a follow-up PUT
+  // is the safe path. Failures here are non-fatal — alt text is a
+  // nice-to-have, the upload itself succeeded.
+  const trimmedAlt = input.altText?.trim() || null;
+  if (trimmedAlt && mediaResponse.alt_text !== trimmedAlt) {
+    try {
+      await input.fetchImpl(
+        buildWordPressMediaEndpoint(input.wpUrl, mediaResponse.id),
+        {
+          method: "PUT",
+          headers: {
+            Authorization: input.auth,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ alt_text: trimmedAlt }),
+        },
+      );
+      /* v8 ignore start -- defensive: alt-text patch is best-effort */
+    } catch {
+      // Swallow — the media upload itself succeeded; the alt text
+      // can be fixed by an operator later via the WP admin.
+    }
+    /* v8 ignore stop */
+  }
+
+  return {
+    mediaId: mediaResponse.id,
+    sourceUrl,
+    altText: trimmedAlt,
+  };
+}
+
+/**
+ * Internal helper used by `syncArticleToWordPress`. Returns the
+ * `featured_media` value to embed in the post payload (or `null`
+ * for "no featured image"). Caches the new id on `articles` when
+ * we just uploaded.
+ */
+async function ensureFeaturedMediaUploaded(opts: {
+  article: ArticleForPublish;
+  wpUrl: string;
+  auth: string;
+  fetchImpl: typeof fetch;
+  client: Client;
+}): Promise<number | null> {
+  const { article, wpUrl, auth, fetchImpl, client } = opts;
+  const imageUrl = article.featured_image_url?.trim();
+  if (!imageUrl) return null;
+  if (article.wp_featured_media_id) {
+    // Already uploaded; reuse the cached attachment id.
+    return article.wp_featured_media_id;
+  }
+
+  const result = await uploadMediaToWordPressWithAuth({
+    wpUrl,
+    auth,
+    imageUrl,
+    altText: article.featured_image_alt,
+    // Pass the article fields so the uploader can build an
+    // SEO-friendly `Content-Disposition` filename once it's read the
+    // source content-type. We don't precompute the filename here
+    // because the extension depends on the WP-side content type
+    // (e.g. an Unsplash URL with no extension might serve `image/jpeg`
+    // OR `image/webp` depending on Accept negotiation).
+    filenameContext: {
+      articleTitle: article.title,
+      targetKeyword: article.target_keyword,
+      featuredImageAlt: article.featured_image_alt,
+    },
+    fetchImpl,
+  });
+
+  // Stamp the cached attachment id on the row so subsequent
+  // updates / re-publishes don't re-upload the same bytes. Failure
+  // here means the next sync will upload a duplicate — annoying
+  // but not user-facing — so we don't bubble it.
+  /* v8 ignore start -- defensive: caching write failure is best-effort */
+  const { error } = await client
+    .from("articles")
+    .update({ wp_featured_media_id: result.mediaId })
+    .eq("id", article.id)
+    .eq("blog_id", article.blog_id);
+  if (error) {
+    // Swallow — operator can reconcile by checking the WP media
+    // library; the post payload still picks up the freshly-returned id.
+  }
+  /* v8 ignore stop */
+
+  // Post-upload Unsplash bookkeeping. Look up the active
+  // attribution row for this article + image — only present when
+  // the user picked from the Unsplash / recently-used picker (a
+  // manually-pasted URL has no row). Two best-effort follow-ups:
+  //
+  //   1. Fire the Unsplash `download_location` GET so the
+  //      photographer's stats reflect this download. Required by
+  //      Unsplash's API guidelines for any "actual use" of a photo.
+  //      We only do this once per upload — the cached
+  //      `wp_featured_media_id` early-return at the top guarantees
+  //      we never re-trigger for the same image.
+  //
+  //   2. Stamp `article_image_uploads.wp_media_id` so the row
+  //      reflects the WP-side id. Future "Recently used" picks of
+  //      this same image get the cached id without re-uploading.
+  //
+  // Both are wrapped in try/catch and swallow because the WP
+  // article publish above us already succeeded — failing the
+  // publish over an attribution bookkeeping miss would be the
+  // wrong trade-off.
+  await runPostUploadBookkeeping({
+    article,
+    wpMediaId: result.mediaId,
+    fetchImpl,
+    client,
+  });
+
+  return result.mediaId;
+}
+
+/**
+ * Result row produced by {@link ensureSectionMediaUploaded}. Carries
+ * everything the HTML injector needs to build the `<figure>` block:
+ * the (WP-side or original) image URL, alt text, the `wp_media_id`
+ * for the `wp-image-{id}` class, and the provider attribution map
+ * keyed by `section_key`.
+ */
+interface SectionUploadResult {
+  sectionKey: string;
+  wpMediaId: number;
+  /** WP `source_url` from the upload response. Falls back to the original `image_url`. */
+  imageUrl: string;
+  altText: string | null;
+  provider: string;
+  photographerName: string | null;
+  photographerProfileUrl: string | null;
+  photoUrl: string | null;
+  downloadLocation: string | null;
+}
+
+/**
+ * Maps a WordPress media upload's `PublishArticleError` codes to
+ * the section-image equivalents. Same shape as the featured-image
+ * errors, but the friendly copy says "section image" and points
+ * the user at the section-image editor (not the featured-image
+ * card) for recovery.
+ *
+ * Kept as a function so future codes (and the matching `details`
+ * passthrough) stay in one place.
+ */
+function toSectionImageError(err: unknown): PublishArticleError {
+  // `uploadMediaToWordPressWithAuth` only ever throws
+  // `PublishArticleError` (see its body — every throw site uses
+  // `throw new PublishArticleError(...)`). Anything else here would
+  // be a future regression — we rethrow it as-is rather than
+  // pretending it's a section-image failure.
+  /* v8 ignore next 1 -- defensive: the underlying uploader's contract guarantees PublishArticleError */
+  if (!(err instanceof PublishArticleError)) throw err;
+  switch (err.code) {
+    case "image_fetch_failed":
+      return new PublishArticleError(
+        "section_image_fetch_failed",
+        err.details,
+      );
+    case "image_invalid_content_type":
+      return new PublishArticleError(
+        "section_image_invalid_content_type",
+        err.details,
+      );
+    case "wp_media_upload_failed":
+      return new PublishArticleError(
+        "section_image_upload_failed",
+        err.details,
+      );
+    case "wp_invalid_media_response":
+      return new PublishArticleError(
+        "section_image_invalid_response",
+        err.details,
+      );
+    /* v8 ignore next 5 -- defensive: the four codes above are the only ones the uploader emits today; the default keeps a future new code from leaking the featured-image copy through to the section-image surface */
+    default:
+      return new PublishArticleError(
+        "section_image_upload_failed",
+        err.details,
+      );
+  }
+}
+
+/**
+ * Internal helper used by `syncArticleToWordPress`. For each
+ * supplied section image row:
+ *
+ *   * If `wp_media_id` is already set, reuse it — no upload, no
+ *     bytes over the wire, no download tracking ping (which already
+ *     fired the first time the row was uploaded).
+ *   * Otherwise, upload the row's `image_url` to WordPress via
+ *     `uploadMediaToWordPressWithAuth`, stamp `wp_media_id` back on
+ *     the row, fire the provider's `trackDownload` so the
+ *     photographer's stats reflect this use, and return the new
+ *     id + `source_url`.
+ *
+ * Upload failures throw — section images are explicit user picks
+ * and shipping a published post with broken / missing section images
+ * would be worse than failing the whole publish. The thrown
+ * `PublishArticleError` is the **section-prefixed** variant so the
+ * UI copy says "a section image" instead of "the featured image".
+ *
+ * Stamping failures + tracking failures are best-effort: the
+ * upload succeeded, the publish should proceed, the operator can
+ * reconcile via WP admin.
+ *
+ * Filename priority: section heading → article target keyword →
+ * article title. Section heading lives in `alt_text` slot of the
+ * filename builder so we get `desk-with-laptop.jpg` even when the
+ * row's own `alt_text` is null (the slot heading is always set).
+ */
+async function ensureSectionMediaUploaded(opts: {
+  article: ArticleForPublish;
+  sectionRows: ArticleImageUploadRow[];
+  wpUrl: string;
+  auth: string;
+  fetchImpl: typeof fetch;
+  client: Client;
+}): Promise<SectionUploadResult[]> {
+  const { article, sectionRows, wpUrl, auth, fetchImpl, client } = opts;
+  const out: SectionUploadResult[] = [];
+  for (const row of sectionRows) {
+    if (row.wp_media_id) {
+      // Cached id reuse — skip upload + tracking entirely.
+      // `row.section_key ?? ""` is defensive — callers
+      // (`syncArticleToWordPress`) filter to rows whose section_key
+      // is in the saved body before passing them here, so the null
+      // branch is unreachable in practice.
+      out.push({
+        /* v8 ignore next 1 -- defensive: filtered upstream by `row.section_key && validKeys.has(...)` */
+        sectionKey: row.section_key ?? "",
+        wpMediaId: row.wp_media_id,
+        imageUrl: row.image_url,
+        altText: row.alt_text,
+        provider: row.provider,
+        photographerName: row.photographer_name,
+        photographerProfileUrl: row.photographer_profile_url,
+        photoUrl: row.photo_url,
+        downloadLocation: row.download_location,
+      });
+      continue;
+    }
+
+    let result: Awaited<ReturnType<typeof uploadMediaToWordPressWithAuth>>;
+    try {
+      result = await uploadMediaToWordPressWithAuth({
+        wpUrl,
+        auth,
+        imageUrl: row.image_url,
+        altText: row.alt_text,
+        filenameContext: {
+          // Section heading is the most specific descriptor → use
+          // it as the alt-equivalent for the filename slug. If the
+          // row's own alt text is set, prefer that.
+          featuredImageAlt: row.alt_text ?? row.section_heading,
+          targetKeyword: article.target_keyword,
+          articleTitle: article.title,
+        },
+        fetchImpl,
+      });
+    } catch (err) {
+      throw toSectionImageError(err);
+    }
+
+    // Stamp the WP media id back onto the section row. Best-effort —
+    // a failure here means the next publish re-uploads (WordPress
+    // dedupes by filename, so worst case is a slightly-renamed
+    // duplicate in the media library, not user-visible breakage).
+    /* v8 ignore start -- defensive: stamping failure is best-effort and doesn't fail the publish */
+    try {
+      await stampWordPressMediaIdOnImageUpload({
+        rowId: row.id,
+        wpMediaId: result.mediaId,
+        client,
+      });
+    } catch {
+      // Swallow.
+    }
+    /* v8 ignore stop */
+
+    // Fire the provider's download tracker (Unsplash etc.). Same
+    // best-effort posture as the featured-image bookkeeping —
+    // failures here never fail the publish.
+    /* v8 ignore start -- defensive: download tracking is best-effort + provider adapters never throw, but the wrap survives a future regression */
+    try {
+      if (row.download_location) {
+        const provider = getImageProvider(row.provider);
+        await provider.trackDownload({
+          downloadLocation: row.download_location,
+          fetchImpl,
+        });
+      }
+    } catch (err) {
+      // Adapter not registered for `row.provider` (e.g. legacy /
+      // future provider not in the registry). The ImageSearchError
+      // is the typed "not registered" signal; anything else
+      // re-throws so the test suite catches unexpected runtime
+      // errors.
+      if (!(err instanceof ImageSearchError)) throw err;
+    }
+    /* v8 ignore stop */
+
+    out.push({
+      /* v8 ignore next 1 -- defensive: filtered upstream by `row.section_key && validKeys.has(...)` */
+      sectionKey: row.section_key ?? "",
+      wpMediaId: result.mediaId,
+      // Prefer the WP-side source_url — it's the canonical URL on
+      // the WP site (closer to the post + survives if the original
+      // remote URL goes away). Fall back to the original image_url
+      // when WP didn't echo source_url (older WP versions).
+      imageUrl: result.sourceUrl ?? row.image_url,
+      altText: row.alt_text,
+      provider: row.provider,
+      photographerName: row.photographer_name,
+      photographerProfileUrl: row.photographer_profile_url,
+      photoUrl: row.photo_url,
+      downloadLocation: row.download_location,
+    });
+  }
+  return out;
+}
+
+/**
+ * Projects the section-upload results into the `sectionImagesByKey`
+ * map shape the markdown-to-html injector consumes. Kept separate
+ * from `ensureSectionMediaUploaded` so the upload helper stays
+ * focused on side effects and the projection stays a pure function
+ * (testable + safe to call multiple times).
+ */
+function buildSectionImagesByKey(
+  results: SectionUploadResult[],
+): Record<string, SectionImageForHtml> {
+  const map: Record<string, SectionImageForHtml> = {};
+  for (const r of results) {
+    /* v8 ignore next 1 -- defensive: ensureSectionMediaUploaded only emits results with non-empty sectionKey (filtered upstream); guard kept so a future caller can't accidentally produce empty-keyed map entries */
+    if (!r.sectionKey) continue;
+    map[r.sectionKey] = {
+      imageUrl: r.imageUrl,
+      altText: r.altText,
+      wpMediaId: r.wpMediaId,
+      attribution: {
+        provider: r.provider,
+        photographerName: r.photographerName,
+        photographerProfileUrl: r.photographerProfileUrl,
+        photoUrl: r.photoUrl,
+      },
+    };
+  }
+  return map;
+}
+
+/**
+ * Best-effort post-upload work: provider-specific download ping +
+ * stamp the `wp_media_id` on the attribution row. Never throws —
+ * the WP post is already on its way and we don't want a stat-
+ * tracking failure to roll back a successful publish.
+ *
+ * Routes through the image-provider registry so any provider that
+ * has tracking semantics (Unsplash today; future Pexels etc.) gets
+ * its `trackDownload` called by reading the `provider` column off
+ * the attribution row. Providers without tracking are no-ops via
+ * the `not_supported` reason in their adapter.
+ */
+async function runPostUploadBookkeeping(opts: {
+  article: ArticleForPublish;
+  wpMediaId: number;
+  fetchImpl: typeof fetch;
+  client: Client;
+}): Promise<void> {
+  const { article, wpMediaId, fetchImpl, client } = opts;
+  /* v8 ignore start -- defensive: bookkeeping is best-effort; any thrown error here would mask a successful WP publish, so we swallow at the outermost layer */
+  try {
+    const row = await getActiveImageUploadForArticle(
+      article.id,
+      article.featured_image_url,
+      client,
+    );
+    if (!row) return;
+
+    // Look up the provider adapter by name. If the provider is not
+    // registered (legacy row, manual seed, etc.) skip tracking but
+    // still stamp `wp_media_id` below — the publish itself is still
+    // a success and the tracker is best-effort by design.
+    let provider:
+      | ReturnType<typeof getImageProvider>
+      | null = null;
+    try {
+      provider = getImageProvider(row.provider);
+    } catch (err) {
+      if (!(err instanceof ImageSearchError)) throw err;
+    }
+
+    if (provider && row.download_location) {
+      // Adapter contract: never throws, returns a typed result.
+      // Wrapped anyway in case a future provider regresses on that.
+      await provider.trackDownload({
+        downloadLocation: row.download_location,
+        fetchImpl,
+      });
+    }
+
+    // Cache the WP media id on the attribution row only if it
+    // wasn't already set (avoid a needless write when the row was
+    // pre-stamped by the editor save's wp_media_id reuse path).
+    if (row.wp_media_id !== wpMediaId) {
+      await stampWordPressMediaIdOnImageUpload({
+        rowId: row.id,
+        wpMediaId,
+        client,
+      });
+    }
+  } catch {
+    // Swallow — the publish itself succeeded.
+  }
+  /* v8 ignore stop */
+}
+
+/**
+ * Picks a sensible filename for the `Content-Disposition` header
+ * from the source URL. Falls back to `featured-image.<ext>` when
+ * the URL doesn't carry a filename (e.g. signed CDN URLs ending
+ * in `?token=...`).
+ */
+function deriveFilename(imageUrl: string, contentType: string): string {
+  try {
+    const parsed = new URL(imageUrl);
+    const last = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
+    if (last.includes(".")) return last;
+  } catch {
+    // fallthrough to the extension-from-content-type fallback
+  }
+  // `image/png` → `png`, `image/jpeg` → `jpeg`. Default to bin so
+  // WordPress doesn't reject for an empty extension.
+  const ext = contentType.split("/")[1]?.split(";")[0]?.trim() || "bin";
+  return `featured-image.${ext}`;
+}
+
+/**
+ * Strips characters that would break the `Content-Disposition`
+ * filename header (quotes, control chars, path separators). The
+ * regex keeps it simple: alphanumerics, dot, hyphen, underscore.
+ */
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 }

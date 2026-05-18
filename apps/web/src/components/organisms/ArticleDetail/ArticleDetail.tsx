@@ -2,7 +2,10 @@ import { cn } from "@/lib/cn";
 import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Card } from "@/components/atoms/Card";
-import { MarkdownPreview } from "@/components/atoms/MarkdownPreview";
+import {
+  MarkdownPreview,
+  type MarkdownPreviewSectionImage,
+} from "@/components/atoms/MarkdownPreview";
 import {
   PostStatusBadge,
   type PostStatus,
@@ -48,6 +51,49 @@ export interface ArticleDetailData {
    * `link`).
    */
   wpPostUrl: string | null;
+  /** Featured image URL stored on the article (or null). */
+  featuredImageUrl: string | null;
+  /** Featured image alt text stored on the article (or null). */
+  featuredImageAlt: string | null;
+  /**
+   * WordPress attachment id for the featured image, set after the
+   * first publish/update uploads the bytes. `null` when no upload
+   * has happened yet OR when the URL was just changed (the edit
+   * action clears this so the next sync re-uploads).
+   */
+  wpFeaturedMediaId: number | null;
+  /**
+   * Provider attribution for the active featured image (the latest
+   * `article_image_uploads` row whose `image_url` matches
+   * `featuredImageUrl`). `null` when the image was manually pasted
+   * (no attribution row) or no featured image is set. Rendered as
+   * "Photo by X on Unsplash" under the image card.
+   */
+  featuredImageAttribution: ArticleFeaturedImageAttribution | null;
+  /**
+   * Section image map keyed by `section_key` — passed straight
+   * through to {@link MarkdownPreview}'s `sectionImagesByKey`.
+   * The connector loads section rows server-side, projects them
+   * into this shape, and the renderer injects each image above
+   * the matching H2 in the article body.
+   *
+   * Empty map / `undefined` → no section images, plain body
+   * rendering (legacy data, articles with no section picks).
+   */
+  sectionImagesByKey?: Record<string, MarkdownPreviewSectionImage>;
+}
+
+/**
+ * Subset of `article_image_uploads` the read-view actually shows.
+ * Only the credit-line fields — `wp_media_id` / `download_location`
+ * etc. stay server-side.
+ */
+export interface ArticleFeaturedImageAttribution {
+  /** `'unsplash'` today; reserved for `'ai'`, `'manual_url'`. */
+  provider: string;
+  photographerName: string | null;
+  photographerProfileUrl: string | null;
+  photoUrl: string | null;
 }
 
 export interface ArticleDetailProps {
@@ -119,6 +165,50 @@ export function ArticleDetail({
         </Card>
       ) : null}
 
+      {article.featuredImageUrl ? (
+        <Card>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Featured image
+            </h2>
+            {article.wpFeaturedMediaId !== null ? (
+              <Badge variant="success" size="sm">
+                Synced to WordPress
+              </Badge>
+            ) : (
+              <Badge variant="default" size="sm">
+                Will upload on next sync
+              </Badge>
+            )}
+          </div>
+          <div className="mt-3 overflow-hidden rounded-[var(--sp-radius-md)] border border-border bg-background">
+            {/* eslint-disable-next-line @next/next/no-img-element -- third-party
+                URL; we don't want next/image's domain allow-list pinned to
+                user-supplied hosts */}
+            <img
+              src={article.featuredImageUrl}
+              alt={article.featuredImageAlt || ""}
+              className="max-h-80 w-full object-cover"
+            />
+          </div>
+          {article.featuredImageAlt ? (
+            <p className="mt-2 text-xs text-muted">
+              <span className="font-medium text-foreground">Alt:</span>{" "}
+              {article.featuredImageAlt}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-muted">
+              No alt text — add one in Edit for screen readers and SEO.
+            </p>
+          )}
+          {article.featuredImageAttribution ? (
+            <FeaturedImageAttributionLine
+              attribution={article.featuredImageAttribution}
+            />
+          ) : null}
+        </Card>
+      ) : null}
+
       {article.excerpt ? (
         <Card>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -147,7 +237,10 @@ export function ArticleDetail({
         </h2>
         <div className="mt-3">
           {article.contentMarkdown && article.contentMarkdown.trim() ? (
-            <MarkdownPreview markdown={article.contentMarkdown} />
+            <MarkdownPreview
+              markdown={article.contentMarkdown}
+              sectionImagesByKey={article.sectionImagesByKey}
+            />
           ) : (
             <p className="text-sm text-muted">
               No body yet.{" "}
@@ -159,5 +252,62 @@ export function ArticleDetail({
         </div>
       </Card>
     </article>
+  );
+}
+
+/**
+ * Renders the credit line under the featured image. Today only
+ * `'unsplash'` produces a meaningful line ("Photo by Annie Spratt
+ * on Unsplash") — other providers fall through to a minimal
+ * "Photo by …" if they ever supply attribution. Returns `null`
+ * when there's literally nothing to attribute (e.g. provider was
+ * recorded but neither photographer name nor URL is present).
+ */
+function FeaturedImageAttributionLine({
+  attribution,
+}: {
+  attribution: ArticleFeaturedImageAttribution;
+}) {
+  const isUnsplash = attribution.provider === "unsplash";
+  const photographerLink = attribution.photographerProfileUrl ? (
+    <a
+      href={attribution.photographerProfileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-foreground hover:underline"
+    >
+      {attribution.photographerName ?? "the photographer"}
+    </a>
+  ) : (
+    <span className="text-foreground">
+      {attribution.photographerName ?? "the photographer"}
+    </span>
+  );
+
+  // We only render the line when there's at least one piece of
+  // useful attribution to surface. The publish service writes a
+  // row even for `'manual_url'` provider in some future flows; we
+  // don't want a bare "Photo by the photographer." with no link.
+  if (!attribution.photographerName && !attribution.photographerProfileUrl) {
+    return null;
+  }
+
+  return (
+    <p className="mt-2 text-xs text-muted">
+      Photo by {photographerLink}
+      {isUnsplash ? (
+        <>
+          {" on "}
+          <a
+            href={attribution.photoUrl ?? "https://unsplash.com"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground hover:underline"
+          >
+            Unsplash
+          </a>
+        </>
+      ) : null}
+    </p>
   );
 }

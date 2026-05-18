@@ -58,6 +58,12 @@ function translateValidationCode(code: string): string {
       return "Target keyword is too long.";
     case "content_too_long":
       return "Article body is too long.";
+    case "featured_image_url_invalid":
+      return "Featured image URL must be an http or https URL.";
+    case "featured_image_url_too_long":
+      return "Featured image URL is too long.";
+    case "featured_image_alt_too_long":
+      return "Featured image alt text is too long.";
     /* v8 ignore next 2 -- defensive: code list is closed by the service union */
     default:
       return "Invalid article fields.";

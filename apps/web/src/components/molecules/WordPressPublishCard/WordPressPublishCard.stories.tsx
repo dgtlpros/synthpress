@@ -107,3 +107,21 @@ export const ClearingLink: Story = {
     isClearing: true,
   },
 };
+
+export const FeaturedImagePendingUpload: Story = {
+  args: {
+    ...baseArgs,
+    featuredImageUrl: "https://example.com/img.jpg",
+    wpFeaturedMediaId: null,
+  },
+};
+
+export const FeaturedImageUploaded: Story = {
+  args: {
+    ...baseArgs,
+    wpPostId: 421,
+    wpPostUrl: "https://example.com/?p=421",
+    featuredImageUrl: "https://example.com/img.jpg",
+    wpFeaturedMediaId: 99,
+  },
+};

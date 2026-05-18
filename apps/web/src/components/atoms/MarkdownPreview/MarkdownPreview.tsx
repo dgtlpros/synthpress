@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
+import { extractArticleSections } from "@/lib/extract-article-sections";
 
 /**
  * Renders Markdown as styled HTML.
@@ -15,14 +17,80 @@ import { cn } from "@/lib/cn";
  * `remark-gfm` adds GitHub-flavoured Markdown support (tables, task
  * lists, strikethrough, autolinks) which is what Claude tends to
  * produce for article bodies.
+ *
+ * Section images (optional):
+ *   When `sectionImagesByKey` is supplied, the custom `h2` renderer
+ *   injects an `<img>` block (plus optional attribution credit) ABOVE
+ *   each H2 whose slugified key matches a map entry. The list of
+ *   keys-in-document-order is computed once via
+ *   {@link extractArticleSections}; the renderer increments a local
+ *   counter as it sees each H2 to know which key it's on. That
+ *   counter resets per render (it's a `let` inside the component
+ *   function), so React Strict Mode's double-render also produces
+ *   correct output.
  */
+
+/**
+ * Provider attribution for a section image. Mirrors
+ * `ArticleFeaturedImageAttribution` field-for-field so featured
+ * + section attribution can share a single render helper later if
+ * we extract it. Kept inline here so `MarkdownPreview` doesn't
+ * depend on an organism.
+ */
+export interface MarkdownPreviewImageAttribution {
+  provider: string;
+  photographerName: string | null;
+  photographerProfileUrl: string | null;
+  photoUrl: string | null;
+}
+
+export interface MarkdownPreviewSectionImage {
+  imageUrl: string;
+  altText: string | null;
+  attribution: MarkdownPreviewImageAttribution | null;
+}
 
 export interface MarkdownPreviewProps {
   markdown: string;
+  /**
+   * Optional map of `section_key` → image to render above the
+   * matching H2. Keys come from
+   * {@link extractArticleSections}'s `sectionKey` field — keep
+   * source-of-truth alignment between the editor (which writes
+   * with this key) and the renderer (which reads with it).
+   *
+   * Entries whose key doesn't appear in the parsed body are
+   * silently ignored — they won't render anywhere. That's the
+   * "orphaned section image" handling: the row may still exist
+   * in `article_image_uploads`, but if the H2 was removed from
+   * the body, it doesn't render.
+   */
+  sectionImagesByKey?: Record<string, MarkdownPreviewSectionImage>;
   className?: string;
 }
 
-export function MarkdownPreview({ markdown, className }: MarkdownPreviewProps) {
+export function MarkdownPreview({
+  markdown,
+  sectionImagesByKey,
+  className,
+}: MarkdownPreviewProps) {
+  // Pre-extract the H2 keys in document order so the H2 renderer
+  // can look them up by index. Memoized on `markdown` to avoid
+  // re-parsing per parent re-render when the body hasn't changed.
+  const orderedSectionKeys = useMemo(() => {
+    if (!sectionImagesByKey || Object.keys(sectionImagesByKey).length === 0) {
+      return [];
+    }
+    return extractArticleSections(markdown).map((s) => s.sectionKey);
+  }, [markdown, sectionImagesByKey]);
+
+  // Counter wrapper for the H2 renderer. Wrapped in an object so
+  // the renderer can mutate `.value` per H2 it sees without
+  // tripping the "no let reassignment after render" lint rule.
+  // Fresh per render → strict-mode double-renders each get their
+  // own counter + produce identical output.
+  const h2Counter = { value: 0 };
+
   return (
     <div className={cn("text-sm text-foreground", className)}>
       <ReactMarkdown
@@ -33,11 +101,22 @@ export function MarkdownPreview({ markdown, className }: MarkdownPreviewProps) {
               {children}
             </h1>
           ),
-          h2: ({ children }) => (
-            <h2 className="mt-6 mb-2 text-xl font-semibold text-foreground first:mt-0">
-              {children}
-            </h2>
-          ),
+          h2: ({ children }) => {
+            // Look up the section image by this H2's document
+            // index. The list is empty when no section images were
+            // supplied, so this short-circuits to the plain H2.
+            const key = orderedSectionKeys[h2Counter.value];
+            h2Counter.value += 1;
+            const image = key ? sectionImagesByKey?.[key] : undefined;
+            return (
+              <>
+                {image ? <SectionImageBlock image={image} /> : null}
+                <h2 className="mt-6 mb-2 text-xl font-semibold text-foreground first:mt-0">
+                  {children}
+                </h2>
+              </>
+            );
+          },
           h3: ({ children }) => (
             <h3 className="mt-4 mb-2 text-lg font-semibold text-foreground first:mt-0">
               {children}
@@ -126,5 +205,89 @@ export function MarkdownPreview({ markdown, className }: MarkdownPreviewProps) {
         {markdown}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/**
+ * Renders the section-image figure above an H2.
+ *
+ * Wrapped in a `<figure>` so the attribution `<figcaption>` is
+ * semantically associated with the image for screen readers.
+ * Margins mirror the H1/H2 spacing so the figure sits naturally
+ * between the previous section's body and the next heading.
+ */
+function SectionImageBlock({
+  image,
+}: {
+  image: MarkdownPreviewSectionImage;
+}) {
+  const credit = renderAttribution(image.attribution);
+  return (
+    <figure className="mt-6 mb-2 first:mt-0">
+      {/* eslint-disable-next-line @next/next/no-img-element -- third-party
+          URL; next/image's domain allowlist would block Unsplash + future
+          providers */}
+      <img
+        src={image.imageUrl}
+        alt={image.altText ?? ""}
+        className="w-full rounded-[var(--sp-radius-md)]"
+      />
+      {credit ? (
+        <figcaption className="mt-2 text-xs text-muted">{credit}</figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
+/**
+ * Builds the "Photo by X on Provider" credit line for a section
+ * image. Returns `null` when there's nothing meaningful to render
+ * (manual-paste rows with no photographer + no link). The shape
+ * mirrors `FeaturedImageAttributionLine` in `ArticleDetail` so the
+ * two surfaces produce visually-consistent credit text.
+ */
+function renderAttribution(
+  attribution: MarkdownPreviewImageAttribution | null,
+): React.ReactNode {
+  if (!attribution) return null;
+  const providerLabel =
+    attribution.provider === "unsplash" ? "Unsplash" : attribution.provider;
+  const photographerName = attribution.photographerName?.trim() || null;
+  // Manual-paste rows with no photographer + no link have nothing
+  // to credit; skip the figcaption entirely.
+  if (!photographerName && !attribution.photoUrl) return null;
+
+  const photographerNode =
+    photographerName && attribution.photographerProfileUrl ? (
+      <a
+        href={attribution.photographerProfileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-foreground underline-offset-2 hover:underline"
+      >
+        {photographerName}
+      </a>
+    ) : photographerName ? (
+      <span className="text-foreground">{photographerName}</span>
+    ) : null;
+
+  const providerNode = attribution.photoUrl ? (
+    <a
+      href={attribution.photoUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-foreground underline-offset-2 hover:underline"
+    >
+      {providerLabel}
+    </a>
+  ) : (
+    <span className="text-foreground">{providerLabel}</span>
+  );
+
+  return (
+    <>
+      {photographerNode ? <>Photo by {photographerNode} on </> : <>From </>}
+      {providerNode}
+    </>
   );
 }

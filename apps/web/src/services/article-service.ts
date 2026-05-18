@@ -7,6 +7,13 @@ import type {
   TablesUpdate,
 } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  recordArticleImageUpload,
+  syncArticleSectionImageRows,
+  type SectionImageDesiredState,
+  type SelectedImageMetadata,
+} from "./article-image-upload-service";
+import { extractArticleSections } from "@/lib/extract-article-sections";
 
 /**
  * Article CRUD helpers used by the detail page + edit action.
@@ -22,7 +29,7 @@ type Client = SupabaseClient<Database>;
 export type ArticleRow = Tables<"articles">;
 
 const ARTICLE_DETAIL_COLUMNS =
-  "id, blog_id, article_idea_id, user_id, title, slug, excerpt, content, content_markdown, meta_description, target_keyword, author_persona, word_count, status, generated_by_model, ai_model, ai_prompt, error_message, raw_ai_response, scheduled_at, published_at, created_at, updated_at, wp_post_id, wp_post_url, featured_image_url" as const;
+  "id, blog_id, article_idea_id, user_id, title, slug, excerpt, content, content_markdown, meta_description, target_keyword, author_persona, word_count, status, generated_by_model, ai_model, ai_prompt, error_message, raw_ai_response, scheduled_at, published_at, created_at, updated_at, wp_post_id, wp_post_url, wp_featured_media_id, featured_image_url, featured_image_alt" as const;
 
 /**
  * Loads a single article scoped to a blog. Returns `null` when the
@@ -59,6 +66,54 @@ export interface ArticleEditableFields {
   metaDescription: string | null;
   targetKeyword: string | null;
   contentMarkdown: string | null;
+  /**
+   * Featured-image URL. Null/empty means "no featured image". Must be
+   * an `http` or `https` URL (validated below). Whenever this value
+   * changes from the previously-stored one we clear the cached
+   * `wp_featured_media_id` so the next WordPress publish/update
+   * uploads the new bytes — see {@link updateArticleFields}.
+   */
+  featuredImageUrl: string | null;
+  /**
+   * Accessible alt text for the featured image. Optional plain text;
+   * we just length-cap it. Persisted onto the matching WordPress
+   * media row by the publish service so it shows up for screen
+   * readers + SEO on the published post.
+   */
+  featuredImageAlt: string | null;
+  /**
+   * Optional provider-side metadata for the selected featured image
+   * (Unsplash photo data today; future AI-gen / manual-upload tags
+   * later). When present AND `imageUrl` matches the saved
+   * `featuredImageUrl`, the save persists an `article_image_uploads`
+   * row so the attribution + Unsplash `download_location` are
+   * available for the WP publish step + the article detail page.
+   *
+   * Hooks set this when the user picks a photo from the Unsplash
+   * picker; manually pasting a URL leaves it `null` so we don't
+   * fabricate attribution for an unknown source.
+   */
+  selectedImageMetadata?: SelectedImageMetadata | null;
+  /**
+   * Optional desired-state list for section images (one per H2 the
+   * editor surfaced). When supplied, the save path reconciles
+   * `article_image_uploads` rows with `role = 'section'` against
+   * this list — INSERTs new picks, UPDATEs alt-text-only edits,
+   * DELETEs cleared or orphaned rows. See
+   * {@link syncArticleSectionImageRows} for the diff rules.
+   *
+   * `undefined` (the default) means "don't touch section image
+   * rows" — preserves the v3 save semantics for callers that
+   * haven't been wired for section images yet (legacy or
+   * non-editor save paths).
+   *
+   * Stale picks (sectionKey not present in the saved
+   * `contentMarkdown` body) are filtered out automatically. The
+   * server re-parses the saved markdown via
+   * {@link extractArticleSections} as the source of truth for which
+   * section keys are valid.
+   */
+  sectionImages?: SectionImageDesiredState[];
 }
 
 export const ARTICLE_TITLE_MAX = 200;
@@ -73,6 +128,13 @@ export const ARTICLE_TARGET_KEYWORD_MAX = 120;
  * blog post; the AI tops out around 5–10k chars in practice.
  */
 export const ARTICLE_CONTENT_MAX = 100_000;
+/**
+ * URL columns are nullable text in Postgres so we cap them at a
+ * generous-but-sane length. WordPress itself accepts URLs up to a few
+ * KB; 2000 chars is the de-facto browser-supported cap.
+ */
+export const ARTICLE_FEATURED_IMAGE_URL_MAX = 2000;
+export const ARTICLE_FEATURED_IMAGE_ALT_MAX = 500;
 
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -84,7 +146,27 @@ export type ArticleEditValidationError =
   | "excerpt_too_long"
   | "meta_description_too_long"
   | "target_keyword_too_long"
-  | "content_too_long";
+  | "content_too_long"
+  | "featured_image_url_invalid"
+  | "featured_image_url_too_long"
+  | "featured_image_alt_too_long";
+
+/**
+ * Lightweight URL validator used for the featured-image field. Allows
+ * only `http` and `https` schemes — anything else (`javascript:`,
+ * `data:`, `file:`) is rejected so a malicious paste can't slip into
+ * the WP payload or the dashboard preview. Returns `true` for valid
+ * URLs, `false` otherwise. Empty / whitespace strings are NOT valid
+ * here — the caller treats blank as "no image" upstream.
+ */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Validates the editor input. Pure function — no DB touch. Returns the
@@ -122,6 +204,21 @@ export function validateArticleEdit(
     input.contentMarkdown.length > ARTICLE_CONTENT_MAX
   ) {
     return "content_too_long";
+  }
+  if (input.featuredImageUrl !== null) {
+    const url = input.featuredImageUrl.trim();
+    if (url.length > ARTICLE_FEATURED_IMAGE_URL_MAX) {
+      return "featured_image_url_too_long";
+    }
+    if (url.length > 0 && !isHttpUrl(url)) {
+      return "featured_image_url_invalid";
+    }
+  }
+  if (
+    input.featuredImageAlt !== null &&
+    input.featuredImageAlt.length > ARTICLE_FEATURED_IMAGE_ALT_MAX
+  ) {
+    return "featured_image_alt_too_long";
   }
   return null;
 }
@@ -190,7 +287,7 @@ export async function updateArticleFields(
 
   const { data: existing, error: readErr } = await supabase
     .from("articles")
-    .select("status")
+    .select("status, featured_image_url")
     .eq("id", input.articleId)
     .eq("blog_id", input.blogId)
     .maybeSingle();
@@ -220,6 +317,19 @@ export async function updateArticleFields(
     existing.status as Database["public"]["Enums"]["article_status"],
   );
 
+  // Normalize the featured-image fields to "stored" form: trimmed
+  // URL or null, trimmed alt or null. The DB columns are nullable
+  // text; an empty string would round-trip differently than null and
+  // confuse downstream "has image" checks.
+  const trimmedFeaturedImageUrl =
+    input.fields.featuredImageUrl !== null
+      ? input.fields.featuredImageUrl.trim() || null
+      : null;
+  const trimmedFeaturedImageAlt =
+    input.fields.featuredImageAlt !== null
+      ? input.fields.featuredImageAlt.trim() || null
+      : null;
+
   const update: TablesUpdate<"articles"> = {
     title: input.fields.title.trim(),
     slug: trimmedSlug || null,
@@ -227,8 +337,29 @@ export async function updateArticleFields(
     meta_description: input.fields.metaDescription ?? null,
     target_keyword: input.fields.targetKeyword?.trim() || null,
     content_markdown: input.fields.contentMarkdown ?? null,
+    featured_image_url: trimmedFeaturedImageUrl,
+    featured_image_alt: trimmedFeaturedImageAlt,
     status: nextStatus,
   };
+
+  // Whenever the featured image URL changes, drop the cached WP
+  // attachment id so the next publish/update flow uploads the new
+  // bytes — UNLESS the picker handed us a `selectedImageMetadata`
+  // with a `wpMediaId` AND its `imageUrl` matches the new URL. That
+  // happens when the user picks from the "Recently used" section:
+  // the photo has already been uploaded to this blog's WordPress, so
+  // we forward the existing media id instead of forcing a re-upload.
+  const previousFeaturedImageUrl = existing.featured_image_url;
+  const featuredImageUrlChanged =
+    trimmedFeaturedImageUrl !== previousFeaturedImageUrl;
+  const reuseWpMediaId = input.fields.selectedImageMetadata?.wpMediaId ?? null;
+  const reuseMatchesNewUrl =
+    !!input.fields.selectedImageMetadata &&
+    input.fields.selectedImageMetadata.imageUrl === trimmedFeaturedImageUrl;
+  if (featuredImageUrlChanged) {
+    update.wp_featured_media_id =
+      reuseWpMediaId !== null && reuseMatchesNewUrl ? reuseWpMediaId : null;
+  }
 
   const { data: updated, error: updateErr } = await supabase
     .from("articles")
@@ -239,6 +370,53 @@ export async function updateArticleFields(
     .single();
 
   if (updateErr) throw updateErr;
+
+  // Persist attribution AFTER the article update succeeds so we
+  // never end up with an orphan attribution row pointing at an
+  // article URL that didn't actually save. Three guards before we
+  // write:
+  //   1. Caller actually attached metadata (picker selection vs.
+  //      manual URL paste).
+  //   2. The metadata's `imageUrl` matches what we just saved — if
+  //      the user picked a photo, then edited the URL by hand, the
+  //      metadata is stale and we drop it.
+  //   3. The saved URL is non-null — clearing the featured image
+  //      shouldn't write an attribution row.
+  // Failures here propagate; the action layer maps them to a
+  // friendly message and the user can retry.
+  const meta = input.fields.selectedImageMetadata;
+  if (
+    meta &&
+    trimmedFeaturedImageUrl !== null &&
+    meta.imageUrl === trimmedFeaturedImageUrl
+  ) {
+    await recordArticleImageUpload({
+      articleId: input.articleId,
+      blogId: input.blogId,
+      metadata: meta,
+      client: supabase,
+    });
+  }
+
+  // Reconcile section-image rows against the saved markdown. Skip
+  // when the caller didn't pass any section_images (legacy or
+  // non-editor save paths); pass through unchanged otherwise. We
+  // derive the valid set of section keys from the JUST-SAVED body
+  // — not the in-memory `input.fields.contentMarkdown` — so a
+  // server-side normalization (e.g. future markdown sanitizer) is
+  // the source of truth for which H2s actually landed in the DB.
+  if (input.fields.sectionImages !== undefined) {
+    const savedSections = extractArticleSections(updated.content_markdown);
+    const validKeys = new Set(savedSections.map((s) => s.sectionKey));
+    await syncArticleSectionImageRows({
+      articleId: input.articleId,
+      blogId: input.blogId,
+      desired: input.fields.sectionImages,
+      validSectionKeys: validKeys,
+      client: supabase,
+    });
+  }
+
   return updated as ArticleRow;
 }
 

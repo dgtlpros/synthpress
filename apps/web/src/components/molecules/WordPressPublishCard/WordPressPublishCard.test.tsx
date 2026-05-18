@@ -428,3 +428,51 @@ describe("WordPressPublishCard — remote draft missing", () => {
     ).toBeEnabled();
   });
 });
+
+describe("WordPressPublishCard — featured image status line", () => {
+  it("hides the status line when there is no featured image URL", () => {
+    render(<WordPressPublishCard {...baseProps} />);
+    expect(
+      screen.queryByTestId("wp-featured-image-status"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the 'will upload on next sync' line when wpFeaturedMediaId is null", () => {
+    render(
+      <WordPressPublishCard
+        {...baseProps}
+        featuredImageUrl="https://example.com/img.jpg"
+        wpFeaturedMediaId={null}
+      />,
+    );
+    const node = screen.getByTestId("wp-featured-image-status");
+    expect(node).toHaveTextContent(
+      /Featured image will be uploaded to WordPress on the next sync\./i,
+    );
+  });
+
+  it("shows the 'uploaded to WordPress' line when wpFeaturedMediaId is set", () => {
+    render(
+      <WordPressPublishCard
+        {...baseProps}
+        featuredImageUrl="https://example.com/img.jpg"
+        wpFeaturedMediaId={99}
+      />,
+    );
+    const node = screen.getByTestId("wp-featured-image-status");
+    expect(node).toHaveTextContent(/Featured image uploaded to WordPress\./i);
+  });
+
+  it("hides the status line when only wpFeaturedMediaId is set without a URL (defensive)", () => {
+    render(
+      <WordPressPublishCard
+        {...baseProps}
+        featuredImageUrl={null}
+        wpFeaturedMediaId={99}
+      />,
+    );
+    expect(
+      screen.queryByTestId("wp-featured-image-status"),
+    ).not.toBeInTheDocument();
+  });
+});

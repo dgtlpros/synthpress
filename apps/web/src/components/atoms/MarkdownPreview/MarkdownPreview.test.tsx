@@ -116,3 +116,287 @@ describe("MarkdownPreview", () => {
     expect(container.firstChild).toHaveClass("custom-cls");
   });
 });
+
+describe("MarkdownPreview — section images", () => {
+  const TWO_SECTION_BODY = "## Intro\n\nIntro body.\n\n## FAQ\n\nFaq body.\n";
+
+  it("does NOT inject any images when sectionImagesByKey is omitted", () => {
+    const { container } = render(
+      <MarkdownPreview markdown={TWO_SECTION_BODY} />,
+    );
+    expect(container.querySelector("figure")).toBeNull();
+    // The H2s themselves still render normally.
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+  });
+
+  it("does NOT inject anything when sectionImagesByKey is empty", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={TWO_SECTION_BODY}
+        sectionImagesByKey={{}}
+      />,
+    );
+    expect(container.querySelector("figure")).toBeNull();
+  });
+
+  it("renders a section image above the matching H2", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={TWO_SECTION_BODY}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: "Intro hero",
+            attribution: null,
+          },
+        }}
+      />,
+    );
+    const figures = container.querySelectorAll("figure");
+    expect(figures).toHaveLength(1);
+    const img = figures[0]!.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("https://example.com/intro.jpg");
+    expect(img?.getAttribute("alt")).toBe("Intro hero");
+  });
+
+  it("renders ONE figure per H2 when both keys are mapped", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={TWO_SECTION_BODY}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: null,
+          },
+          faq: {
+            imageUrl: "https://example.com/faq.jpg",
+            altText: null,
+            attribution: null,
+          },
+        }}
+      />,
+    );
+    const figures = container.querySelectorAll("figure");
+    expect(figures).toHaveLength(2);
+    expect(figures[0]!.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/intro.jpg",
+    );
+    expect(figures[1]!.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/faq.jpg",
+    );
+  });
+
+  it("falls back to empty alt when altText is null", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: null,
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector("figure img")?.getAttribute("alt")).toBe(
+      "",
+    );
+  });
+
+  it("renders Unsplash attribution credit when supplied", () => {
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: "Hero",
+            attribution: {
+              provider: "unsplash",
+              photographerName: "Annie Spratt",
+              photographerProfileUrl: "https://unsplash.com/@anniespratt",
+              photoUrl: "https://unsplash.com/photos/abc",
+            },
+          },
+        }}
+      />,
+    );
+    const credit = screen.getByText(/photo by/i);
+    expect(credit).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Annie Spratt" })).toHaveAttribute(
+      "href",
+      "https://unsplash.com/@anniespratt",
+    );
+    expect(screen.getByRole("link", { name: "Unsplash" })).toHaveAttribute(
+      "href",
+      "https://unsplash.com/photos/abc",
+    );
+  });
+
+  it("renders photographer as plain text (no link) when profile URL is null", () => {
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "unsplash",
+              photographerName: "Annie Spratt",
+              photographerProfileUrl: null,
+              photoUrl: "https://unsplash.com/photos/abc",
+            },
+          },
+        }}
+      />,
+    );
+    // Photographer name is rendered but NOT as a link.
+    expect(
+      screen.queryByRole("link", { name: "Annie Spratt" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Annie Spratt")).toBeInTheDocument();
+  });
+
+  it("renders provider as plain text (no link) when photoUrl is null", () => {
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "unsplash",
+              photographerName: "Annie Spratt",
+              photographerProfileUrl: "https://unsplash.com/@anniespratt",
+              photoUrl: null,
+            },
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("link", { name: /^Unsplash$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders 'From <Provider>' (no 'Photo by') when no photographer", () => {
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "unsplash",
+              photographerName: null,
+              photographerProfileUrl: null,
+              photoUrl: "https://unsplash.com/photos/abc",
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/^From/)).toBeInTheDocument();
+  });
+
+  it("skips the figcaption entirely when attribution has neither name nor link", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "manual_url",
+              photographerName: null,
+              photographerProfileUrl: null,
+              photoUrl: null,
+            },
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector("figcaption")).toBeNull();
+  });
+
+  it("uses provider id as the label for non-unsplash providers", () => {
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "pexels",
+              photographerName: "Sam",
+              photographerProfileUrl: "https://pexels.com/@sam",
+              photoUrl: "https://pexels.com/photos/123",
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "pexels" })).toBeInTheDocument();
+  });
+
+  it("silently ignores entries whose key isn't present in the body (orphaned)", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: null,
+          },
+          ghost: {
+            // Section was removed from the body but the row still
+            // exists in the picker map — must not render.
+            imageUrl: "https://example.com/ghost.jpg",
+            altText: null,
+            attribution: null,
+          },
+        }}
+      />,
+    );
+    const figures = container.querySelectorAll("figure");
+    expect(figures).toHaveLength(1);
+    expect(figures[0]!.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/intro.jpg",
+    );
+  });
+
+  it("matches duplicate H2 slugs via the parser's deduped keys (faq, faq-2, …)", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={"## FAQ\n\nfirst body.\n\n## FAQ\n\nsecond body.\n"}
+        sectionImagesByKey={{
+          faq: {
+            imageUrl: "https://example.com/faq-1.jpg",
+            altText: null,
+            attribution: null,
+          },
+          "faq-2": {
+            imageUrl: "https://example.com/faq-2.jpg",
+            altText: null,
+            attribution: null,
+          },
+        }}
+      />,
+    );
+    const srcs = Array.from(
+      container.querySelectorAll("figure img"),
+    ).map((n) => n.getAttribute("src"));
+    expect(srcs).toEqual([
+      "https://example.com/faq-1.jpg",
+      "https://example.com/faq-2.jpg",
+    ]);
+  });
+});

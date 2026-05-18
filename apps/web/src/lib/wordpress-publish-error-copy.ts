@@ -35,4 +35,20 @@ export const PUBLISH_ARTICLE_ERROR_COPY: Record<
     "WordPress rejected the request. Check the connection and try again.",
   wp_invalid_response:
     "WordPress responded with an unexpected payload. Try again in a minute.",
+  image_fetch_failed:
+    "Could not download the featured image from its URL. Check that the link is publicly reachable.",
+  image_invalid_content_type:
+    "The featured image URL did not return an image. Use a direct link to a JPEG, PNG, GIF, or WebP file.",
+  wp_media_upload_failed:
+    "WordPress rejected the featured image upload. Check the WordPress media library permissions and try again.",
+  wp_invalid_media_response:
+    "WordPress responded with an unexpected media payload. Try again in a minute.",
+  section_image_fetch_failed:
+    "Could not download a section image from its URL. Check that the link is publicly reachable, or remove the section image and try again.",
+  section_image_invalid_content_type:
+    "A section image URL did not return an image. Use a direct link to a JPEG, PNG, GIF, or WebP file, or remove the section image and try again.",
+  section_image_upload_failed:
+    "WordPress rejected a section image upload. Check the WordPress media library permissions and try again.",
+  section_image_invalid_response:
+    "WordPress responded with an unexpected payload while uploading a section image. Try again in a minute.",
 };

@@ -13,6 +13,7 @@ import {
   type BlogAutopilotRunDetail,
   getBlogAutopilotRunDetail,
 } from "@/services/blog-autopilot-run-service";
+import { AUTOPILOT_ACTION_ERRORS } from "./autopilot-errors";
 import type { ActionResult } from "./workspace";
 
 /**
@@ -41,17 +42,6 @@ export interface RunAutopilotNowResult {
   ideasGenerated: number;
   articleJobsStarted: number;
 }
-
-/**
- * Errors we surface as `result.error`. UI maps these to friendly
- * copy so the wording can change without touching the action.
- */
-export const AUTOPILOT_ACTION_ERRORS = {
-  not_signed_in: "You must be signed in.",
-  blog_not_found: "Blog not found.",
-  autopilot_disabled:
-    "Enable autopilot first. Open the Automation tab, set Mode to Autopilot and turn on the Enabled toggle.",
-} as const;
 
 export async function runAutopilotNow(
   teamId: string,

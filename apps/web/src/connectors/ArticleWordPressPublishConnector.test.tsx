@@ -55,6 +55,8 @@ const baseProps = {
   wpPostId: null as number | null,
   wpPostUrl: null as string | null,
   articleStatus: "ready_for_review" as const,
+  featuredImageUrl: null as string | null,
+  wpFeaturedMediaId: null as number | null,
   connectionsHref: "/teams/t1/projects/p1/blogs/b1/connections",
 };
 

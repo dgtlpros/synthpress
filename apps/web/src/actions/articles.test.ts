@@ -121,6 +121,8 @@ const baseFields = {
   metaDescription: "A meta description.",
   targetKeyword: "edited",
   contentMarkdown: "Body.",
+  featuredImageUrl: null,
+  featuredImageAlt: null,
 };
 
 beforeEach(() => {
@@ -241,6 +243,18 @@ describe("updateArticle", () => {
         expected: /target keyword is too long/i,
       },
       { code: "content_too_long", expected: /article body is too long/i },
+      {
+        code: "featured_image_url_invalid",
+        expected: /featured image URL must be an http or https URL/i,
+      },
+      {
+        code: "featured_image_url_too_long",
+        expected: /featured image URL is too long/i,
+      },
+      {
+        code: "featured_image_alt_too_long",
+        expected: /featured image alt text is too long/i,
+      },
     ];
 
     for (const { code, expected } of cases) {

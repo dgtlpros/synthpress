@@ -24,6 +24,17 @@ export interface ArticleWordPressPublishConnectorProps {
    * branching in the card).
    */
   articleStatus: WordPressArticleLocalStatus;
+  /**
+   * Featured image URL stored on the article (or null). Drives the
+   * card's "Featured image will be uploaded…" / "Featured image
+   * uploaded to WordPress" status line.
+   */
+  featuredImageUrl: string | null;
+  /**
+   * Cached WordPress media id for the featured image (or null).
+   * `null` after a URL change → next sync uploads.
+   */
+  wpFeaturedMediaId: number | null;
   /** Where "Connect WordPress" links to. */
   connectionsHref: string;
 }
@@ -49,6 +60,8 @@ export function ArticleWordPressPublishConnector({
   wpPostId,
   wpPostUrl,
   articleStatus,
+  featuredImageUrl,
+  wpFeaturedMediaId,
   connectionsHref,
 }: ArticleWordPressPublishConnectorProps) {
   const {
@@ -85,6 +98,8 @@ export function ArticleWordPressPublishConnector({
       errorIsRemoteMissing={errorIsRemoteMissing}
       justSentPostId={lastResult?.wpPostId ?? null}
       justSentPostUrl={lastResult?.wpPostUrl ?? null}
+      featuredImageUrl={featuredImageUrl}
+      wpFeaturedMediaId={wpFeaturedMediaId}
     />
   );
 }

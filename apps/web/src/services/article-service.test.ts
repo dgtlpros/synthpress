@@ -8,6 +8,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ARTICLE_CONTENT_MAX,
   ARTICLE_EXCERPT_MAX,
+  ARTICLE_FEATURED_IMAGE_ALT_MAX,
+  ARTICLE_FEATURED_IMAGE_URL_MAX,
   ARTICLE_META_DESCRIPTION_MAX,
   ARTICLE_SLUG_MAX,
   ARTICLE_TARGET_KEYWORD_MAX,
@@ -28,17 +30,29 @@ interface ChainResult<T> {
 }
 
 function makeChain<T>(result: ChainResult<T>) {
-  return {
+  // `order` is intentionally a chainable-AND-thenable hybrid: many
+  // existing queries terminate at `.order(...)` and `await` the
+  // result, while `listSectionImageRowsForArticle` chains
+  // `.order(...).order(...)`. We satisfy both by returning `this`
+  // from `order` AND making the chain itself thenable to the
+  // canned result.
+  const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     neq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
-    order: vi.fn().mockResolvedValue(result),
+    order: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
     single: vi.fn().mockResolvedValue(result),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    delete: vi.fn().mockReturnThis(),
+    then: ((onFulfilled, onRejected) =>
+      Promise.resolve(result).then(onFulfilled, onRejected)) as PromiseLike<
+      ChainResult<T>
+    >["then"],
   };
+  return chain;
 }
 
 interface MockClient {
@@ -72,6 +86,8 @@ const baseFields: ArticleEditableFields = {
   metaDescription: "Step-by-step playbook for launching a B2B blog in 30 days.",
   targetKeyword: "launch b2b blog",
   contentMarkdown: "# heading\n\nA paragraph.",
+  featuredImageUrl: null,
+  featuredImageAlt: null,
 };
 
 // ============================================================================
@@ -152,6 +168,89 @@ describe("validateArticleEdit", () => {
         contentMarkdown: "x".repeat(ARTICLE_CONTENT_MAX + 1),
       }),
     ).toBe("content_too_long");
+  });
+
+  it("accepts a null featured image URL (no image)", () => {
+    expect(
+      validateArticleEdit({ ...baseFields, featuredImageUrl: null }),
+    ).toBeNull();
+  });
+
+  it("accepts an empty featured image URL (treated as no image)", () => {
+    expect(
+      validateArticleEdit({ ...baseFields, featuredImageUrl: "" }),
+    ).toBeNull();
+  });
+
+  it("accepts an http URL", () => {
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "http://example.com/img.jpg",
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts an https URL", () => {
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "https://example.com/img.jpg",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a featured image URL that is not http(s)", () => {
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "javascript:alert(1)",
+      }),
+    ).toBe("featured_image_url_invalid");
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "data:image/png;base64,abcd",
+      }),
+    ).toBe("featured_image_url_invalid");
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "/relative/path.jpg",
+      }),
+    ).toBe("featured_image_url_invalid");
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: "not a url at all",
+      }),
+    ).toBe("featured_image_url_invalid");
+  });
+
+  it("rejects an over-long featured image URL", () => {
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageUrl: `https://example.com/${"x".repeat(
+          ARTICLE_FEATURED_IMAGE_URL_MAX,
+        )}`,
+      }),
+    ).toBe("featured_image_url_too_long");
+  });
+
+  it("accepts a null featured image alt", () => {
+    expect(
+      validateArticleEdit({ ...baseFields, featuredImageAlt: null }),
+    ).toBeNull();
+  });
+
+  it("rejects an over-long featured image alt", () => {
+    expect(
+      validateArticleEdit({
+        ...baseFields,
+        featuredImageAlt: "x".repeat(ARTICLE_FEATURED_IMAGE_ALT_MAX + 1),
+      }),
+    ).toBe("featured_image_alt_too_long");
   });
 });
 
@@ -583,6 +682,623 @@ describe("updateArticleFields", () => {
 
     expect(maybeSingle).toHaveBeenCalledTimes(1);
     expect(client.__chains.articles!.neq).not.toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------------------
+  // Featured image fields — persistence + clear-on-change behavior.
+  // --------------------------------------------------------------
+
+  it("persists trimmed featured_image_url + featured_image_alt", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      // existing read returns the previous URL (same as new) so the
+      // wp_featured_media_id reset doesn't fire.
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/img.jpg",
+        },
+        error: null,
+      })
+      // slug conflict check (no conflict)
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "  https://example.com/img.jpg  ",
+        featuredImageAlt: "  A photo of a cat  ",
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      featured_image_url: string | null;
+      featured_image_alt: string | null;
+      wp_featured_media_id?: number | null;
+    };
+    expect(updateArg.featured_image_url).toBe("https://example.com/img.jpg");
+    expect(updateArg.featured_image_alt).toBe("A photo of a cat");
+    // URL didn't change, so wp_featured_media_id is NOT touched.
+    expect(updateArg).not.toHaveProperty("wp_featured_media_id");
+  });
+
+  it("normalizes blank featured-image fields to null", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { status: "draft", featured_image_url: null },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "   ",
+        featuredImageAlt: "   ",
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      featured_image_url: string | null;
+      featured_image_alt: string | null;
+    };
+    expect(updateArg.featured_image_url).toBeNull();
+    expect(updateArg.featured_image_alt).toBeNull();
+  });
+
+  it("clears wp_featured_media_id when featured_image_url changes", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/new.jpg",
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      wp_featured_media_id: number | null;
+      featured_image_url: string;
+    };
+    expect(updateArg.wp_featured_media_id).toBeNull();
+    expect(updateArg.featured_image_url).toBe("https://example.com/new.jpg");
+  });
+
+  it("clears wp_featured_media_id when the user removes the featured image", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: { ...baseFields, featuredImageUrl: null, featuredImageAlt: null },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      wp_featured_media_id: number | null;
+      featured_image_url: string | null;
+    };
+    expect(updateArg.wp_featured_media_id).toBeNull();
+    expect(updateArg.featured_image_url).toBeNull();
+  });
+
+  it("does NOT clear wp_featured_media_id when only the alt changes", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/img.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/img.jpg",
+        featuredImageAlt: "Updated alt text",
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      featured_image_alt: string | null;
+      wp_featured_media_id?: number | null;
+    };
+    expect(updateArg.featured_image_alt).toBe("Updated alt text");
+    expect(updateArg).not.toHaveProperty("wp_featured_media_id");
+  });
+
+  // --------------------------------------------------------------
+  // selectedImageMetadata — attribution row + wp_media_id reuse
+  // --------------------------------------------------------------
+
+  const SAMPLE_METADATA = {
+    provider: "unsplash",
+    providerPhotoId: "abc",
+    imageUrl: "https://example.com/new.jpg",
+    altText: "Desk with laptop",
+    photographerName: "Annie Spratt",
+    photographerProfileUrl: "https://unsplash.com/@anniespratt",
+    photoUrl: "https://unsplash.com/photos/abc",
+    downloadLocation: "https://api.unsplash.com/photos/abc/download",
+    wpMediaId: null,
+  };
+
+  it("inserts an article_image_uploads row when metadata + URL match the saved value", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+    // Attribution insert returns a row from `.single()` on the
+    // `article_image_uploads` chain.
+    client.__chains.article_image_uploads = makeChain({
+      data: { id: "img-row-1" },
+      error: null,
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/new.jpg",
+        featuredImageAlt: "Desk with laptop",
+        selectedImageMetadata: SAMPLE_METADATA,
+      },
+      client: client as never,
+    });
+
+    expect(client.__chains.article_image_uploads!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        article_id: "a1",
+        blog_id: "b1",
+        provider: "unsplash",
+        provider_photo_id: "abc",
+        image_url: "https://example.com/new.jpg",
+        photographer_name: "Annie Spratt",
+        download_location: SAMPLE_METADATA.downloadLocation,
+        role: "featured",
+      }),
+    );
+  });
+
+  it("does NOT insert an attribution row when metadata.imageUrl doesn't match the saved URL (stale pick)", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+    client.__chains.article_image_uploads = makeChain({
+      data: null,
+      error: null,
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        // User picked a Unsplash photo, then edited the URL by hand
+        // before saving. Metadata is stale — attribution row stays
+        // unwritten.
+        featuredImageUrl: "https://example.com/manually-pasted.jpg",
+        selectedImageMetadata: SAMPLE_METADATA,
+      },
+      client: client as never,
+    });
+
+    expect(
+      client.__chains.article_image_uploads!.insert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("does NOT insert an attribution row when no selectedImageMetadata is supplied (manual paste)", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { status: "ready_for_review", featured_image_url: null },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+    client.__chains.article_image_uploads = makeChain({
+      data: null,
+      error: null,
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/manually-pasted.jpg",
+        // selectedImageMetadata omitted entirely.
+      },
+      client: client as never,
+    });
+
+    expect(
+      client.__chains.article_image_uploads!.insert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("does NOT insert an attribution row when the user clears the featured image", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+    client.__chains.article_image_uploads = makeChain({
+      data: null,
+      error: null,
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: null,
+        // Hypothetical: caller passes metadata that's now stale because
+        // the URL was cleared. The save still drops the attribution row.
+        selectedImageMetadata: SAMPLE_METADATA,
+      },
+      client: client as never,
+    });
+
+    expect(
+      client.__chains.article_image_uploads!.insert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("reuses wp_media_id from metadata when URL changes AND metadata matches (recently-used flow)", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+    client.__chains.article_image_uploads = makeChain({
+      data: { id: "img-row-2" },
+      error: null,
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/new.jpg",
+        selectedImageMetadata: { ...SAMPLE_METADATA, wpMediaId: 99 },
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      wp_featured_media_id: number | null;
+    };
+    expect(updateArg.wp_featured_media_id).toBe(99);
+    // The attribution row also carries the cached wp_media_id.
+    expect(client.__chains.article_image_uploads!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ wp_media_id: 99 }),
+    );
+  });
+
+  it("does NOT reuse wp_media_id when metadata.imageUrl doesn't match the new URL (stale pick)", async () => {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "ready_for_review",
+          featured_image_url: "https://example.com/old.jpg",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { id: "a1" }, error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        featuredImageUrl: "https://example.com/manually-pasted.jpg",
+        selectedImageMetadata: { ...SAMPLE_METADATA, wpMediaId: 99 },
+      },
+      client: client as never,
+    });
+
+    const updateArg = client.__chains.articles!.update.mock.calls[0]![0] as {
+      wp_featured_media_id: number | null;
+    };
+    expect(updateArg.wp_featured_media_id).toBeNull();
+  });
+
+  // --------------------------------------------------------------
+  // sectionImages — diff/sync against article_image_uploads
+  // --------------------------------------------------------------
+
+  const SECTION_METADATA = {
+    provider: "unsplash",
+    providerPhotoId: "sec-1",
+    imageUrl: "https://example.com/section.jpg",
+    altText: "Section hero alt",
+    photographerName: "Pat",
+    photographerProfileUrl: "https://unsplash.com/@pat",
+    photoUrl: "https://unsplash.com/photos/sec-1",
+    downloadLocation: "https://api.unsplash.com/photos/sec-1/download",
+    wpMediaId: null,
+  };
+
+  /**
+   * Section-image tests share this `articles` chain setup: one
+   * `maybeSingle` for the existence read + one `single` for the
+   * update return. The saved `content_markdown` carries an H2 that
+   * matches `intro` so the section parser's `validSectionKeys`
+   * accepts that key downstream.
+   */
+  function makeSectionFlowClient(opts: { savedContentMarkdown: string }) {
+    const client = makeClient({ articles: { data: null, error: null } });
+    client.__chains.articles!.maybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { status: "ready_for_review", featured_image_url: null },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.__chains.articles!.single = vi.fn().mockResolvedValueOnce({
+      data: { id: "a1", content_markdown: opts.savedContentMarkdown },
+      error: null,
+    });
+    return client;
+  }
+
+  /**
+   * Overrides the `article_image_uploads` chain's awaitable
+   * resolution to `{data: rows, error: null}`. Used by the section-
+   * image sync tests so the list query (which awaits the chain
+   * itself, not `.single()` or `.maybeSingle()`) yields the rows
+   * the test wants to drive.
+   */
+  function setArticleImageUploadsListResult(
+    client: ReturnType<typeof makeClient>,
+    result: ChainResult<unknown>,
+  ): void {
+    const chain = client.__chains.article_image_uploads!;
+    const thenImpl: PromiseLike<ChainResult<unknown>>["then"] = (
+      onFulfilled,
+      onRejected,
+    ) => Promise.resolve(result).then(onFulfilled, onRejected);
+    chain.then = thenImpl as typeof chain.then;
+  }
+
+  it("skips the section sync entirely when sectionImages is undefined", async () => {
+    const client = makeSectionFlowClient({
+      savedContentMarkdown: "## Intro\n\nbody",
+    });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: { ...baseFields }, // no sectionImages
+      client: client as never,
+    });
+
+    // No `from("article_image_uploads")` call should fire for the
+    // sync path (the featured-image path only fires when metadata
+    // is present, which it isn't in baseFields).
+    const calls = client.from.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain("article_image_uploads");
+  });
+
+  it("calls the section sync (inserts) when sectionImages is supplied for a saved H2", async () => {
+    const client = makeSectionFlowClient({
+      savedContentMarkdown: "## Intro\n\nbody",
+    });
+    // The sync's first await is the `listSectionImageRowsForArticle`
+    // call → empty array. Subsequent insert hits `.single()` →
+    // returns the new row id. Both share the same chain.
+    client.__chains.article_image_uploads = makeChain({
+      data: { id: "sec-row-1" },
+      error: null,
+    });
+    setArticleImageUploadsListResult(client, { data: [], error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        sectionImages: [
+          {
+            sectionKey: "intro",
+            sectionHeading: "Intro",
+            sortOrder: 0,
+            imageUrl: SECTION_METADATA.imageUrl,
+            altText: "Section hero alt",
+            metadata: SECTION_METADATA,
+          },
+        ],
+      },
+      client: client as never,
+    });
+
+    expect(client.__chains.article_image_uploads!.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        article_id: "a1",
+        blog_id: "b1",
+        role: "section",
+        section_key: "intro",
+        section_heading: "Intro",
+        sort_order: 0,
+        image_url: SECTION_METADATA.imageUrl,
+      }),
+    );
+  });
+
+  it("filters out stale section keys (heading removed from the saved body)", async () => {
+    const client = makeSectionFlowClient({
+      savedContentMarkdown: "## Intro\n\nbody", // only `intro`
+    });
+    client.__chains.article_image_uploads = makeChain({
+      data: { id: "sec-row-1" },
+      error: null,
+    });
+    setArticleImageUploadsListResult(client, { data: [], error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: {
+        ...baseFields,
+        sectionImages: [
+          // Intro IS in saved body → should insert.
+          {
+            sectionKey: "intro",
+            sectionHeading: "Intro",
+            sortOrder: 0,
+            imageUrl: SECTION_METADATA.imageUrl,
+            altText: "Intro",
+            metadata: SECTION_METADATA,
+          },
+          // Ghost is NOT in saved body → should drop.
+          {
+            sectionKey: "ghost",
+            sectionHeading: "Ghost",
+            sortOrder: 1,
+            imageUrl: "https://example.com/ghost.jpg",
+            altText: "Ghost",
+            metadata: { ...SECTION_METADATA, imageUrl: "https://example.com/ghost.jpg" },
+          },
+        ],
+      },
+      client: client as never,
+    });
+
+    const insertCalls = client.__chains.article_image_uploads!.insert.mock
+      .calls;
+    expect(insertCalls).toHaveLength(1);
+    expect(insertCalls[0]![0]).toMatchObject({ section_key: "intro" });
+  });
+
+  it("empty sectionImages array against a body with H2s → no inserts (no-op sync)", async () => {
+    const client = makeSectionFlowClient({
+      savedContentMarkdown: "## Intro\n\nbody",
+    });
+    client.__chains.article_image_uploads = makeChain({
+      data: null,
+      error: null,
+    });
+    setArticleImageUploadsListResult(client, { data: [], error: null });
+
+    await updateArticleFields({
+      articleId: "a1",
+      blogId: "b1",
+      fields: { ...baseFields, sectionImages: [] },
+      client: client as never,
+    });
+
+    expect(
+      client.__chains.article_image_uploads!.insert,
+    ).not.toHaveBeenCalled();
+    expect(
+      client.__chains.article_image_uploads!.update,
+    ).not.toHaveBeenCalled();
   });
 });
 

@@ -34,6 +34,9 @@ export type {
   CreateAppChoiceModalStep,
 } from "./CreateAppChoiceModal";
 
+export { UnsplashPicker } from "./UnsplashPicker";
+export type { UnsplashPickerProps } from "./UnsplashPicker";
+
 export { ProjectsListToolbar } from "./ProjectsListToolbar";
 export type {
   ProjectsListToolbarProps,
