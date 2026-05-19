@@ -19,7 +19,8 @@
     "build-storybook": "storybook build",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
     "stripe:setup": "node --env-file=.env.local scripts/stripe-setup.mjs",
-    "stripe:listen": "stripe listen --forward-to localhost:3000/api/webhooks/stripe"
+    "stripe:listen": "stripe listen --forward-to localhost:3000/api/webhooks/stripe",
+    "autopilot:seed": "node --env-file=.env.local scripts/seed-autopilot-test-data.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.76",
