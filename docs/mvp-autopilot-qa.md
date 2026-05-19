@@ -57,8 +57,21 @@ pnpm stripe:listen
 
 ### 1.3 Trigger autopilot manually
 
-Cron is wired to `/api/cron/autopilot` every 15 min in production.
-Locally you trigger it by hand:
+The committed `vercel.json` cron schedule is **daily at 08:00 UTC**
+(autopilot) + **08:30 UTC** (reconciler). That's the only schedule
+**Vercel Hobby** allows — Hobby caps cron jobs at once-per-day, and
+pushing a `*/5` or `*/15` schedule fails the deploy with a link to
+the Cron Jobs pricing docs.
+
+For local QA + Vercel **Pro** production:
+
+| Environment | How to trigger autopilot |
+|-------------|-------------------------|
+| **Local dev** | `curl` against the dev server (below) — fire as often as you want. |
+| **Vercel Hobby** | Cron fires once daily at 08:00 UTC. For more frequent checks, manually `curl` the deployed URL with `Authorization: Bearer $CRON_SECRET`. |
+| **Vercel Pro** | Edit `apps/web/vercel.json` to `*/15 * * * *` (or any sub-daily cadence) — Pro lifts the daily cap. The route handler + scheduler logic don't change. |
+
+Local trigger:
 
 ```bash
 # Dry run first — no workflows are actually started.

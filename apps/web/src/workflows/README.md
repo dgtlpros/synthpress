@@ -188,14 +188,38 @@ and the bar will jump.
 ```json
 {
   "crons": [
-    { "path": "/api/cron/reconcile-article-jobs", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/autopilot", "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/reconcile-article-jobs", "schedule": "30 8 * * *" },
+    { "path": "/api/cron/autopilot", "schedule": "0 8 * * *" }
   ]
 }
 ```
 
 Vercel sends a `GET` to each route on the configured cadence with
 `Authorization: Bearer ${CRON_SECRET}` set automatically.
+
+**Why daily, not every 15 min?** Vercel **Hobby** allows cron jobs
+to fire **at most once per day** — pushing a `*/5` or `*/15`
+schedule fails the deploy with a link to the Cron Jobs pricing
+docs. The committed schedule is therefore Hobby-safe (8:00 UTC for
+autopilot, 8:30 UTC for the reconciler so it runs after autopilot
+has had time to spawn workflows).
+
+For **production-grade** autopilot throughput (15-minute /
+hourly checks), upgrade to **Vercel Pro** and bump these
+schedules in `vercel.json` — Pro lifts the daily cap. Suggested
+Pro values:
+
+```json
+{
+  "crons": [
+    { "path": "/api/cron/reconcile-article-jobs", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/autopilot", "schedule": "*/15 * * * *" }
+  ]
+}
+```
+
+The cron route handlers + autopilot scheduler logic are
+schedule-agnostic — only `vercel.json` changes.
 
 ## Autopilot scheduler
 
