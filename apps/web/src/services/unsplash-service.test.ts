@@ -466,15 +466,13 @@ describe("searchUnsplashPhotos — error handling", () => {
   });
 
   it("translates HTTP 429 into rate_limited", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(
-        makeResponse({
-          status: 429,
-          ok: false,
-          statusText: "Too Many Requests",
-        }),
-      );
+    const fetchImpl = vi.fn().mockResolvedValue(
+      makeResponse({
+        status: 429,
+        ok: false,
+        statusText: "Too Many Requests",
+      }),
+    );
     await expect(
       searchUnsplashPhotos({ query: "x", fetchImpl: fetchImpl as never }),
     ).rejects.toMatchObject({ code: "rate_limited" });

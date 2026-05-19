@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { start } from "workflow/api";
 import { loadBlogSettings } from "@/lib/blog-settings";
 import { getCreditCost } from "@/lib/ai/config";
+import { AUTOPILOT_SKIP_REASONS } from "@/lib/autopilot-skip-reasons";
 import { getTeamPlan } from "./team-billing-service";
 import {
   type ArticleIdeaRow,
@@ -66,6 +67,57 @@ type Client = SupabaseClient<Database>;
  * during the first few autopilot runs after a fresh idea backlog.
  */
 export const PER_RUN_ARTICLE_CAP = 5;
+
+/**
+ * Operational backpressure throttles for autopilot — NOT product /
+ * subscription / pricing limits.
+ *
+ * What these are:
+ *   * Internal MVP safety throttles that cap how many
+ *     `pending` + `processing` `generate_article` jobs autopilot
+ *     keeps IN FLIGHT at once.
+ *   * Defenses against cron stampedes, runaway duplicate jobs,
+ *     and provider rate-limit bursts (Anthropic, Pexels, the
+ *     Vercel Workflows queue).
+ *   * Skipped runs caused by these throttles are recorded as
+ *     `skipped`, not `failed` — autopilot resumes naturally on
+ *     the next cron tick once the in-flight jobs finish.
+ *
+ * What these are NOT:
+ *   * NOT a daily generation cap. Daily output is controlled by
+ *     `settings.automation.maxPostsPerDay` /
+ *     `settings.automation.generatePerWeek` and gated by the
+ *     team's Synth-token balance + per-blog `dailyTokenBudget`.
+ *     A 10 posts/day blog can absolutely reach 10 posts/day —
+ *     these throttles only spread the work across multiple
+ *     15-minute cron ticks.
+ *   * NOT tied to the customer's subscription tier or Stripe
+ *     plan. There is no plan-based concurrency in MVP. Tying
+ *     concurrency to pricing is something we may revisit
+ *     post-launch; for now the constants are deliberately
+ *     non-customer-facing.
+ *   * NOT exposed in any settings UI. Adjust them in code if
+ *     operations needs more headroom.
+ *
+ * Defaults:
+ *   * 3 per blog — large enough to hide normal latency (one
+ *     workflow finishes while the cron starts the next) but
+ *     small enough that an outage doesn't accumulate dozens of
+ *     concurrent jobs.
+ *   * 20 per team — protects a multi-blog project from runaway
+ *     concurrency: 20 blogs × 3 jobs/blog would otherwise be 60
+ *     concurrent workflows. The cap is enforced per blog tick;
+ *     other teams' blogs in the same scheduler invocation are
+ *     unaffected.
+ */
+export const AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG = 3;
+
+/**
+ * See {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG}. Same
+ * "operational backpressure, not a product limit" posture, scoped
+ * across every blog in a team.
+ */
+export const AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM = 20;
 
 /**
  * Auto-pause policy defaults.
@@ -426,6 +478,26 @@ export interface RunBlogAutopilotSchedulerInput {
 
 export interface RunBlogAutopilotSchedulerResult {
   blogsChecked: number;
+  /**
+   * `blogsSkippedDueToLimit > 0` means there were more eligible
+   * blogs than the cron tick's `limit` allowed. The next tick
+   * (15 minutes later, by default) will pick up the rest.
+   *
+   * Why this exists: a project with hundreds of armed blogs would
+   * otherwise silently process the first N every tick without any
+   * signal that it's NOT processing them all — operators wouldn't
+   * know whether autopilot is keeping up or falling behind.
+   *
+   * Computed by counting eligible blogs at scan time
+   * (`{ count: 'exact' }`) and subtracting the number we processed.
+   */
+  blogsSkippedDueToLimit: number;
+  /**
+   * Total number of eligible blogs the scan saw, regardless of
+   * `limit`. Always `>= blogsChecked + blogsSkippedDueToLimit`.
+   * Surfaced so dashboards can chart "fleet size" over time.
+   */
+  blogsEligibleTotal: number;
   runsCreated: number;
   runsSkipped: number;
   runsFailed: number;
@@ -464,6 +536,8 @@ export async function runBlogAutopilotScheduler(
 
   const result: RunBlogAutopilotSchedulerResult = {
     blogsChecked: 0,
+    blogsSkippedDueToLimit: 0,
+    blogsEligibleTotal: 0,
     runsCreated: 0,
     runsSkipped: 0,
     runsFailed: 0,
@@ -474,12 +548,17 @@ export async function runBlogAutopilotScheduler(
   };
 
   let blogs: ScheduledBlog[];
+  let totalEligible: number;
   try {
-    blogs = await loadEligibleBlogs(supabase, limit);
+    const loaded = await loadEligibleBlogs(supabase, limit);
+    blogs = loaded.blogs;
+    totalEligible = loaded.totalEligible;
   } catch (err) {
     result.errors.push(`load_blogs: ${describeErr(err)}`);
     return result;
   }
+  result.blogsEligibleTotal = totalEligible;
+  result.blogsSkippedDueToLimit = Math.max(0, totalEligible - blogs.length);
 
   for (const blog of blogs) {
     result.blogsChecked += 1;
@@ -561,8 +640,12 @@ export async function runAutopilotForBlog(
     // 2. Load settings + budget snapshot.
     const ctx = await loadBlogContext(supabase, input.blogId);
     if (!ctx) {
-      await skip(supabase, run.id, "blog_not_found");
-      return makeResult(run.id, "skipped", "blog_not_found");
+      await skip(supabase, run.id, AUTOPILOT_SKIP_REASONS.BLOG_NOT_FOUND);
+      return makeResult(
+        run.id,
+        "skipped",
+        AUTOPILOT_SKIP_REASONS.BLOG_NOT_FOUND,
+      );
     }
 
     const { settings, blog: blogRow } = ctx;
@@ -575,8 +658,12 @@ export async function runAutopilotForBlog(
       settings.automation.mode !== "autopilot" ||
       !settings.automation.enabled
     ) {
-      await skip(supabase, run.id, "autopilot_disabled");
-      return makeResult(run.id, "skipped", "autopilot_disabled");
+      await skip(supabase, run.id, AUTOPILOT_SKIP_REASONS.AUTOPILOT_DISABLED);
+      return makeResult(
+        run.id,
+        "skipped",
+        AUTOPILOT_SKIP_REASONS.AUTOPILOT_DISABLED,
+      );
     }
 
     // 3. Token + daily-spend budget check.
@@ -591,8 +678,16 @@ export async function runAutopilotForBlog(
 
     const teamPlan = await getTeamPlan(input.teamId, supabase);
     if (!teamPlan) {
-      await skip(supabase, run.id, "team_billing_unavailable");
-      return makeResult(run.id, "skipped", "team_billing_unavailable");
+      await skip(
+        supabase,
+        run.id,
+        AUTOPILOT_SKIP_REASONS.TEAM_BILLING_UNAVAILABLE,
+      );
+      return makeResult(
+        run.id,
+        "skipped",
+        AUTOPILOT_SKIP_REASONS.TEAM_BILLING_UNAVAILABLE,
+      );
     }
 
     const tokenBalance = teamPlan.balance;
@@ -614,21 +709,19 @@ export async function runAutopilotForBlog(
     // 4. Article-count budget check. "How many articles am I allowed
     // to start in this tick?" — driven by maxPostsPerDay, the
     // weekly-divided-by-7 daily allowance, and what's already been
-    // started today.
-    const articlesStartedToday = await countArticleJobsStartedTodayForBlog(
-      supabase,
-      input.blogId,
+    // started today (any status, calendar-day local to the blog's
+    // configured timezone or UTC).
+    const dailyUsage = await getBlogDailyArticleGenerationUsage({
+      blogId: input.blogId,
+      timezone: settings.automation.timezone,
       now,
-    );
-
-    const dailyMaxFromConfig = computeDailyMaxArticles(
-      settings.automation.maxPostsPerDay,
-      settings.automation.generatePerWeek,
-    );
-    const articleSlotsRemainingToday = Math.max(
-      0,
-      dailyMaxFromConfig - articlesStartedToday,
-    );
+      maxPostsPerDay: settings.automation.maxPostsPerDay,
+      generatePerWeek: settings.automation.generatePerWeek,
+      client: supabase,
+    });
+    const articlesStartedToday = dailyUsage.jobsStartedToday;
+    const dailyMaxFromConfig = dailyUsage.dailyLimit;
+    const articleSlotsRemainingToday = dailyUsage.remainingToday;
 
     // 5. Backlog check + idea top-up.
     await updateBlogAutopilotRunStatus({
@@ -750,11 +843,54 @@ export async function runAutopilotForBlog(
       Math.min(tokensFromBalance, tokensFromBudget),
     );
 
+    // 6a. Operational backpressure throttles. NOT product caps —
+    // a 10 posts/day blog can still hit 10 posts/day across cron
+    // ticks; these throttles only spread the work so a single
+    // tick doesn't fan out a queue storm. Two caps share a single
+    // early-exit path:
+    //
+    //   * per-blog — stops a tick from stacking jobs on top of a
+    //     prior tick's still-processing workflows.
+    //   * per-team — protects a multi-blog project (think 20
+    //     blogs × 3 jobs each = 60 concurrent workflows) from
+    //     saturating Anthropic / Pexels / Vercel Workflows queue.
+    //
+    // When a throttle binds, the run records `skipped` with a
+    // `*_limit_reached` reason and the next cron tick continues
+    // naturally once jobs drain. Token balance + daily article
+    // cap remain the customer-facing controls.
+    //
+    // We compute the remaining-slots numbers BEFORE
+    // `articlesToStart` so the spawn loop is bounded by the
+    // tightest of {daily cap, token budget, per-run cap,
+    // operational throttle}. Querying the counts lazily here
+    // (not earlier) keeps the early skip paths fast for blogs
+    // that have nothing to do.
+    const activeJobsForBlog = await countActiveArticleJobsForBlog({
+      blogId: input.blogId,
+      client: supabase,
+    });
+    const activeBlogSlotsRemaining = Math.max(
+      0,
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG - activeJobsForBlog,
+    );
+
+    const activeJobsForTeam = await countActiveArticleJobsForTeam({
+      teamId: input.teamId,
+      client: supabase,
+    });
+    const activeTeamSlotsRemaining = Math.max(
+      0,
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM - activeJobsForTeam,
+    );
+
     const articlesToStart = Math.min(
       approvedIdeas.length,
       articleSlotsRemainingToday,
       articlesAllowedByTokens,
       PER_RUN_ARTICLE_CAP,
+      activeBlogSlotsRemaining,
+      activeTeamSlotsRemaining,
     );
 
     const articleJobIds: string[] = [];
@@ -762,9 +898,38 @@ export async function runAutopilotForBlog(
     let lastSpawnError: string | null = null;
 
     if (articlesToStart > 0 && !input.dryRun) {
-      for (let i = 0; i < articlesToStart; i += 1) {
-        const idea = approvedIdeas[i];
+      // Loop is bounded by the slot count AND the available
+      // ideas. Dedupe-skipped ideas DON'T consume a slot — we
+      // keep walking the approved-ideas list until we've either
+      // filled all `articlesToStart` slots with fresh spawns OR
+      // run out of ideas to try. Without this, an idea whose
+      // article was already generated would silently waste a
+      // daily-cap slot and a 10-posts/day blog could end up
+      // starting only 5 jobs because half its backlog had stale
+      // completed jobs.
+      let ideaCursor = 0;
+      while (
+        articleJobsStarted < articlesToStart &&
+        ideaCursor < approvedIdeas.length
+      ) {
+        const idea = approvedIdeas[ideaCursor];
+        ideaCursor += 1;
         try {
+          // Pre-flight dedupe: skip ideas that already have an
+          // active OR completed `generate_article` job. Saves a
+          // round-trip to `queueGenerateArticleFromIdea` (which
+          // would also short-circuit on `pending`/`processing`,
+          // but we want the loop to advance to a fresh idea
+          // immediately rather than spending the slot on a
+          // duplicate-detection pass). Failed jobs are NOT
+          // short-circuited — those should retry on the next tick.
+          const alreadyExists = await hasExistingArticleGenerationForIdea({
+            ideaId: idea.id,
+            blogId: input.blogId,
+            client: supabase,
+          });
+          if (alreadyExists) continue;
+
           const queued = await queueGenerateArticleFromIdea({
             blogId: input.blogId,
             teamId: input.teamId,
@@ -776,8 +941,9 @@ export async function runAutopilotForBlog(
           });
           // The workflow is what actually consumes tokens + calls
           // Claude. queueGenerateArticleFromIdea is idempotent on
-          // already-pending jobs for the same idea, so a re-run of
-          // the scheduler hour later won't double-spawn workflows.
+          // already-pending jobs for the same idea (defense in
+          // depth — we already filtered above). A re-run of the
+          // scheduler hour later won't double-spawn workflows.
           if (!queued.alreadyQueued) {
             await start(generateArticleWorkflow, [
               {
@@ -817,6 +983,8 @@ export async function runAutopilotForBlog(
         approvedIdeasCount: approvedIdeas.length,
         articleSlotsRemainingToday,
         articlesAllowedByTokens,
+        activeBlogSlotsRemaining,
+        activeTeamSlotsRemaining,
         backlogThreshold,
         belowBacklog: initialApprovedIdeas.length < backlogThreshold,
         tokenBalance,
@@ -838,6 +1006,8 @@ export async function runAutopilotForBlog(
           dryRun: Boolean(input.dryRun),
           ideasAutoApproved,
           requireReview: settings.automation.requireReview,
+          activeJobsForBlog,
+          activeJobsForTeam,
         }),
         client: supabase,
       });
@@ -853,7 +1023,9 @@ export async function runAutopilotForBlog(
       status: "completed",
       countersDelta: { ideasGenerated, articlesStarted: articleJobsStarted },
       output: buildOutput({
-        reason: lastSpawnError ? "partial_failure" : "ok",
+        reason: lastSpawnError
+          ? AUTOPILOT_SKIP_REASONS.PARTIAL_FAILURE
+          : AUTOPILOT_SKIP_REASONS.OK,
         tokenBalance,
         tokensSpentToday,
         tokensRemainingFromBudget,
@@ -866,6 +1038,8 @@ export async function runAutopilotForBlog(
         blogName: blogRow.name,
         ideasAutoApproved,
         requireReview: settings.automation.requireReview,
+        activeJobsForBlog,
+        activeJobsForTeam,
       }),
       client: supabase,
     });
@@ -873,7 +1047,7 @@ export async function runAutopilotForBlog(
     return makeResult(
       run.id,
       "completed",
-      lastSpawnError ? "partial_failure" : null,
+      lastSpawnError ? AUTOPILOT_SKIP_REASONS.PARTIAL_FAILURE : null,
       {
         ideasGenerated,
         articleJobsStarted,
@@ -916,27 +1090,36 @@ export async function runAutopilotForBlog(
 // ============================================================================
 
 /**
- * Loads blogs whose owner has explicitly armed autopilot. Uses the
- * jsonb `->>` operator — no separate column for `mode` / `enabled`,
- * everything lives in `blogs.settings.automation` per the cleanup PR.
+ * Loads up to `limit` blogs whose owner has explicitly armed
+ * autopilot AND a count of how many are eligible IN TOTAL (so the
+ * scheduler can report `blogsSkippedDueToLimit` when more blogs
+ * exist than this tick can process).
+ *
+ * Uses the jsonb `->>` operator — no separate column for `mode` /
+ * `enabled`, everything lives in `blogs.settings.automation` per
+ * the cleanup PR. The `count: 'exact'` modifier asks PostgREST
+ * for the unfiltered total alongside the limited rows in a single
+ * query.
  */
 async function loadEligibleBlogs(
   client: Client,
   limit: number,
-): Promise<ScheduledBlog[]> {
+): Promise<{ blogs: ScheduledBlog[]; totalEligible: number }> {
   // Project membership is intentionally NOT joined — the run row
   // captures team_id directly from the project, and a deleted
   // project would cascade-delete the blog (FK on `blogs.project_id`).
-  const { data, error } = await client
+  const { data, error, count } = await client
     .from("blogs")
-    .select("id, project_id, settings, project:projects!project_id(team_id)")
+    .select("id, project_id, settings, project:projects!project_id(team_id)", {
+      count: "exact",
+    })
     .filter("settings->automation->>mode", "eq", "autopilot")
     .filter("settings->automation->>enabled", "eq", "true")
     .limit(limit);
 
   if (error) throw error;
   /* v8 ignore next 1 -- defensive: supabase returns data when error is null */
-  if (!data) return [];
+  if (!data) return { blogs: [], totalEligible: count ?? 0 };
 
   const out: ScheduledBlog[] = [];
   for (const row of data as Array<{
@@ -956,7 +1139,7 @@ async function loadEligibleBlogs(
       teamId: projectRaw.team_id,
     });
   }
-  return out;
+  return { blogs: out, totalEligible: count ?? out.length };
 }
 
 /**
@@ -991,25 +1174,6 @@ async function listApprovedIdeasForBlog(
   if (error) throw error;
   /* v8 ignore next 1 -- defensive: supabase returns data when error is null */
   return (data ?? []) as ArticleIdeaRow[];
-}
-
-async function countArticleJobsStartedTodayForBlog(
-  client: Client,
-  blogId: string,
-  now: Date,
-): Promise<number> {
-  // 24h rolling window — see the `runAutopilotForBlog` JSDoc for why
-  // we don't honor the blog's timezone in v1.
-  const cutoffIso = new Date(now.getTime() - 24 * 60 * 60_000).toISOString();
-  const { count, error } = await client
-    .from("article_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("blog_id", blogId)
-    .eq("type", "generate_article")
-    .gte("created_at", cutoffIso);
-  if (error) throw error;
-  /* v8 ignore next 1 -- defensive: supabase returns count when error is null */
-  return count ?? 0;
 }
 
 async function sumTokensSpentForBlogToday(
@@ -1054,10 +1218,340 @@ export function computeDailyMaxArticles(
   return Math.min(Math.max(0, maxPostsPerDay), Math.max(0, dailyFromWeekly));
 }
 
+// ----------------------------------------------------------------------------
+// Daily / active-job usage helpers — public so other services + tests can
+// inspect quota state without re-implementing the queries.
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the UTC `Date` corresponding to local midnight (00:00:00)
+ * in `timezone`, where "local" means "the calendar day `now` falls
+ * on inside that timezone". Defaults to a plain UTC midnight when
+ * `timezone` is `"Etc/UTC"`, falsy, or unparseable.
+ *
+ * Why we don't lean on the `Date` constructor:
+ *   `new Date(year, month, day)` builds the local time of the
+ *   *server* (which on Vercel is UTC), not the blog owner's
+ *   timezone. We have to round-trip through `Intl.DateTimeFormat`
+ *   to learn what the blog calls "today".
+ *
+ * Implementation:
+ *   1. Format `now` in `timezone` to extract local Y-M-D.
+ *   2. Build a candidate UTC midnight at that Y-M-D.
+ *   3. Compute the timezone's offset relative to UTC at that
+ *      candidate moment.
+ *   4. Subtract the offset to land on the actual UTC instant of
+ *      the local midnight.
+ *
+ * The DST trick: step 3 uses {@link computeTimezoneOffsetMs} which
+ * formats the candidate again and diffs the local representation
+ * against UTC. That's accurate even across spring-forward / fall-
+ * back days because the offset query targets the candidate moment
+ * directly, not "today's offset".
+ */
+export function startOfLocalDayUtc(now: Date, timezone: string): Date {
+  // Normalize: "Etc/UTC" / "UTC" / falsy / weird → plain UTC midnight.
+  if (!timezone || timezone === "Etc/UTC" || timezone === "UTC") {
+    const iso = now.toISOString().slice(0, 10);
+    return new Date(`${iso}T00:00:00.000Z`);
+  }
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    parts = dtf.formatToParts(now);
+    /* v8 ignore start -- defensive: Intl.DateTimeFormat throws on garbage zones (e.g. "Mars/Olympus"); fall through to plain UTC midnight */
+  } catch {
+    const iso = now.toISOString().slice(0, 10);
+    return new Date(`${iso}T00:00:00.000Z`);
+  }
+  /* v8 ignore stop */
+
+  /* v8 ignore start -- defensive: with `year`/`month`/`day` requested in the formatter options, the corresponding parts ARE always emitted by Intl.DateTimeFormat; the `?? ""` fallback is an unreachable null guard */
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  /* v8 ignore stop */
+  const year = parseInt(get("year"), 10);
+  const month = parseInt(get("month"), 10);
+  const day = parseInt(get("day"), 10);
+
+  // Step 2: candidate UTC midnight of the local Y-M-D.
+  const candidateUtcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+  const candidate = new Date(candidateUtcMs);
+
+  // Step 3+4: the candidate, viewed through `timezone`, will read
+  // some local time; the offset between that local time and UTC
+  // at this exact moment tells us how to shift back.
+  const offsetMs = computeTimezoneOffsetMs(candidate, timezone);
+  return new Date(candidateUtcMs - offsetMs);
+}
+
+/**
+ * Returns the offset (UTC → `timezone`) at `date`, in milliseconds.
+ * Positive = `timezone` is ahead of UTC (e.g. Europe/London in
+ * summer = +3600000). Negative = behind UTC (e.g. America/New_York
+ * = -18000000 in winter).
+ *
+ * Used by {@link startOfLocalDayUtc} to convert a "candidate UTC
+ * midnight" to the actual UTC instant when the blog's timezone
+ * crosses to the next calendar day.
+ */
+function computeTimezoneOffsetMs(date: Date, timezone: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = dtf.formatToParts(date);
+  /* v8 ignore start -- defensive: with all six date parts requested in the formatter options, Intl.DateTimeFormat always emits them; the `?? "0"` fallback is an unreachable null guard */
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? "0";
+  /* v8 ignore stop */
+  const localY = parseInt(get("year"), 10);
+  const localMo = parseInt(get("month"), 10);
+  const localD = parseInt(get("day"), 10);
+  const localH = parseInt(get("hour"), 10);
+  const localMi = parseInt(get("minute"), 10);
+  const localS = parseInt(get("second"), 10);
+  const localAsUtcMs = Date.UTC(
+    localY,
+    localMo - 1,
+    localD,
+    localH,
+    localMi,
+    localS,
+  );
+  return localAsUtcMs - date.getTime();
+}
+
+export interface BlogDailyArticleGenerationUsage {
+  /** UTC instant of the blog's local-day boundary. */
+  dayStart: Date;
+  /** `dayStart + 24h`. Slight DST wobble is acceptable for v1 quotas. */
+  dayEnd: Date;
+  /**
+   * Count of `article_jobs` rows where `type = 'generate_article'`
+   * AND `created_at IN [dayStart, dayEnd)`. Includes pending,
+   * processing, completed, AND failed/cancelled — every started
+   * job counts toward the cap so a flaky generation can't be
+   * retried into infinity by re-burning the user's daily quota.
+   */
+  jobsStartedToday: number;
+  /**
+   * Count of `article_jobs` rows where `type = 'generate_article'`,
+   * `status = 'completed'`, AND `completed_at IN [dayStart, dayEnd)`.
+   * Informational only — NOT used to gate the cap. Surfaced so
+   * future dashboards can show "5 started, 3 completed".
+   */
+  articlesCompletedToday: number;
+  /** {@link computeDailyMaxArticles} result — the binding cap. */
+  dailyLimit: number;
+  /** `max(0, dailyLimit - jobsStartedToday)`. */
+  remainingToday: number;
+}
+
+export interface GetBlogDailyArticleGenerationUsageInput {
+  blogId: string;
+  /**
+   * IANA zone (e.g. `"America/Los_Angeles"`). Falls back to UTC
+   * when unset, `"Etc/UTC"`, `"UTC"`, or unparseable. Pull this
+   * from `settings.automation.timezone`.
+   */
+  timezone?: string | null;
+  /** Anchor moment for "today". Defaults to `new Date()`. */
+  now?: Date;
+  /**
+   * `maxPostsPerDay` from `settings.automation`. Required so the
+   * helper can compute `dailyLimit`/`remainingToday` without
+   * re-loading the blog row.
+   */
+  maxPostsPerDay: number;
+  /** `generatePerWeek` from `settings.automation`. */
+  generatePerWeek: number;
+  client?: Client;
+}
+
+/**
+ * Centralized "how many articles is this blog allowed to start
+ * today, and how many has it already started/completed?" lookup.
+ *
+ * Replaces the previous 24h-rolling-window helper with a calendar-
+ * day window keyed off the blog's configured timezone. Two queries:
+ *
+ *   1. count of rows by `created_at` in [dayStart, dayEnd)
+ *      → `jobsStartedToday` (all statuses).
+ *   2. count of rows by `completed_at` in [dayStart, dayEnd) AND
+ *      `status='completed'` → `articlesCompletedToday`.
+ *
+ * The two queries are kept separate (instead of one COUNT-with-
+ * conditional aggregation) so each can use the existing
+ * `(blog_id, created_at)` / `(blog_id, completed_at)` indexes
+ * cleanly, and so a v1 caller that only needs the first count can
+ * skip the second when a future caller wants to.
+ *
+ * Returns deterministic zeros on supabase errors only after
+ * surfacing them — defensive failure here would mask a real DB
+ * outage AND silently flood quotas. Callers wrap in try/catch as
+ * usual.
+ */
+export async function getBlogDailyArticleGenerationUsage(
+  input: GetBlogDailyArticleGenerationUsageInput,
+): Promise<BlogDailyArticleGenerationUsage> {
+  const supabase = input.client ?? createAdminClient();
+  const now = input.now ?? new Date();
+  const timezone = input.timezone || "Etc/UTC";
+
+  const dayStart = startOfLocalDayUtc(now, timezone);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
+
+  const dailyLimit = computeDailyMaxArticles(
+    input.maxPostsPerDay,
+    input.generatePerWeek,
+  );
+
+  // (1) Started today — by created_at in the local day window.
+  const { count: startedCount, error: startedErr } = await supabase
+    .from("article_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("blog_id", input.blogId)
+    .eq("type", "generate_article")
+    .gte("created_at", dayStart.toISOString())
+    .lt("created_at", dayEnd.toISOString());
+  if (startedErr) throw startedErr;
+  const jobsStartedToday = startedCount ?? 0;
+
+  // (2) Completed today — by completed_at in the same window.
+  const { count: completedCount, error: completedErr } = await supabase
+    .from("article_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("blog_id", input.blogId)
+    .eq("type", "generate_article")
+    .eq("status", "completed")
+    .gte("completed_at", dayStart.toISOString())
+    .lt("completed_at", dayEnd.toISOString());
+  if (completedErr) throw completedErr;
+  const articlesCompletedToday = completedCount ?? 0;
+
+  return {
+    dayStart,
+    dayEnd,
+    jobsStartedToday,
+    articlesCompletedToday,
+    dailyLimit,
+    remainingToday: Math.max(0, dailyLimit - jobsStartedToday),
+  };
+}
+
+/**
+ * Counts `pending` + `processing` `generate_article` jobs for one
+ * blog. Drives the operational backpressure throttle in
+ * {@link runAutopilotForBlog} (see
+ * {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG} for the
+ * "this is NOT a product cap" framing). Pure count by status —
+ * not a time window — because we care about concurrent in-flight
+ * work, not how much was started today.
+ */
+export async function countActiveArticleJobsForBlog(input: {
+  blogId: string;
+  client?: Client;
+}): Promise<number> {
+  const supabase = input.client ?? createAdminClient();
+  const { count, error } = await supabase
+    .from("article_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("blog_id", input.blogId)
+    .eq("type", "generate_article")
+    .in("status", ["pending", "processing"]);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Counts `pending` + `processing` `generate_article` jobs across
+ * all blogs in a team. Drives the team-wide operational
+ * backpressure throttle in {@link runAutopilotForBlog} (see
+ * {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM} for the
+ * "this is NOT a subscription / plan-tier cap" framing).
+ *
+ * `article_jobs` doesn't carry a denormalized `team_id` column —
+ * we filter on `input->>teamId` (jsonb path) which every queue
+ * caller stamps via `queueGenerateArticleFromIdea`. The string-
+ * compare scan is cheap because the table is bounded by retention
+ * (rows older than ~30 days are truncated by a future job) and
+ * the `(team_id, status)` predicate is highly selective.
+ */
+export async function countActiveArticleJobsForTeam(input: {
+  teamId: string;
+  client?: Client;
+}): Promise<number> {
+  const supabase = input.client ?? createAdminClient();
+  const { count, error } = await supabase
+    .from("article_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("type", "generate_article")
+    .in("status", ["pending", "processing"])
+    .filter("input->>teamId", "eq", input.teamId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Returns `true` when an `active` (pending / processing) OR
+ * `completed` `generate_article` job already exists for the supplied
+ * idea. Used by the scheduler to skip ideas that have already been
+ * (or are being) converted, even before
+ * {@link queueGenerateArticleFromIdea}'s own idempotency check
+ * fires — gives us an explicit `output.lastSpawnError` line per
+ * skipped idea instead of a silent `alreadyQueued` bypass.
+ *
+ * `failed` / `cancelled` jobs do NOT count — autopilot v1 retries
+ * those automatically by re-queueing on the next cron tick (the
+ * idea is still `approved`, the failed job's article placeholder
+ * is left as `generating`, and the new job re-uses the same idea
+ * to drive a fresh attempt).
+ */
+export async function hasExistingArticleGenerationForIdea(input: {
+  ideaId: string;
+  blogId: string;
+  client?: Client;
+}): Promise<boolean> {
+  const supabase = input.client ?? createAdminClient();
+  const { count, error } = await supabase
+    .from("article_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("article_idea_id", input.ideaId)
+    .eq("blog_id", input.blogId)
+    .eq("type", "generate_article")
+    .in("status", ["pending", "processing", "completed"]);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
 interface SkipReasonInput {
   approvedIdeasCount: number;
   articleSlotsRemainingToday: number;
   articlesAllowedByTokens: number;
+  /**
+   * Operational throttle slack: per-blog limit minus in-flight
+   * jobs. NOT a product cap — see
+   * {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG}.
+   */
+  activeBlogSlotsRemaining: number;
+  /**
+   * Operational throttle slack: per-team limit minus in-flight
+   * jobs. NOT tied to subscription tier — see
+   * {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM}.
+   */
+  activeTeamSlotsRemaining: number;
   backlogThreshold: number;
   belowBacklog: boolean;
   tokenBalance: number;
@@ -1065,27 +1559,49 @@ interface SkipReasonInput {
   dryRun: boolean;
 }
 
+/**
+ * Branch order matters — pick the **most specific actionable
+ * reason** that describes why the tick produced no work.
+ *
+ * Customer-facing controls (top up the backlog, raise the daily
+ * post target, top up tokens) come BEFORE internal operational
+ * throttles (active-job concurrency, token-budget rounding) so
+ * the dashboard surfaces the most useful message.
+ *
+ * The active-job branches surface a `*_limit_reached` reason but
+ * are framed as backpressure ("autopilot is waiting for current
+ * jobs to finish"), not subscription / plan caps. The next cron
+ * tick continues automatically once jobs drain.
+ */
 function pickSkipReason(input: SkipReasonInput): string {
-  if (input.dryRun) return "dry_run";
+  if (input.dryRun) return AUTOPILOT_SKIP_REASONS.DRY_RUN;
   if (input.approvedIdeasCount === 0 && input.belowBacklog) {
     // Backlog was below threshold AND we ended the run without
     // generating ideas — the only way that happens (besides dry run)
     // is the team can't afford even a single idea batch.
-    if (input.tokenBalance < input.ideaCost) return "insufficient_balance";
-    return "backlog_empty_no_budget_for_ideas";
+    if (input.tokenBalance < input.ideaCost) {
+      return AUTOPILOT_SKIP_REASONS.INSUFFICIENT_BALANCE;
+    }
+    return AUTOPILOT_SKIP_REASONS.BACKLOG_EMPTY_NO_BUDGET_FOR_IDEAS;
   }
   if (input.approvedIdeasCount === 0) {
-    return "no_approved_ideas_in_backlog";
+    return AUTOPILOT_SKIP_REASONS.NO_APPROVED_IDEAS_IN_BACKLOG;
   }
   if (input.articleSlotsRemainingToday === 0) {
-    return "daily_article_cap_reached";
+    return AUTOPILOT_SKIP_REASONS.DAILY_ARTICLE_CAP_REACHED;
+  }
+  if (input.activeBlogSlotsRemaining === 0) {
+    return AUTOPILOT_SKIP_REASONS.ACTIVE_ARTICLE_JOB_LIMIT_REACHED;
+  }
+  if (input.activeTeamSlotsRemaining === 0) {
+    return AUTOPILOT_SKIP_REASONS.ACTIVE_TEAM_ARTICLE_JOB_LIMIT_REACHED;
   }
   /* v8 ignore next 1 -- defensive: covered by other branches in practice */
   if (input.articlesAllowedByTokens === 0) {
-    return "insufficient_token_budget";
+    return AUTOPILOT_SKIP_REASONS.INSUFFICIENT_TOKEN_BUDGET;
   }
   /* v8 ignore next 1 -- defensive: should be unreachable when `noWorkDone` is true */
-  return "no_work_needed";
+  return AUTOPILOT_SKIP_REASONS.NO_WORK_NEEDED;
 }
 
 interface BuildOutputInput {
@@ -1114,6 +1630,17 @@ interface BuildOutputInput {
    * generated this tick.
    */
   requireReview: boolean;
+  /**
+   * In-flight job snapshot at the moment the tick decided to
+   * spawn (or skip) work. Used by the operational backpressure
+   * throttles — see {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG}
+   * + {@link AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM}. NOT
+   * subscription / plan caps. Both fields are 0 on early-skip
+   * paths that bail before computing them — the keys are still
+   * emitted so downstream readers don't have to feature-detect.
+   */
+  activeJobsForBlog: number;
+  activeJobsForTeam: number;
 }
 
 function buildOutput(input: BuildOutputInput): Record<string, unknown> {
@@ -1132,6 +1659,23 @@ function buildOutput(input: BuildOutputInput): Record<string, unknown> {
     },
     backlog: {
       approvedIdeasAvailable: input.approvedIdeasCount,
+    },
+    // Internal operational throttle snapshot. The `*Limit` fields
+    // are the in-code constants (NOT subscription / plan caps) —
+    // surfaced here for debugging cron behavior + future ops
+    // dashboards. The recent-runs panel + run drawer don't render
+    // this object today; if they ever do, the labels need to
+    // stay backpressure-flavored ("autopilot is waiting for
+    // current jobs to finish"), not customer-facing limit copy.
+    operationalThrottle: {
+      blog: {
+        activeJobs: input.activeJobsForBlog,
+        operationalLimit: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+      },
+      team: {
+        activeJobs: input.activeJobsForTeam,
+        operationalLimit: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM,
+      },
     },
     spawnedArticleJobIds: input.articleJobIds,
     ideasAutoApproved: input.ideasAutoApproved,

@@ -57,12 +57,22 @@ export type BlogImageSource =
  * articles. Distinct from `BlogImageSource` (which is legacy / for
  * the old "where does the bytes come from" axis) — this enum is the
  * id passed to `getImageProvider(...)` in the image-provider
- * registry. Today `'unsplash'` is the only real adapter; `'none'`
- * disables automatic picking entirely (users still pick manually
- * from the editor). New providers slot in by adding a value here +
- * a registry entry — no other call sites change.
+ * registry. `'pexels'` is the active provider as of the v12 image
+ * overhaul; `'none'` disables automatic picking entirely (users
+ * still pick manually from the editor). Future providers slot in
+ * by adding a value here + a registry entry — no other call sites
+ * change.
+ *
+ * `'unsplash'` is intentionally NOT in this union anymore — it's a
+ * legacy stored value. The {@link loadBlogSettings} normalizer
+ * coerces stored `'unsplash'` to `'pexels'` so existing blogs roll
+ * forward without a separate user step. The migration in
+ * `00024_blog_settings_image_provider_pexels.sql` flips the
+ * persisted value too; the runtime coercion is a belt-and-braces
+ * guard for blogs whose `settings` was written between the
+ * migration and a user save.
  */
-export type BlogImageProvider = "unsplash" | "none";
+export type BlogImageProvider = "pexels" | "none";
 
 export type BlogAutomationMode = "manual" | "autopilot";
 
@@ -215,7 +225,7 @@ export interface BlogMediaSettings {
    * Which provider the autopilot picker queries. `'none'` is
    * functionally identical to `autoPickImages = false` but kept as
    * a separate axis so users can leave auto-pick on while they
-   * shop for a different provider. Default: `'unsplash'`.
+   * shop for a different provider. Default: `'pexels'`.
    */
   imageProvider: BlogImageProvider;
 }
@@ -323,11 +333,11 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
     generateAltText: true,
     defaultImageDimensions: "1200x630",
     includeInlineImages: false,
-    // Autopilot picker defaults on with Unsplash. Existing blogs
+    // Autopilot picker defaults on with Pexels. Existing blogs
     // (rows without these keys in `settings.media`) inherit the
     // same posture via the normalizer's fallback.
     autoPickImages: true,
-    imageProvider: "unsplash",
+    imageProvider: "pexels",
   },
   advanced: {
     customSystemPrompt: "",
@@ -432,6 +442,37 @@ function pickEnum<T extends string>(
     : fallback;
 }
 
+/**
+ * Picks the `media.imageProvider` value with legacy-value
+ * coercion. Order of resolution:
+ *
+ *   1. Source has a current `BlogImageProvider` value → use it.
+ *   2. Source has a legacy value
+ *      ({@link LEGACY_IMAGE_PROVIDER_MAP}) → map to its current
+ *      replacement so existing-blog rows roll forward without a
+ *      user save.
+ *   3. Anything else (missing, malformed, unknown future value) →
+ *      fall back to the supplied default (`'pexels'` today).
+ *
+ * Kept separate from {@link pickEnum} because the legacy map +
+ * default behavior are specific to `imageProvider`. No other field
+ * needs both legacy coercion AND a closed enum.
+ */
+function pickImageProvider(
+  source: Record<string, unknown> | undefined,
+  fallback: BlogImageProvider,
+): BlogImageProvider {
+  if (!source) return fallback;
+  const v = source.imageProvider;
+  if (typeof v !== "string") return fallback;
+  if ((IMAGE_PROVIDERS as readonly string[]).includes(v)) {
+    return v as BlogImageProvider;
+  }
+  const mapped = LEGACY_IMAGE_PROVIDER_MAP[v];
+  if (mapped) return mapped;
+  return fallback;
+}
+
 const READING_LEVELS = [
   "elementary",
   "intermediate",
@@ -473,9 +514,24 @@ const IMAGE_SOURCES = [
   "none",
 ] as const satisfies readonly BlogImageSource[];
 const IMAGE_PROVIDERS = [
-  "unsplash",
+  "pexels",
   "none",
 ] as const satisfies readonly BlogImageProvider[];
+
+/**
+ * Legacy stored `imageProvider` values that should silently roll
+ * forward to a current value at load time.
+ *
+ * Pexels replaced Unsplash as the active provider in the v12 image
+ * overhaul. The `00024_*` migration flips persisted rows, but
+ * a runtime coercion here keeps things sane between the migration
+ * landing and the next per-blog save (which would re-write the
+ * jsonb), and protects forward-compat for any data path that
+ * bypasses the migration (seeds, fixtures, manual inserts).
+ */
+const LEGACY_IMAGE_PROVIDER_MAP: Record<string, BlogImageProvider> = {
+  unsplash: "pexels",
+};
 const AUTOMATION_MODES = [
   "manual",
   "autopilot",
@@ -775,12 +831,7 @@ export function loadBlogSettings(raw: Json | null | undefined): BlogSettings {
         "autoPickImages",
         d.media.autoPickImages,
       ),
-      imageProvider: pickEnum(
-        media,
-        "imageProvider",
-        IMAGE_PROVIDERS,
-        d.media.imageProvider,
-      ),
+      imageProvider: pickImageProvider(media, d.media.imageProvider),
     },
     advanced: {
       customSystemPrompt: pickString(

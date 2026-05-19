@@ -2151,8 +2151,7 @@ function makeArticleOrchestrationClient(opts?: {
     description: "A workflow blog",
     slug: "acme",
     project_id: "p1",
-    settings:
-      opts?.blogSettings ?? { identity: { audience: "engineers" } },
+    settings: opts?.blogSettings ?? { identity: { audience: "engineers" } },
   };
   const projectRow = { id: "p1", name: "Default", team_id: "t1" };
   const teamRow = { id: "t1", name: "Acme team" };
@@ -3441,7 +3440,9 @@ describe("runGenerateArticleFromIdeaJob", () => {
         featuredSelected: false,
         sectionsFound: 0,
         sectionImagesSelected: 0,
-        warnings: ['Image provider "unsplash" is not available (missing_access_key).'],
+        warnings: [
+          'Image provider "unsplash" is not available (missing_access_key).',
+        ],
       });
       const client = makeArticleOrchestrationClient();
       const result = await runGenerateArticleFromIdeaJob({
@@ -3507,7 +3508,7 @@ describe("runGenerateArticleFromIdeaJob", () => {
 
     it("passes settings.media.imageProvider through to the picker", async () => {
       const client = makeArticleOrchestrationClient({
-        blogSettings: { media: { imageProvider: "unsplash" } },
+        blogSettings: { media: { imageProvider: "pexels" } },
       });
       await runGenerateArticleFromIdeaJob({
         jobId: "job-1",
@@ -3519,7 +3520,7 @@ describe("runGenerateArticleFromIdeaJob", () => {
         client: client as never,
       });
       expect(mockedPickImages).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "unsplash" }),
+        expect.objectContaining({ providerId: "pexels" }),
       );
     });
 
@@ -3543,7 +3544,7 @@ describe("runGenerateArticleFromIdeaJob", () => {
         .find((u) => "output" in u);
       expect(completionUpdate!.output).toMatchObject({
         imageSummary: {
-          providerId: "unsplash", // default
+          providerId: "pexels", // default
           featuredSelected: false,
           sectionsFound: 0,
           sectionImagesSelected: 0,
@@ -3688,7 +3689,11 @@ describe("runGenerateArticleFromIdeaJob", () => {
     it("does NOT auto-send when automation.enabled is false", async () => {
       const client = makeArticleOrchestrationClient({
         blogSettings: passingSettings({
-          automation: { mode: "autopilot", enabled: false, requireReview: false },
+          automation: {
+            mode: "autopilot",
+            enabled: false,
+            requireReview: false,
+          },
         }),
       });
       await runGenerateArticleFromIdeaJob({
@@ -4051,9 +4056,7 @@ describe("runGenerateArticleFromIdeaJob", () => {
     });
 
     it("does NOT fail the article job when counter sync throws (best-effort)", async () => {
-      mockedSyncWpCounters.mockRejectedValueOnce(
-        new Error("sync exploded"),
-      );
+      mockedSyncWpCounters.mockRejectedValueOnce(new Error("sync exploded"));
       const client = makeArticleOrchestrationClient();
       const result = await runGenerateArticleFromIdeaJob({
         jobId: "job-1",

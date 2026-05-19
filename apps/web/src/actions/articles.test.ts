@@ -1026,13 +1026,7 @@ describe("retryAutopilotWordPressDraftSend", () => {
     const { client } = makeAdminWithBlog({ id: "b1" });
     mockedCreateAdmin.mockReturnValue(client as never);
 
-    await retryAutopilotWordPressDraftSend(
-      "t1",
-      "p1",
-      "b1",
-      "run-1",
-      "job-1",
-    );
+    await retryAutopilotWordPressDraftSend("t1", "p1", "b1", "run-1", "job-1");
 
     expect(mockedRevalidatePath).toHaveBeenCalledWith(
       "/teams/t1/projects/p1/blogs/b1",
@@ -1077,9 +1071,7 @@ describe("retryAutopilotWordPressDraftSend", () => {
       "no_wp_connection",
     ] as const;
     for (const code of codes) {
-      mockedRetry.mockRejectedValueOnce(
-        new RetryAutopilotWpDraftError(code),
-      );
+      mockedRetry.mockRejectedValueOnce(new RetryAutopilotWpDraftError(code));
       const result = await retryAutopilotWordPressDraftSend(
         "t1",
         "p1",

@@ -641,7 +641,10 @@ describe("useArticleEdit — section images", () => {
         sortOrder: 0,
         imageUrl: "https://example.com/new.jpg",
         altText: "New",
-        metadata: { ...SECTION_METADATA, imageUrl: "https://example.com/new.jpg" },
+        metadata: {
+          ...SECTION_METADATA,
+          imageUrl: "https://example.com/new.jpg",
+        },
       }),
     );
     expect(result.current.sectionImages.intro?.imageUrl).toBe(

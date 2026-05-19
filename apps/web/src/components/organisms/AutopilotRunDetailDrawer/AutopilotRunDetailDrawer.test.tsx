@@ -454,7 +454,7 @@ describe("AutopilotRunDetailDrawer — failure / reason / paused", () => {
     expect(alerts.some((a) => a.textContent?.includes("529"))).toBe(true);
   });
 
-  it("renders the reason from output when there's no error_message", () => {
+  it("renders the friendly reason label + description when there's no error_message", () => {
     render(
       <AutopilotRunDetailDrawer
         open
@@ -469,7 +469,81 @@ describe("AutopilotRunDetailDrawer — failure / reason / paused", () => {
         error={null}
       />,
     );
-    expect(screen.getByText("daily_article_cap_reached")).toBeInTheDocument();
+    const reasonCard = screen.getByTestId("autopilot-detail-reason");
+    expect(reasonCard).toHaveTextContent(/Daily article target reached/i);
+    expect(reasonCard).toHaveTextContent(/configured number of article jobs/i);
+    // Raw key still attached for e2e selectors but NOT rendered as
+    // user-facing copy.
+    expect(reasonCard).toHaveAttribute(
+      "data-reason-key",
+      "daily_article_cap_reached",
+    );
+    // Confirm the raw snake_case key is gone from the visible text.
+    expect(reasonCard.textContent ?? "").not.toContain(
+      "daily_article_cap_reached",
+    );
+  });
+
+  it("renders backpressure copy for the active-job throttle reasons (NOT plan/subscription wording)", () => {
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={makeDetail({
+          run: makeRun({
+            status: "skipped",
+            output: { reason: "active_article_job_limit_reached" },
+          }),
+        })}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    const reasonCard = screen.getByTestId("autopilot-detail-reason");
+    expect(reasonCard).toHaveTextContent(/waiting for current article jobs/i);
+    expect(reasonCard).toHaveTextContent(
+      /continue on the next scheduled run/i,
+    );
+    expect(reasonCard.textContent ?? "").not.toMatch(
+      /\b(plan|subscription|tier|pricing|upgrade|paywall)\b/i,
+    );
+  });
+
+  it("preserves the raw `output.reason` key as a data attribute on the Reason section", () => {
+    // The drawer surfaces friendly copy in the Reason section but
+    // operators / e2e tests still need access to the raw key.
+    // The ReasonCard pins it onto a `data-reason-key` attribute
+    // so a future label refactor can't accidentally drop the
+    // underlying value from the debug surface.
+    const detail = makeDetail({
+      run: makeRun({
+        status: "skipped",
+        output: { reason: "daily_article_cap_reached" },
+      }),
+    });
+    render(
+      <AutopilotRunDetailDrawer
+        open
+        onClose={vi.fn()}
+        detail={detail}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    // Raw key still on the data attribute even though the visible
+    // copy is the friendly label.
+    expect(screen.getByTestId("autopilot-detail-reason")).toHaveAttribute(
+      "data-reason-key",
+      "daily_article_cap_reached",
+    );
+    // The drawer also exposes the entire raw output via the "Raw
+    // run output" details panel; the panel renders the JSON pre
+    // when expanded. We assert on the section being present rather
+    // than its expanded body — jsdom's <details> toggle behavior
+    // is unreliable. The structural data on `detail.run.output` is
+    // not mutated on the read path.
+    expect(screen.getByTestId("raw-output")).toBeInTheDocument();
+    expect(detail.run.output).toEqual({ reason: "daily_article_cap_reached" });
   });
 
   it("does NOT render reason when both error_message and reason are present (error wins)", () => {
@@ -896,12 +970,8 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
     expect(screen.getByText("Image picker warnings")).toBeInTheDocument();
 
     // Both warning bodies render.
-    expect(
-      screen.getByText(/Skipped section "Pricing"/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Skipped section "FAQ"/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Skipped section "Pricing"/)).toBeInTheDocument();
+    expect(screen.getByText(/Skipped section "FAQ"/)).toBeInTheDocument();
   });
 
   it("singularizes the badge text when there's exactly one warning", () => {
@@ -977,9 +1047,7 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
     expect(
       screen.queryByTestId("autopilot-job-job-1-image-warnings-badge"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Image picker warnings"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Image picker warnings")).not.toBeInTheDocument();
   });
 
   it("does NOT render the image-warnings UI for legacy jobs (no imageSummary)", () => {
@@ -1009,9 +1077,7 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
         error={null}
       />,
     );
-    expect(
-      screen.queryByText("Image picker warnings"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Image picker warnings")).not.toBeInTheDocument();
   });
 
   it("does NOT render the image-warnings UI when output is null", () => {
@@ -1041,9 +1107,7 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
         error={null}
       />,
     );
-    expect(
-      screen.queryByText("Image picker warnings"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Image picker warnings")).not.toBeInTheDocument();
   });
 
   it("filters non-string warnings defensively (forward-compat)", () => {
@@ -1507,9 +1571,7 @@ describe("AutopilotRunDetailDrawer — jobs section", () => {
         error={null}
       />,
     );
-    expect(
-      screen.queryByText("Image picker warnings"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Image picker warnings")).not.toBeInTheDocument();
   });
 });
 
@@ -1525,7 +1587,11 @@ describe("AutopilotRunDetailDrawer — WordPress retry button", () => {
    */
   function makeJob(
     id: string,
-    status: "failed" | "skipped_no_connection" | "draft_created" | "already_sent",
+    status:
+      | "failed"
+      | "skipped_no_connection"
+      | "draft_created"
+      | "already_sent",
     overrides: Record<string, unknown> = {},
   ) {
     return {
@@ -1708,10 +1774,7 @@ describe("AutopilotRunDetailDrawer — WordPress retry button", () => {
         open
         onClose={vi.fn()}
         detail={makeDetail({
-          jobs: [
-            makeJob("job-a", "failed"),
-            makeJob("job-b", "failed"),
-          ],
+          jobs: [makeJob("job-a", "failed"), makeJob("job-b", "failed")],
         })}
         isLoading={false}
         error={null}
@@ -1749,10 +1812,7 @@ describe("AutopilotRunDetailDrawer — WordPress retry button", () => {
         open
         onClose={vi.fn()}
         detail={makeDetail({
-          jobs: [
-            makeJob("job-a", "failed"),
-            makeJob("job-b", "failed"),
-          ],
+          jobs: [makeJob("job-a", "failed"), makeJob("job-b", "failed")],
         })}
         isLoading={false}
         error={null}

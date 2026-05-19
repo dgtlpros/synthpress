@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -131,10 +132,7 @@ describe("MarkdownPreview — section images", () => {
 
   it("does NOT inject anything when sectionImagesByKey is empty", () => {
     const { container } = render(
-      <MarkdownPreview
-        markdown={TWO_SECTION_BODY}
-        sectionImagesByKey={{}}
-      />,
+      <MarkdownPreview markdown={TWO_SECTION_BODY} sectionImagesByKey={{}} />,
     );
     expect(container.querySelector("figure")).toBeNull();
   });
@@ -200,9 +198,7 @@ describe("MarkdownPreview — section images", () => {
         }}
       />,
     );
-    expect(container.querySelector("figure img")?.getAttribute("alt")).toBe(
-      "",
-    );
+    expect(container.querySelector("figure img")?.getAttribute("alt")).toBe("");
   });
 
   it("renders Unsplash attribution credit when supplied", () => {
@@ -325,7 +321,7 @@ describe("MarkdownPreview — section images", () => {
     expect(container.querySelector("figcaption")).toBeNull();
   });
 
-  it("uses provider id as the label for non-unsplash providers", () => {
+  it("renders 'Pexels' (not 'pexels') as the provider label for the active provider", () => {
     render(
       <MarkdownPreview
         markdown={"## Intro\n\nbody.\n"}
@@ -343,7 +339,33 @@ describe("MarkdownPreview — section images", () => {
         }}
       />,
     );
-    expect(screen.getByRole("link", { name: "pexels" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pexels" })).toBeInTheDocument();
+  });
+
+  it("falls through to the raw provider id for unknown / future providers", () => {
+    // 'midjourney' isn't in the display-label map so the renderer
+    // surfaces the raw id verbatim. Keeps unmapped data legible
+    // without silently hiding what's actually persisted.
+    render(
+      <MarkdownPreview
+        markdown={"## Intro\n\nbody.\n"}
+        sectionImagesByKey={{
+          intro: {
+            imageUrl: "https://example.com/intro.jpg",
+            altText: null,
+            attribution: {
+              provider: "midjourney",
+              photographerName: "Bot",
+              photographerProfileUrl: "https://example.com/@bot",
+              photoUrl: "https://example.com/photos/123",
+            },
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: "midjourney" }),
+    ).toBeInTheDocument();
   });
 
   it("silently ignores entries whose key isn't present in the body (orphaned)", () => {
@@ -391,12 +413,97 @@ describe("MarkdownPreview — section images", () => {
         }}
       />,
     );
-    const srcs = Array.from(
-      container.querySelectorAll("figure img"),
-    ).map((n) => n.getAttribute("src"));
+    const srcs = Array.from(container.querySelectorAll("figure img")).map((n) =>
+      n.getAttribute("src"),
+    );
     expect(srcs).toEqual([
       "https://example.com/faq-1.jpg",
       "https://example.com/faq-2.jpg",
+    ]);
+  });
+
+  it("renders ALL section images under StrictMode (regression for index-counter double-invoke bug)", () => {
+    // React's StrictMode double-invokes function components in
+    // development. A previous implementation tracked which H2 was
+    // being rendered with a `let h2Counter = { value: 0 }` mutated
+    // inside the H2 component override. The second strict-mode
+    // invocation kept incrementing the same counter, so for an
+    // article with N H2s + N images the renderer would commit
+    // image[1], image[3], ... image[2N-1] for the H2s and undefined
+    // for the trailing half — visually presenting as "first few
+    // images render (wrong photo) + last few are missing" plus a
+    // hydration mismatch against the SSR pass (which is single-
+    // invocation). The position-based join is purely functional,
+    // so StrictMode double-invoke produces identical output.
+    //
+    // Five H2s is enough to exercise the failure mode: the buggy
+    // code would have shown only sections 1 + 2's figures (with
+    // images 2 + 4) and dropped 3, 4, 5 entirely.
+    const FIVE_SECTION_BODY = [
+      "## One",
+      "",
+      "body 1.",
+      "",
+      "## Two",
+      "",
+      "body 2.",
+      "",
+      "## Three",
+      "",
+      "body 3.",
+      "",
+      "## Four",
+      "",
+      "body 4.",
+      "",
+      "## Five",
+      "",
+      "body 5.",
+      "",
+    ].join("\n");
+    const { container } = render(
+      <StrictMode>
+        <MarkdownPreview
+          markdown={FIVE_SECTION_BODY}
+          sectionImagesByKey={{
+            one: {
+              imageUrl: "https://example.com/1.jpg",
+              altText: null,
+              attribution: null,
+            },
+            two: {
+              imageUrl: "https://example.com/2.jpg",
+              altText: null,
+              attribution: null,
+            },
+            three: {
+              imageUrl: "https://example.com/3.jpg",
+              altText: null,
+              attribution: null,
+            },
+            four: {
+              imageUrl: "https://example.com/4.jpg",
+              altText: null,
+              attribution: null,
+            },
+            five: {
+              imageUrl: "https://example.com/5.jpg",
+              altText: null,
+              attribution: null,
+            },
+          }}
+        />
+      </StrictMode>,
+    );
+    const srcs = Array.from(container.querySelectorAll("figure img")).map((n) =>
+      n.getAttribute("src"),
+    );
+    expect(srcs).toEqual([
+      "https://example.com/1.jpg",
+      "https://example.com/2.jpg",
+      "https://example.com/3.jpg",
+      "https://example.com/4.jpg",
+      "https://example.com/5.jpg",
     ]);
   });
 });

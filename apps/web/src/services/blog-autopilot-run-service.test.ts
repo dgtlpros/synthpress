@@ -1480,14 +1480,20 @@ describe("syncAutopilotRunWordPressDraftCounters", () => {
     const runUpdateChain = makeChain(opts.update);
     // Both chains terminate via `await chain` (no .single / .maybeSingle).
     type ThenCb = (
-      onFulfilled: ((value: ChainResult<unknown>) => unknown) | null | undefined,
+      onFulfilled:
+        | ((value: ChainResult<unknown>) => unknown)
+        | null
+        | undefined,
       onRejected: ((reason: unknown) => unknown) | null | undefined,
     ) => unknown;
     (jobsChain as unknown as PromiseLike<unknown>).then = ((
       onFulfilled,
       onRejected,
     ) =>
-      Promise.resolve(opts.jobs).then(onFulfilled, onRejected)) as ThenCb as never;
+      Promise.resolve(opts.jobs).then(
+        onFulfilled,
+        onRejected,
+      )) as ThenCb as never;
     (runUpdateChain as unknown as PromiseLike<unknown>).then = ((
       onFulfilled,
       onRejected,

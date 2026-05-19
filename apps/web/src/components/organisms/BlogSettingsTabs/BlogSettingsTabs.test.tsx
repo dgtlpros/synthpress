@@ -681,10 +681,12 @@ describe("BlogSettingsTabs", () => {
     const providerSelect = screen.getByLabelText(
       /Image provider/,
     ) as HTMLSelectElement;
-    expect(providerSelect.value).toBe("unsplash");
-    // Provider dropdown only carries the two v1 options.
+    expect(providerSelect.value).toBe("pexels");
+    // Provider dropdown carries only the active provider + 'none'.
+    // Legacy 'unsplash' is intentionally NOT in the dropdown — it
+    // remains in the registry for historical attribution rows.
     const options = Array.from(providerSelect.options).map((o) => o.value);
-    expect(options).toEqual(["unsplash", "none"]);
+    expect(options).toEqual(["pexels", "none"]);
   });
 
   it("toggling auto-pick OFF + saving emits autoPickImages=false in the payload", () => {
@@ -709,6 +711,20 @@ describe("BlogSettingsTabs", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onSave.mock.calls[0][0].settings.media.imageProvider).toBe("none");
+  });
+
+  it("image provider dropdown lists Pexels but NOT Unsplash", () => {
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    const select = screen.getByLabelText(/Image provider/) as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toContain("pexels");
+    expect(optionValues).toContain("none");
+    expect(optionValues).not.toContain("unsplash");
+    // Pexels label shows up so users see the brand name they chose,
+    // not the raw provider id.
+    const optionLabels = Array.from(select.options).map((o) => o.text);
+    expect(optionLabels).toContain("Pexels");
   });
 
   // ─── Advanced tab ────────────────────────────────────────────────────────

@@ -67,24 +67,21 @@ export class RetryAutopilotWpDraftError extends Error {
 }
 
 /** UI-ready copy for each retry-side error code. */
-export const RETRY_ERROR_COPY: Record<
-  RetryAutopilotWpDraftErrorCode,
-  string
-> = {
-  job_not_found: "We couldn't find the article job to retry.",
-  job_blog_mismatch:
-    "That job belongs to a different blog. Reload and try again.",
-  job_run_mismatch:
-    "That job belongs to a different autopilot run. Reload and try again.",
-  job_missing_article_id:
-    "That job never produced an article, so there's nothing to send to WordPress.",
-  job_not_retryable:
-    "That job's WordPress send is not in a retryable state.",
-  article_not_found: "The article for that job no longer exists.",
-  article_missing_content:
-    "The article has no content to send to WordPress yet.",
-  no_wp_connection: "Connect WordPress before retrying the draft send.",
-};
+export const RETRY_ERROR_COPY: Record<RetryAutopilotWpDraftErrorCode, string> =
+  {
+    job_not_found: "We couldn't find the article job to retry.",
+    job_blog_mismatch:
+      "That job belongs to a different blog. Reload and try again.",
+    job_run_mismatch:
+      "That job belongs to a different autopilot run. Reload and try again.",
+    job_missing_article_id:
+      "That job never produced an article, so there's nothing to send to WordPress.",
+    job_not_retryable: "That job's WordPress send is not in a retryable state.",
+    article_not_found: "The article for that job no longer exists.",
+    article_missing_content:
+      "The article has no content to send to WordPress yet.",
+    no_wp_connection: "Connect WordPress before retrying the draft send.",
+  };
 
 // ============================================================================
 // Public surface
@@ -169,7 +166,10 @@ export async function retryAutopilotJobWordPressDraft(
   }
 
   // 3. WordPress connection gate. Skips before any POST.
-  const hasConnection = await hasBlogWordPressConnection(input.blogId, supabase);
+  const hasConnection = await hasBlogWordPressConnection(
+    input.blogId,
+    supabase,
+  );
   if (!hasConnection) {
     throw new RetryAutopilotWpDraftError("no_wp_connection");
   }
@@ -350,7 +350,9 @@ async function mergeWpPublishIntoJobOutput(
     throw new RetryAutopilotWpDraftError("job_not_found");
   }
   const currentOutput =
-    data.output && typeof data.output === "object" && !Array.isArray(data.output)
+    data.output &&
+    typeof data.output === "object" &&
+    !Array.isArray(data.output)
       ? (data.output as Record<string, unknown>)
       : {};
 

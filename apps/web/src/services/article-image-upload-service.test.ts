@@ -636,9 +636,9 @@ describe("listSectionImageRowsForArticle", () => {
     const client = makeClient({
       article_image_uploads: { data: null, error: null },
     });
-    expect(
-      await listSectionImageRowsForArticle("a1", client as never),
-    ).toEqual([]);
+    expect(await listSectionImageRowsForArticle("a1", client as never)).toEqual(
+      [],
+    );
   });
 
   it("propagates supabase errors", async () => {
@@ -895,8 +895,16 @@ describe("syncArticleSectionImageRows", () => {
   });
 
   it("handles multi-section updates in one call: insert one, update one, delete one", async () => {
-    const intro = { ...SECTION_ROW_BASE, section_key: "intro", id: "row-intro" };
-    const outro = { ...SECTION_ROW_BASE, section_key: "outro", id: "row-outro" };
+    const intro = {
+      ...SECTION_ROW_BASE,
+      section_key: "intro",
+      id: "row-intro",
+    };
+    const outro = {
+      ...SECTION_ROW_BASE,
+      section_key: "outro",
+      id: "row-outro",
+    };
     const client = makeSequenceClient({
       article_image_uploads: [
         { data: [intro, outro], error: null }, // list
@@ -979,7 +987,10 @@ describe("syncArticleSectionImageRows", () => {
             sortOrder: 0,
             imageUrl: "https://example.com/different.jpg",
             altText: "alt",
-            metadata: { ...baseSectionMeta, imageUrl: "https://example.com/different.jpg" },
+            metadata: {
+              ...baseSectionMeta,
+              imageUrl: "https://example.com/different.jpg",
+            },
           },
         ],
         validSectionKeys: new Set(["intro"]),

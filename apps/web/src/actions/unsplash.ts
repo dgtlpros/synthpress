@@ -89,8 +89,7 @@ export async function searchUnsplash(
         error: IMAGE_SEARCH_ERROR_COPY[err.code],
       };
     }
-    const message =
-      err instanceof Error ? err.message : "Image search failed.";
+    const message = err instanceof Error ? err.message : "Image search failed.";
     return { data: null, error: message };
   }
 }

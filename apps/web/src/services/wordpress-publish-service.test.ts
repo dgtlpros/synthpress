@@ -1339,7 +1339,11 @@ describe("hasBlogWordPressConnection", () => {
 
   it("returns false when wp_username is missing", async () => {
     const { client } = makeClient({
-      blog: { wp_url: "https://x.com", wp_username: null, wp_app_password: "p" },
+      blog: {
+        wp_url: "https://x.com",
+        wp_username: null,
+        wp_app_password: "p",
+      },
     });
     expect(await hasBlogWordPressConnection("b1", client)).toBe(false);
   });
@@ -2629,9 +2633,9 @@ describe("section-image publishing with syncArticleToWordPress", () => {
     mockedMarkdownToHtml.mockImplementation(async (md, options) => {
       // Re-import dynamically inside the mock so we don't accidentally
       // hold a stale module ref across test files.
-      const real = await vi.importActual<typeof import("@/lib/markdown-to-html")>(
-        "@/lib/markdown-to-html",
-      );
+      const real = await vi.importActual<
+        typeof import("@/lib/markdown-to-html")
+      >("@/lib/markdown-to-html");
       return real.markdownToHtml(md, options);
     });
   });
@@ -3108,7 +3112,7 @@ describe("section-image publishing with syncArticleToWordPress", () => {
 
     const postBody = JSON.parse(fetchImpl.mock.calls[0]![1].body as string);
     expect(postBody.content).toContain("<figcaption>");
-    expect(postBody.content).toContain("rel=\"nofollow noopener noreferrer\"");
+    expect(postBody.content).toContain('rel="nofollow noopener noreferrer"');
     // & in name is HTML-entity-escaped.
     expect(postBody.content).toMatch(/Annie &(amp|#x26|#38); Co/);
   });

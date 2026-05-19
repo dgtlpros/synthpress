@@ -55,10 +55,15 @@ export interface ArticleEditFormProps {
   isSaving?: boolean;
   errorMessage?: string | null;
   /**
-   * When provided, renders a "Pick from Unsplash" button next to the
+   * When provided, renders a "Pick image" button next to the
    * featured image URL input. The parent owns the picker modal +
    * search state — we just fire the callback when the user clicks
    * the button.
+   *
+   * Prop name is `onPickFromUnsplash` for back-compat with the
+   * connector wiring; the visible button label is provider-neutral
+   * ("Pick image") and the picker itself routes through whichever
+   * provider the registry's default points at (Pexels today).
    */
   onPickFromUnsplash?: () => void;
   /**
@@ -211,7 +216,7 @@ export function ArticleEditForm({
                 disabled={isSaving}
                 className="shrink-0"
               >
-                Pick from Unsplash
+                Pick from image library
               </Button>
             ) : null}
           </div>

@@ -18,9 +18,8 @@ vi.mock("../unsplash-download-service", () => ({
 }));
 
 const { searchUnsplashPhotos } = await import("../unsplash-service");
-const { triggerUnsplashDownload } = await import(
-  "../unsplash-download-service"
-);
+const { triggerUnsplashDownload } =
+  await import("../unsplash-download-service");
 const mockedSearch = vi.mocked(searchUnsplashPhotos);
 const mockedTrack = vi.mocked(triggerUnsplashDownload);
 
@@ -100,7 +99,9 @@ describe("unsplashProvider.searchImages", () => {
 
   it("normalizes optional Unsplash fields to null when missing", async () => {
     mockedSearch.mockResolvedValue({
-      results: [{ ...SAMPLE_RAW, fullUrl: undefined, downloadLocation: undefined }],
+      results: [
+        { ...SAMPLE_RAW, fullUrl: undefined, downloadLocation: undefined },
+      ],
       totalResults: 1,
       totalPages: 1,
     });
@@ -123,7 +124,9 @@ describe("unsplashProvider.searchImages", () => {
   });
 
   it("re-wraps query_required + missing_access_key codes verbatim", async () => {
-    mockedSearch.mockRejectedValueOnce(new UnsplashSearchError("query_required"));
+    mockedSearch.mockRejectedValueOnce(
+      new UnsplashSearchError("query_required"),
+    );
     await expect(
       unsplashProvider.searchImages({ query: "" }),
     ).rejects.toMatchObject({ code: "query_required" });
@@ -138,7 +141,10 @@ describe("unsplashProvider.searchImages", () => {
 
   it("collapses unsplash_request_failed onto the generic request_failed code (preserving details)", async () => {
     mockedSearch.mockRejectedValue(
-      new UnsplashSearchError("unsplash_request_failed", "503 Service Unavailable"),
+      new UnsplashSearchError(
+        "unsplash_request_failed",
+        "503 Service Unavailable",
+      ),
     );
     let caught: ImageSearchError | undefined;
     try {
@@ -167,9 +173,9 @@ describe("unsplashProvider.searchImages", () => {
   it("re-throws non-UnsplashSearchError errors unchanged", async () => {
     const boom = new Error("network exploded");
     mockedSearch.mockRejectedValue(boom);
-    await expect(
-      unsplashProvider.searchImages({ query: "x" }),
-    ).rejects.toBe(boom);
+    await expect(unsplashProvider.searchImages({ query: "x" })).rejects.toBe(
+      boom,
+    );
   });
 });
 

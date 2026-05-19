@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { providerDisplayLabel } from "@/lib/image-provider-label";
 import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Card } from "@/components/atoms/Card";
@@ -256,19 +257,31 @@ export function ArticleDetail({
 }
 
 /**
- * Renders the credit line under the featured image. Today only
- * `'unsplash'` produces a meaningful line ("Photo by Annie Spratt
- * on Unsplash") — other providers fall through to a minimal
- * "Photo by …" if they ever supply attribution. Returns `null`
- * when there's literally nothing to attribute (e.g. provider was
- * recorded but neither photographer name nor URL is present).
+ * Renders the credit line under the featured image. Resolves the
+ * provider's display label via {@link providerDisplayLabel} so:
+ *
+ *   * `'pexels'` (active)   → "Photo by X on Pexels"
+ *   * `'unsplash'` (legacy) → "Photo by X on Unsplash" — historical
+ *     attribution rows continue rendering correctly even though
+ *     Unsplash is no longer a user-facing option.
+ *   * Anything else → raw provider id; readable but visually
+ *     un-branded so a malformed row surfaces instead of hiding.
+ *
+ * Returns `null` when there's literally nothing to attribute (e.g.
+ * provider was recorded but neither photographer name nor URL is
+ * present — the manual-paste / `'manual_url'` flow).
  */
 function FeaturedImageAttributionLine({
   attribution,
 }: {
   attribution: ArticleFeaturedImageAttribution;
 }) {
-  const isUnsplash = attribution.provider === "unsplash";
+  /* v8 ignore start -- defensive: providerDisplayLabel only returns "" for empty/null/non-string input, but `attribution.provider` is typed `string` and required; fallback to raw id is an unreachable forward-compat guard */
+  const providerLabel =
+    providerDisplayLabel(attribution.provider) || attribution.provider;
+  /* v8 ignore stop */
+  const showProviderClause =
+    attribution.provider === "pexels" || attribution.provider === "unsplash";
   const photographerLink = attribution.photographerProfileUrl ? (
     <a
       href={attribution.photographerProfileUrl}
@@ -292,20 +305,33 @@ function FeaturedImageAttributionLine({
     return null;
   }
 
+  // Per-provider fallback URL for the "on <Provider>" link when the
+  // row didn't capture a `photoUrl`. Pexels rows usually include
+  // `photoUrl` from the API, so this is mostly a defensive fallback
+  // for legacy / partially-populated rows.
+  const providerFallbackUrl =
+    attribution.provider === "pexels"
+      ? "https://www.pexels.com"
+      : attribution.provider === "unsplash"
+        ? "https://unsplash.com"
+        : null;
+
   return (
     <p className="mt-2 text-xs text-muted">
       Photo by {photographerLink}
-      {isUnsplash ? (
+      {showProviderClause ? (
         <>
           {" on "}
+          {/* v8 ignore start -- defensive: this block only runs when showProviderClause is true (provider ∈ {pexels, unsplash}), so providerFallbackUrl is always non-null and `?? "#"` is unreachable */}
           <a
-            href={attribution.photoUrl ?? "https://unsplash.com"}
+            href={attribution.photoUrl ?? providerFallbackUrl ?? "#"}
             target="_blank"
             rel="noopener noreferrer"
             className="text-foreground hover:underline"
           >
-            Unsplash
+            {providerLabel}
           </a>
+          {/* v8 ignore stop */}
         </>
       ) : null}
     </p>

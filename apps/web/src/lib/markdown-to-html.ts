@@ -7,6 +7,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { extractArticleSections } from "./extract-article-sections";
+import { providerDisplayLabel } from "./image-provider-label";
 
 /**
  * Server-side Markdown → HTML conversion used by the publishing
@@ -154,9 +155,7 @@ function isSafeHttpUrl(value: string | null | undefined): value is string {
  * `imageUrl` skips the figure entirely (returns `null`), an invalid
  * link URL drops the link wrapper but keeps the photographer text.
  */
-function buildSectionImageFigure(
-  image: SectionImageForHtml,
-): HastNode | null {
+function buildSectionImageFigure(image: SectionImageForHtml): HastNode | null {
   if (!isSafeHttpUrl(image.imageUrl)) return null;
 
   const imgProperties: Record<string, unknown> = {
@@ -199,8 +198,14 @@ function buildAttributionFigcaption(
   attribution: SectionImageAttributionForHtml | null,
 ): HastNode | null {
   if (!attribution) return null;
+  // Provider label resolves: 'pexels' → 'Pexels' (active),
+  // 'unsplash' → 'Unsplash' (legacy historical rows continue to
+  // serialize correctly into published WordPress HTML), anything
+  // else → raw id (forward-compat for future providers).
+  /* v8 ignore start -- defensive: providerDisplayLabel only returns "" for empty/null/non-string input, but `attribution.provider` is typed `string` and required by SectionImageAttributionForHtml; fallback to raw id is unreachable from typed callers */
   const providerLabel =
-    attribution.provider === "unsplash" ? "Unsplash" : attribution.provider;
+    providerDisplayLabel(attribution.provider) || attribution.provider;
+  /* v8 ignore stop */
   const photographerName = attribution.photographerName?.trim() || null;
   // Nothing to credit → no figcaption.
   if (!photographerName && !isSafeHttpUrl(attribution.photoUrl)) {
@@ -211,7 +216,9 @@ function buildAttributionFigcaption(
   if (photographerName) {
     children.push({ type: "text", value: "Photo by " });
     if (isSafeHttpUrl(attribution.photographerProfileUrl)) {
-      children.push(buildExternalLink(attribution.photographerProfileUrl, photographerName));
+      children.push(
+        buildExternalLink(attribution.photographerProfileUrl, photographerName),
+      );
     } else {
       children.push({ type: "text", value: photographerName });
     }
@@ -345,17 +352,13 @@ export async function markdownToHtml(
   // Section data → build a one-shot processor that adds the
   // injector after sanitize. Compute `orderedKeys` once from the
   // same `extractArticleSections` the editor uses so keys align.
-  const orderedKeys = extractArticleSections(markdown).map(
-    (s) => s.sectionKey,
-  );
+  const orderedKeys = extractArticleSections(markdown).map((s) => s.sectionKey);
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkRehype)
     .use(rehypeSanitize, SANITIZE_SCHEMA)
-    .use(() =>
-      rehypeInjectSectionImages({ orderedKeys, sectionImagesByKey }),
-    )
+    .use(() => rehypeInjectSectionImages({ orderedKeys, sectionImagesByKey }))
     .use(rehypeStringify);
   const file = await processor.process(markdown);
   return String(file);

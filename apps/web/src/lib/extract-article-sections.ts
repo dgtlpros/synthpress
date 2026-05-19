@@ -12,11 +12,16 @@ import { slugify } from "./slugify";
  * the two structural shapes we touch here keeps the parser
  * dependency-free from the type side.
  */
+interface MdastPosition {
+  start?: { offset?: number; line?: number; column?: number };
+  end?: { offset?: number; line?: number; column?: number };
+}
 interface MdastNode {
   type: string;
   value?: string;
   children?: MdastNode[];
   depth?: number;
+  position?: MdastPosition;
 }
 interface MdastHeading extends MdastNode {
   type: "heading";
@@ -73,6 +78,27 @@ export interface ExtractedArticleSection {
   sectionHeading: string;
   /** 0-indexed document order. */
   sortOrder: number;
+  /**
+   * Source offset (UTF-16 character index into the original markdown
+   * string) of the heading's first character. Mirrors the
+   * `position.start.offset` value remark-parse stamps on every node
+   * and that remark-rehype carries over to the rendered hast nodes.
+   *
+   * Why we expose it: the client-side `MarkdownPreview` matches each
+   * rendered `<h2>` to its section image by reading
+   * `node.position.start.offset` off the hast node react-markdown
+   * passes to component overrides. A position-based join is purely
+   * functional — no per-render counter, so it stays correct under
+   * React's StrictMode double-invoke. The featured publish pipeline
+   * (`markdown-to-html.ts` / `rehypeInjectSectionImages`) only runs
+   * once per call so it could keep its index-based join, but we
+   * still emit `startOffset` for symmetry + future use.
+   *
+   * `null` only when remark-parse for some reason omits position
+   * info on the heading node — never observed on real input but
+   * declared so the consumer must defend.
+   */
+  startOffset: number | null;
 }
 
 /**
@@ -105,10 +131,7 @@ function readHeadingText(heading: MdastHeading): string {
  * the second gets `-2`, the third `-3`, etc. Keeps section image
  * rows stable across re-saves of the same article body.
  */
-function uniqueKey(
-  base: string,
-  used: Map<string, number>,
-): string {
+function uniqueKey(base: string, used: Map<string, number>): string {
   const count = (used.get(base) ?? 0) + 1;
   used.set(base, count);
   if (count === 1) return base;
@@ -143,10 +166,7 @@ export function extractArticleSections(
       // Synthesize a stable `section-N` key, then dedupe through
       // the same map so a real `## section-1` heading later in the
       // doc gets a `-2` suffix instead of colliding.
-      sectionKey = uniqueKey(
-        `section-${nextSyntheticIndex}`,
-        usedKeys,
-      );
+      sectionKey = uniqueKey(`section-${nextSyntheticIndex}`, usedKeys);
       nextSyntheticIndex += 1;
     }
 
@@ -154,6 +174,11 @@ export function extractArticleSections(
       sectionKey,
       sectionHeading: text,
       sortOrder: sections.length,
+      /* v8 ignore next 4 -- defensive: remark-parse always stamps `position.start.offset` on heading nodes for real string input; the `null` branch only fires for hand-crafted mdast nodes (not produced by `unified().use(remarkParse).parse(string)`). */
+      startOffset:
+        typeof heading.position?.start?.offset === "number"
+          ? heading.position.start.offset
+          : null,
     });
   }
 

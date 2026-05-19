@@ -1,5 +1,6 @@
 import "server-only";
 
+import { pexelsProvider } from "./pexels-provider";
 import { unsplashProvider } from "./unsplash-provider";
 import {
   ImageSearchError,
@@ -18,29 +19,52 @@ import {
  *
  * Why a registry over a switch:
  *   A registry keeps the provider list closed inside this file.
- *   Action / WP code never imports `unsplashProvider` directly, so
- *   you can't accidentally couple them to Unsplash. They go
- *   through `getImageProvider(id)` and get back the
- *   `ImageSearchProvider` interface.
+ *   Action / WP code never imports `pexelsProvider` /
+ *   `unsplashProvider` directly, so you can't accidentally couple
+ *   them to a single provider. They go through
+ *   `getImageProvider(id)` and get back the `ImageSearchProvider`
+ *   interface.
+ *
+ * Active vs. legacy:
+ *   * **Active**: `pexels`. New picks (manual + autopilot) all go
+ *     through here. {@link listImageProviderIds} returns only the
+ *     active ids — UI selectors / settings dropdowns iterate this.
+ *   * **Legacy**: `unsplash`. Still registered so historical
+ *     `article_image_uploads` rows whose `provider='unsplash'` can
+ *     still resolve via `getImageProvider('unsplash')` for the
+ *     WordPress publish path's `trackDownload` ping. Not exposed
+ *     in the dropdown / picker UI; existing rows continue to render
+ *     attribution + publish to WordPress correctly.
  *
  * Default provider:
- *   `'unsplash'` for now. The Unsplash picker is the only image-
- *   search UI in the app, so the default matches the picker. When
- *   we add a multi-provider picker, this constant becomes the
- *   "selected by default" tab/option.
+ *   `'pexels'` — what the picker + autopilot reach for when the
+ *   blog's `settings.media.imageProvider` doesn't override.
  */
 
-const PROVIDERS: Record<string, ImageSearchProvider> = {
+const ACTIVE_PROVIDERS: Record<string, ImageSearchProvider> = {
+  [pexelsProvider.providerId]: pexelsProvider,
+};
+
+const LEGACY_PROVIDERS: Record<string, ImageSearchProvider> = {
   [unsplashProvider.providerId]: unsplashProvider,
 };
 
+const PROVIDERS: Record<string, ImageSearchProvider> = {
+  ...LEGACY_PROVIDERS,
+  ...ACTIVE_PROVIDERS,
+};
+
 export const DEFAULT_IMAGE_PROVIDER_ID: ImageProviderId =
-  unsplashProvider.providerId;
+  pexelsProvider.providerId;
 
 /**
  * Returns the registered provider for `providerId` or throws an
  * `ImageSearchError("unsupported_provider")` so the action/UI can
  * map it to friendly copy through the standard error path.
+ *
+ * Resolves both active AND legacy providers — the WordPress publish
+ * path needs to be able to look up a row's recorded provider even
+ * when it's no longer offered to users (Unsplash today).
  *
  * Throws (rather than returning null) because every consumer needs
  * a provider to do anything useful. Hiding the failure behind a
@@ -62,9 +86,13 @@ export function getImageProvider(
 }
 
 /**
- * Returns the list of registered provider ids. Useful for a future
- * multi-provider picker UI; today only Unsplash is registered.
+ * Returns the list of **active** (user-facing) provider ids.
+ * Settings dropdowns + future picker provider tabs iterate this.
+ *
+ * Legacy providers (Unsplash) are NOT included — they're resolvable
+ * via {@link getImageProvider} for historical-row bookkeeping but
+ * shouldn't appear in any selectable list.
  */
 export function listImageProviderIds(): ImageProviderId[] {
-  return Object.keys(PROVIDERS);
+  return Object.keys(ACTIVE_PROVIDERS);
 }

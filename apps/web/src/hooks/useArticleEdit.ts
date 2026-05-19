@@ -222,7 +222,9 @@ function toFields(
     // if the editor's section-images card was visible but empty,
     // the user intends "no section images on this article".
     sectionImages:
-      sectionImages !== null ? toSectionImagesPayload(sectionImages) : undefined,
+      sectionImages !== null
+        ? toSectionImagesPayload(sectionImages)
+        : undefined,
   };
 }
 
@@ -333,25 +335,22 @@ export function useArticleEdit({
     [],
   );
 
-  const selectSectionImage = useCallback(
-    (selection: SectionImageSelection) => {
-      setSectionImages((prev) => ({
-        ...prev,
-        [selection.sectionKey]: {
-          sectionKey: selection.sectionKey,
-          sectionHeading: selection.sectionHeading,
-          sortOrder: selection.sortOrder,
-          imageUrl: selection.imageUrl,
-          altText: selection.altText,
-          // Fresh provider attribution — the save path forwards
-          // this to `recordArticleImageUpload` so the new
-          // `article_image_uploads` row carries the full credit.
-          metadata: selection.metadata,
-        },
-      }));
-    },
-    [],
-  );
+  const selectSectionImage = useCallback((selection: SectionImageSelection) => {
+    setSectionImages((prev) => ({
+      ...prev,
+      [selection.sectionKey]: {
+        sectionKey: selection.sectionKey,
+        sectionHeading: selection.sectionHeading,
+        sortOrder: selection.sortOrder,
+        imageUrl: selection.imageUrl,
+        altText: selection.altText,
+        // Fresh provider attribution — the save path forwards
+        // this to `recordArticleImageUpload` so the new
+        // `article_image_uploads` row carries the full credit.
+        metadata: selection.metadata,
+      },
+    }));
+  }, []);
 
   const setSectionImageAlt = useCallback(
     (sectionKey: string, altText: string) => {

@@ -72,7 +72,11 @@ function makeChain<T>(seq: Array<ChainResult<T>>) {
   (chain as unknown as PromiseLike<ChainResult<T>>).then = ((
     onFulfilled: ((v: ChainResult<T>) => unknown) | null | undefined,
     onRejected: ((r: unknown) => unknown) | null | undefined,
-  ) => Promise.resolve(seq[seq.length - 1]).then(onFulfilled, onRejected)) as never;
+  ) =>
+    Promise.resolve(seq[seq.length - 1]).then(
+      onFulfilled,
+      onRejected,
+    )) as never;
   return chain;
 }
 
@@ -99,9 +103,7 @@ function makeClient(opts: {
     opts.articleRead ?? { data: null, error: null },
   ]);
   // Stamp the update terminal on the article_jobs chain.
-  (
-    articleJobsChain as unknown as PromiseLike<ChainResult<unknown>>
-  ).then = ((
+  (articleJobsChain as unknown as PromiseLike<ChainResult<unknown>>).then = ((
     onFulfilled: ((v: ChainResult<unknown>) => unknown) | null | undefined,
     onRejected: ((r: unknown) => unknown) | null | undefined,
   ) =>
@@ -214,9 +216,7 @@ describe("retryAutopilotJobWordPressDraft — validation", () => {
 
   it("throws job_blog_mismatch when the job belongs to a different blog", async () => {
     const client = makeClient({
-      jobReads: [
-        { data: baseJobRow({ blog_id: "other-blog" }), error: null },
-      ],
+      jobReads: [{ data: baseJobRow({ blog_id: "other-blog" }), error: null }],
     });
     await expect(
       retryAutopilotJobWordPressDraft({
@@ -249,9 +249,7 @@ describe("retryAutopilotJobWordPressDraft — validation", () => {
 
   it("throws job_run_mismatch when input.autopilotRunId is missing entirely (manual job)", async () => {
     const client = makeClient({
-      jobReads: [
-        { data: baseJobRow({ input: {} }), error: null },
-      ],
+      jobReads: [{ data: baseJobRow({ input: {} }), error: null }],
     });
     await expect(
       retryAutopilotJobWordPressDraft({
@@ -674,7 +672,9 @@ describe("retryAutopilotJobWordPressDraft — outcomes", () => {
       attempted: true,
       status: "failed",
     });
-    expect(out.wpPublish.status === "failed" && out.wpPublish.warning).toBeTruthy();
+    expect(
+      out.wpPublish.status === "failed" && out.wpPublish.warning,
+    ).toBeTruthy();
 
     expect(client.__chains.article_jobs!.update).toHaveBeenCalledWith({
       output: expect.objectContaining({

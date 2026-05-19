@@ -1417,12 +1417,18 @@ export interface QueueGenerateArticleFromIdeaResult {
   jobId: string;
   articleId: string;
   ideaId: string;
-  /** Status the durable job/article rows are in after queueing. */
-  status: "pending" | "processing";
   /**
-   * `true` when a pending/processing job already existed for this idea
-   * and we returned it instead of creating a new one. Lets the server
-   * action skip starting a duplicate workflow run.
+   * Status the durable job/article rows are in after queueing.
+   * `'completed'` is returned when an already-completed job exists
+   * for the idea (autopilot dedupe path) and the caller should
+   * skip starting another workflow.
+   */
+  status: "pending" | "processing" | "completed";
+  /**
+   * `true` when a `pending` / `processing` / `completed` job
+   * already existed for this idea and we returned it instead of
+   * creating a new one. Lets the server action skip starting a
+   * duplicate workflow run.
    */
   alreadyQueued: boolean;
 }
@@ -1467,15 +1473,32 @@ export async function queueGenerateArticleFromIdea(
   }
   const idea = ideaRow as ArticleIdeaRow;
 
-  // 3. Idempotency: short-circuit if a pending/processing job already
-  // exists for this idea. Prevents double-charging when the user
-  // double-clicks Generate Article (or two tabs both fire it).
+  // 3. Idempotency: short-circuit if a pending / processing /
+  // completed job already exists for this idea.
+  //
+  //   * `pending` / `processing` — prevents double-charging when
+  //     the user double-clicks Generate Article (or two tabs both
+  //     fire it), AND prevents overlapping autopilot cron ticks
+  //     from spawning duplicates while a prior tick's workflow is
+  //     still running.
+  //   * `completed` — defends against a race where an idea was
+  //     converted but its `article_ideas.status` flip to
+  //     `converted_to_article` hasn't propagated yet (or a future
+  //     contract change leaves it `approved` post-completion).
+  //     Without this guard, the next cron tick could re-spawn a
+  //     duplicate generation for an already-converted idea.
+  //
+  // `failed` / `cancelled` jobs are deliberately NOT in the list:
+  // autopilot v1 retries those automatically by re-queueing from
+  // the same `approved` idea on the next cron tick. The new job
+  // re-uses the existing article placeholder via the article_id
+  // link the workflow looks up.
   const { data: existingJobs, error: existingJobsErr } = await supabase
     .from("article_jobs")
     .select("id, article_id, status")
     .eq("article_idea_id", input.ideaId)
     .eq("type", "generate_article")
-    .in("status", ["pending", "processing"])
+    .in("status", ["pending", "processing", "completed"])
     .order("created_at", { ascending: false })
     .limit(1);
   if (existingJobsErr) throw existingJobsErr;
@@ -1489,7 +1512,7 @@ export async function queueGenerateArticleFromIdea(
       jobId: existing.id,
       articleId: existing.article_id,
       ideaId: input.ideaId,
-      status: existing.status as "pending" | "processing",
+      status: existing.status as "pending" | "processing" | "completed",
       alreadyQueued: true,
     };
   }

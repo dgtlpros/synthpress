@@ -40,10 +40,25 @@ import {
  *     Unsplash's API guidelines say to ping `download_location`
  *     on **actual use** (the WordPress media upload). Firing here
  *     would double-count + count picks the user later removes.
+ *     Pexels has no tracking concept at all — its adapter no-ops.
  *   * Existing images are preserved (manual picks win over autopilot)
  *     unless `force: true` is passed. Lets a user "reset to auto"
  *     by clearing their picks + re-running the picker without us
  *     overwriting an in-progress manual selection.
+ *
+ * Diversity (v12):
+ *   The featured + every section pick share a single
+ *   `usedImageKeys: Set<string>`. Each successful pick adds two
+ *   keys to it: a strong `provider:providerPhotoId` key AND a
+ *   fallback `regularUrl` key (catches the rare case where two
+ *   provider rows produce the same hosted URL). On every search
+ *   we walk the candidate list and pick the first photo whose
+ *   keys are NOT yet in the set. If the chain runs out without
+ *   finding a fresh candidate, we fall through to "no result"
+ *   rather than reusing — duplicate hero + section images on the
+ *   same article looked obviously stale, which is why we widen
+ *   `perPage` to {@link AUTO_IMAGE_SEARCH_PER_PAGE} (15) so the
+ *   provider has room to surface alternatives.
  *
  * Query derivation:
  *   * Featured: `article.target_keyword` → `article.title` → `blog.niche`.
@@ -52,6 +67,20 @@ import {
  *     provider's relevance ranker the article topic on top of the
  *     heading's specificity).
  */
+
+/**
+ * Per-page count the autopilot picker requests from the provider
+ * for each query attempt. Wide enough that the dedupe logic
+ * almost always finds a non-used candidate without paginating
+ * (Pexels' free tier caps at 200 req/hour — paginating would
+ * burn that quota for marginal gains). Narrow enough that the
+ * client-side pick loop stays fast and doesn't allocate a giant
+ * array of candidates we'll never use.
+ *
+ * Manual picker still defaults to its own (smaller) perPage value
+ * because the user only selects one image per click.
+ */
+export const AUTO_IMAGE_SEARCH_PER_PAGE = 15;
 
 type Client = SupabaseClient<Database>;
 
@@ -118,9 +147,7 @@ async function loadArticleForPicker(
 ): Promise<ArticleQueryRow | null> {
   const { data, error } = await client
     .from("articles")
-    .select(
-      "id, title, target_keyword, content_markdown, featured_image_url",
-    )
+    .select("id, title, target_keyword, content_markdown, featured_image_url")
     .eq("id", articleId)
     .eq("blog_id", blogId)
     .maybeSingle();
@@ -189,11 +216,7 @@ function buildSectionQueries(
   const keyword = article.target_keyword?.trim();
   const title = article.title?.trim();
   const chain: string[] = [];
-  if (
-    heading &&
-    keyword &&
-    keyword.toLowerCase() !== heading.toLowerCase()
-  ) {
+  if (heading && keyword && keyword.toLowerCase() !== heading.toLowerCase()) {
     chain.push(`${heading} ${keyword}`);
   }
   if (heading) chain.push(heading);
@@ -259,15 +282,44 @@ function photoToMetadata(
 }
 
 /**
- * Pulls the first usable result out of a provider search response.
- * `results[0]` is "first usable" because the provider's adapter
- * filters out incomplete rows (missing `regularUrl` / `id`) during
- * normalization.
+ * Builds the dedupe keys for a candidate photo. We compose two keys
+ * (and add BOTH to the used set on a successful pick):
+ *
+ *   * `provider:providerPhotoId` — the strong identity key. Two rows
+ *     from the same provider with the same id are the same photo.
+ *   * `url:<regularUrl>` — the fallback key. Catches the case where
+ *     two distinct provider rows coincidentally point at the same
+ *     hosted URL (rare in practice but worth guarding so the
+ *     featured + section images can never share the same on-page
+ *     `<img src>`).
  */
-function pickFirstUsable(
+function imageDedupeKeys(photo: NormalizedImageSearchResult): string[] {
+  return [
+    `${photo.provider}:${photo.providerPhotoId}`,
+    `url:${photo.regularUrl}`,
+  ];
+}
+
+/**
+ * Walks a search-result list and returns the first photo whose
+ * dedupe keys are not yet in `usedImageKeys`. Returns `null` when
+ * every result is already used (so the caller can fall through to
+ * the next query in the chain or warn).
+ *
+ * `usedImageKeys` is NOT mutated here — the caller adds the chosen
+ * photo's keys after deciding to use it (so a search-with-fallback
+ * call that later returns "no_results" doesn't poison the set).
+ */
+function pickFirstUnused(
   results: NormalizedImageSearchResult[],
+  usedImageKeys: Set<string>,
 ): NormalizedImageSearchResult | null {
-  return results[0] ?? null;
+  for (const photo of results) {
+    const keys = imageDedupeKeys(photo);
+    if (keys.some((k) => usedImageKeys.has(k))) continue;
+    return photo;
+  }
+  return null;
 }
 
 /**
@@ -284,14 +336,24 @@ type FallbackSearchOutcome =
 
 /**
  * Walks a query chain calling `searchImages` in sequence until one
- * returns a usable photo. Stops at the first hit (no over-fetch).
- * Provider errors short-circuit the chain — if Unsplash rate-limits
- * on query #1, trying query #2 immediately would just hit the same
- * limit; we surface the error and let the caller warn.
+ * returns a non-already-used photo. Each query asks the provider
+ * for {@link AUTO_IMAGE_SEARCH_PER_PAGE} candidates so the dedupe
+ * pass has room to skip past photos that were already picked for
+ * the featured slot or earlier sections.
+ *
+ * Provider errors short-circuit the chain — if the provider rate-
+ * limits on query #1, trying query #2 immediately would just hit
+ * the same limit; we surface the error and let the caller warn.
+ *
+ * `usedImageKeys` is read-only inside this function. The caller
+ * adds the chosen photo's keys to the set after deciding to commit
+ * the pick (so a "no_results" outcome doesn't accidentally poison
+ * the set with photos we ended up not using).
  */
 async function searchWithFallback(
   provider: ImageSearchProvider,
   queries: string[],
+  usedImageKeys: Set<string>,
   fetchImpl?: typeof fetch,
 ): Promise<FallbackSearchOutcome> {
   let lastQuery = "";
@@ -300,10 +362,10 @@ async function searchWithFallback(
     try {
       const result = await provider.searchImages({
         query,
-        perPage: 1,
+        perPage: AUTO_IMAGE_SEARCH_PER_PAGE,
         fetchImpl,
       });
-      const photo = pickFirstUsable(result.results);
+      const photo = pickFirstUnused(result.results, usedImageKeys);
       if (photo) return { photo, query };
     } catch (err) {
       /* v8 ignore next 1 -- defensive: provider adapters only throw ImageSearchError */
@@ -319,10 +381,31 @@ async function searchWithFallback(
 }
 
 /**
+ * Marks a photo as used so subsequent picks in the same article
+ * skip it. Adds both dedupe keys ({@link imageDedupeKeys}) so a
+ * future row that matches EITHER key is filtered out.
+ */
+function markImageUsed(
+  photo: NormalizedImageSearchResult,
+  usedImageKeys: Set<string>,
+): void {
+  for (const key of imageDedupeKeys(photo)) {
+    usedImageKeys.add(key);
+  }
+}
+
+/**
  * Picks section images for every H2 in the saved body. Skips
  * sections that already have a row (manual / previous-pass pick)
  * unless `force: true`. Each section's failure is isolated — one
  * provider rate-limit doesn't kill the rest of the picks.
+ *
+ * `usedImageKeys` is the running dedupe set shared with the
+ * featured pick — every successful section pick adds its dedupe
+ * keys so later sections (and any subsequent featured retry) skip
+ * the same photo. We also seed the set with the URLs of any
+ * existing section rows so a `force=false` re-run doesn't pick the
+ * same photo for a different section.
  */
 async function pickSectionImages(opts: {
   client: Client;
@@ -331,6 +414,7 @@ async function pickSectionImages(opts: {
   blogId: string;
   force: boolean;
   warnings: string[];
+  usedImageKeys: Set<string>;
   fetchImpl?: typeof fetch;
 }): Promise<{ sectionsFound: number; sectionImagesSelected: number }> {
   const {
@@ -340,6 +424,7 @@ async function pickSectionImages(opts: {
     blogId,
     force,
     warnings,
+    usedImageKeys,
     fetchImpl,
   } = opts;
 
@@ -353,6 +438,12 @@ async function pickSectionImages(opts: {
   for (const row of existingRows) {
     /* v8 ignore next 1 -- defensive: section rows always have a non-null section_key by `recordArticleImageUpload`'s write contract; falsy branch is unreachable */
     if (row.section_key) existingByKey.set(row.section_key, true);
+    // Seed dedupe with existing URLs so a partial re-pick (force=false +
+    // some sections already filled) doesn't pick the same image again.
+    if (row.image_url) usedImageKeys.add(`url:${row.image_url}`);
+    if (row.provider && row.provider_photo_id) {
+      usedImageKeys.add(`${row.provider}:${row.provider_photo_id}`);
+    }
   }
 
   let selected = 0;
@@ -367,7 +458,12 @@ async function pickSectionImages(opts: {
       continue;
     }
 
-    const outcome = await searchWithFallback(provider, queries, fetchImpl);
+    const outcome = await searchWithFallback(
+      provider,
+      queries,
+      usedImageKeys,
+      fetchImpl,
+    );
     if (outcome.photo === null) {
       if (outcome.reason === "provider_error") {
         warnings.push(
@@ -380,6 +476,13 @@ async function pickSectionImages(opts: {
       }
       continue;
     }
+
+    // Mark the chosen photo used BEFORE writing so that if the
+    // insert below somehow throws, the next section still sees a
+    // consistent dedupe set (the outer try/catch swallows + the
+    // partial state is fine; we'd rather skip a duplicate than
+    // accidentally double-pick a photo).
+    markImageUsed(outcome.photo, usedImageKeys);
 
     const altText = pickAltText(outcome.photo, section.sectionHeading);
     await recordArticleImageUpload({
@@ -481,6 +584,12 @@ export async function pickImagesForArticle(
   let sectionsFound = 0;
   let sectionImagesSelected = 0;
 
+  // Shared dedupe set for the whole article. Mutated by both
+  // `pickFeaturedImageInner` and `pickSectionImages` so they pick
+  // disjoint photos. Seeded with any pre-existing featured /
+  // section picks so a partial re-run also stays disjoint.
+  const usedImageKeys = new Set<string>();
+
   // Featured. Wrapped in try so an unexpected DB write error (e.g.
   // RLS misconfig) doesn't kill the section-image pass.
   if (includeFeatured) {
@@ -493,6 +602,7 @@ export async function pickImagesForArticle(
         blogId: input.blogId,
         force: input.force ?? false,
         warnings,
+        usedImageKeys,
         fetchImpl: input.fetchImpl,
       });
       /* v8 ignore start -- defensive: pickFeaturedImageInner only throws on unexpected DB errors during write; warning collected so section pass still runs */
@@ -512,6 +622,7 @@ export async function pickImagesForArticle(
         blogId: input.blogId,
         force: input.force ?? false,
         warnings,
+        usedImageKeys,
         fetchImpl: input.fetchImpl,
       });
       sectionsFound = result.sectionsFound;
@@ -538,6 +649,10 @@ export async function pickImagesForArticle(
  * but returns a single boolean. Kept as a private fn so the top-
  * level `pickImagesForArticle` can wrap it in its own catch
  * without polluting the public surface.
+ *
+ * Adds the chosen photo's keys to `usedImageKeys` on success so
+ * the section pass that runs after this skips re-using the
+ * featured photo for any section.
  */
 async function pickFeaturedImageInner(opts: {
   client: Client;
@@ -547,6 +662,7 @@ async function pickFeaturedImageInner(opts: {
   blogId: string;
   force: boolean;
   warnings: string[];
+  usedImageKeys: Set<string>;
   fetchImpl?: typeof fetch;
 }): Promise<boolean> {
   const {
@@ -557,10 +673,15 @@ async function pickFeaturedImageInner(opts: {
     blogId,
     force,
     warnings,
+    usedImageKeys,
     fetchImpl,
   } = opts;
 
   if (article.featured_image_url?.trim() && !force) {
+    // Existing manual / previous-autopilot featured pick — seed
+    // the dedupe set with its URL so the section pass doesn't
+    // accidentally pick the same image for a section.
+    usedImageKeys.add(`url:${article.featured_image_url}`);
     return false;
   }
 
@@ -572,7 +693,12 @@ async function pickFeaturedImageInner(opts: {
     return false;
   }
 
-  const outcome = await searchWithFallback(provider, queries, fetchImpl);
+  const outcome = await searchWithFallback(
+    provider,
+    queries,
+    usedImageKeys,
+    fetchImpl,
+  );
   if (outcome.photo === null) {
     if (outcome.reason === "provider_error") {
       warnings.push(
@@ -586,6 +712,11 @@ async function pickFeaturedImageInner(opts: {
     return false;
   }
   const photo = outcome.photo;
+
+  // Mark used BEFORE writing the article + attribution rows so
+  // the section pass (which shares this set) can never pick the
+  // same photo even if a write below throws.
+  markImageUsed(photo, usedImageKeys);
 
   const altText = pickAltText(photo, article.title);
 

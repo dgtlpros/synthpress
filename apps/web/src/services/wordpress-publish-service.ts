@@ -14,9 +14,7 @@ import {
 import { getImageProvider } from "./image-providers/registry";
 import { ImageSearchError } from "./image-providers/types";
 import { extractArticleSections } from "@/lib/extract-article-sections";
-import type {
-  SectionImageForHtml,
-} from "@/lib/markdown-to-html";
+import type { SectionImageForHtml } from "@/lib/markdown-to-html";
 
 /**
  * WordPress publishing helpers used by the Article detail page.
@@ -263,8 +261,8 @@ export async function hasBlogWordPressConnection(
   if (!row) return false;
   return Boolean(
     row.wp_url?.trim() &&
-      row.wp_username?.trim() &&
-      row.wp_app_password?.trim(),
+    row.wp_username?.trim() &&
+    row.wp_app_password?.trim(),
   );
 }
 
@@ -1097,10 +1095,7 @@ function toSectionImageError(err: unknown): PublishArticleError {
   if (!(err instanceof PublishArticleError)) throw err;
   switch (err.code) {
     case "image_fetch_failed":
-      return new PublishArticleError(
-        "section_image_fetch_failed",
-        err.details,
-      );
+      return new PublishArticleError("section_image_fetch_failed", err.details);
     case "image_invalid_content_type":
       return new PublishArticleError(
         "section_image_invalid_content_type",
@@ -1325,9 +1320,7 @@ async function runPostUploadBookkeeping(opts: {
     // registered (legacy row, manual seed, etc.) skip tracking but
     // still stamp `wp_media_id` below — the publish itself is still
     // a success and the tracker is best-effort by design.
-    let provider:
-      | ReturnType<typeof getImageProvider>
-      | null = null;
+    let provider: ReturnType<typeof getImageProvider> | null = null;
     try {
       provider = getImageProvider(row.provider);
     } catch (err) {

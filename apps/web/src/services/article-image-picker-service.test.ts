@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // provider directly. Same shape as `actions/unsplash.test.ts`.
 vi.mock("@/services/image-providers/registry", () => ({
   getImageProvider: vi.fn(),
-  DEFAULT_IMAGE_PROVIDER_ID: "unsplash",
+  DEFAULT_IMAGE_PROVIDER_ID: "pexels",
 }));
 
 vi.mock("@/services/image-providers/types", () => {
@@ -54,8 +54,8 @@ const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedSearchImages = vi.fn();
 const mockedTrackDownload = vi.fn();
 const fakeProvider = {
-  providerId: "unsplash",
-  displayName: "Unsplash",
+  providerId: "pexels",
+  displayName: "Pexels",
   searchImages: mockedSearchImages,
   trackDownload: mockedTrackDownload,
 };
@@ -63,20 +63,29 @@ const fakeProvider = {
 /**
  * Sample provider result — minimum fields the picker reads, plus
  * the optional ones to verify they flow into attribution metadata.
+ *
+ * `providerPhotoId` defaults to a fresh string per call so the
+ * shared `usedImageKeys` dedupe set in the picker doesn't reject
+ * the second `sampleResult()` in a multi-section test as a
+ * duplicate of the first. Tests that rely on a specific id can
+ * still override.
  */
+let SAMPLE_RESULT_COUNTER = 0;
 function sampleResult(overrides: Partial<Record<string, unknown>> = {}) {
+  SAMPLE_RESULT_COUNTER += 1;
+  const id = `photo-${SAMPLE_RESULT_COUNTER}`;
   return {
-    provider: "unsplash",
-    providerPhotoId: "abc",
+    provider: "pexels",
+    providerPhotoId: id,
     description: null,
     altDescription: "A modern home office",
-    thumbUrl: "https://x.com/t",
-    regularUrl: "https://x.com/r",
+    thumbUrl: `https://x.com/t-${id}`,
+    regularUrl: `https://x.com/r-${id}`,
     fullUrl: null,
-    photographerName: "Annie Spratt",
-    photographerProfileUrl: "https://unsplash.com/@anniespratt",
-    photoUrl: "https://unsplash.com/photos/abc",
-    downloadLocation: "https://api.unsplash.com/photos/abc/download",
+    photographerName: "Sam Person",
+    photographerProfileUrl: "https://www.pexels.com/@sam",
+    photoUrl: `https://www.pexels.com/photo/${id}/`,
+    downloadLocation: null,
     ...overrides,
   };
 }
@@ -114,13 +123,22 @@ const defaultBlog: BlogRowFixture = {
  * exists" with two separate reads. The `update` chain resolves to
  * `{data, error}` and tracks the payload for assertions.
  */
-function makeClient(opts: {
-  articleReads?: Array<{ data: ArticleRowFixture | null; error: unknown | null }>;
-  blogReads?: Array<{ data: BlogRowFixture | null; error: unknown | null }>;
-  articleUpdateError?: unknown | null;
-} = {}) {
-  const articleReadQueue = [...(opts.articleReads ?? [{ data: defaultArticle, error: null }])];
-  const blogReadQueue = [...(opts.blogReads ?? [{ data: defaultBlog, error: null }])];
+function makeClient(
+  opts: {
+    articleReads?: Array<{
+      data: ArticleRowFixture | null;
+      error: unknown | null;
+    }>;
+    blogReads?: Array<{ data: BlogRowFixture | null; error: unknown | null }>;
+    articleUpdateError?: unknown | null;
+  } = {},
+) {
+  const articleReadQueue = [
+    ...(opts.articleReads ?? [{ data: defaultArticle, error: null }]),
+  ];
+  const blogReadQueue = [
+    ...(opts.blogReads ?? [{ data: defaultBlog, error: null }]),
+  ];
   const articleUpdates: Array<Record<string, unknown>> = [];
 
   function makeArticleChain() {
@@ -184,6 +202,10 @@ beforeEach(() => {
   mockedGetProvider.mockReturnValue(fakeProvider as never);
   mockedListSections.mockResolvedValue([]);
   mockedRecord.mockResolvedValue({} as never);
+  // Reset the per-test photo-id counter so each test starts from
+  // photo-1 / photo-2 / ... — keeps assertions on
+  // `providerPhotoId` predictable when a test cares.
+  SAMPLE_RESULT_COUNTER = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -215,7 +237,7 @@ describe("pickImagesForArticle — provider lookup", () => {
     expect(client.from).not.toHaveBeenCalled();
   });
 
-  it("uses DEFAULT_IMAGE_PROVIDER_ID ('unsplash') when providerId is omitted", async () => {
+  it("uses DEFAULT_IMAGE_PROVIDER_ID ('pexels') when providerId is omitted", async () => {
     mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
     const client = makeClient();
     const result = await pickImagesForArticle({
@@ -223,8 +245,8 @@ describe("pickImagesForArticle — provider lookup", () => {
       blogId: "b1",
       client: client as never,
     });
-    expect(result.providerId).toBe("unsplash");
-    expect(mockedGetProvider).toHaveBeenCalledWith("unsplash");
+    expect(result.providerId).toBe("pexels");
+    expect(mockedGetProvider).toHaveBeenCalledWith("pexels");
   });
 });
 
@@ -259,7 +281,7 @@ describe("pickImagesForArticle — featured image", () => {
 
     // Article update payload.
     expect(client.__articleUpdates[0]).toEqual({
-      featured_image_url: "https://x.com/r",
+      featured_image_url: "https://x.com/r-photo-1",
       featured_image_alt: "A modern home office",
       wp_featured_media_id: null,
     });
@@ -270,9 +292,9 @@ describe("pickImagesForArticle — featured image", () => {
         articleId: "a1",
         blogId: "b1",
         metadata: expect.objectContaining({
-          provider: "unsplash",
-          providerPhotoId: "abc",
-          imageUrl: "https://x.com/r",
+          provider: "pexels",
+          providerPhotoId: "photo-1",
+          imageUrl: "https://x.com/r-photo-1",
           altText: "A modern home office",
           wpMediaId: null,
         }),
@@ -292,7 +314,7 @@ describe("pickImagesForArticle — featured image", () => {
       client: client as never,
     });
     expect(mockedSearchImages).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "launch b2b blog", perPage: 1 }),
+      expect.objectContaining({ query: "launch b2b blog", perPage: 15 }),
     );
   });
 
@@ -484,9 +506,7 @@ describe("pickImagesForArticle — featured image", () => {
 
   it("falls back to a synthesized alt text when the photo has no altDescription or description", async () => {
     mockedSearchImages.mockResolvedValueOnce({
-      results: [
-        sampleResult({ altDescription: null, description: null }),
-      ],
+      results: [sampleResult({ altDescription: null, description: null })],
       totalResults: 1,
     });
     mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
@@ -1286,5 +1306,276 @@ describe("pickImagesForArticle — download tracking is NEVER called", () => {
     });
 
     expect(mockedTrackDownload).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-pick diversity (perPage + dedupe)
+// ---------------------------------------------------------------------------
+
+describe("pickImagesForArticle — auto-pick diversity", () => {
+  it("requests AUTO_IMAGE_SEARCH_PER_PAGE (15) results per query, not 1", async () => {
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    // EVERY call (featured + each section + every fallback rung)
+    // must request 15 results so the dedupe walk has room.
+    for (const call of mockedSearchImages.mock.calls) {
+      expect(call[0]).toMatchObject({ perPage: 15 });
+    }
+    // Sanity: at least one search ran so the assertion isn't vacuous.
+    expect(mockedSearchImages).toHaveBeenCalled();
+  });
+
+  it("does NOT reuse the featured photo for any section image", async () => {
+    // First search (featured) hands back PHOTO-A. Every subsequent
+    // section search returns ONLY PHOTO-A again. The dedupe pass
+    // must reject PHOTO-A for the section and fall through to a
+    // "no results" warning rather than re-using it.
+    const PHOTO_A = sampleResult({
+      providerPhotoId: "shared-id",
+      regularUrl: "https://x.com/shared.jpg",
+    });
+    mockedSearchImages.mockResolvedValue({
+      results: [PHOTO_A],
+      totalResults: 1,
+    });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.featuredSelected).toBe(true);
+    // Every section image attempt only had PHOTO-A available, which
+    // is now in the used set, so none committed.
+    expect(result.sectionImagesSelected).toBe(0);
+    // Section warnings explain "no results" (the per-page candidate
+    // list collapsed after dedupe).
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.join(" ")).toMatch(/no results/);
+
+    // Exactly ONE attribution-row insert happened (the featured pick).
+    // No section row recorded for PHOTO-A.
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts).toHaveLength(0);
+  });
+
+  it("picks the FIRST non-used candidate when the top result was already used", async () => {
+    // Section search returns the featured photo at index 0 and a
+    // fresh photo at index 1. The picker must skip the duplicate
+    // and commit the fresh one.
+    const FEATURED = sampleResult({
+      providerPhotoId: "featured-id",
+      regularUrl: "https://x.com/featured.jpg",
+    });
+    const FRESH = sampleResult({
+      providerPhotoId: "fresh-id",
+      regularUrl: "https://x.com/fresh.jpg",
+    });
+    mockedSearchImages
+      // Featured pick → FEATURED.
+      .mockResolvedValueOnce({ results: [FEATURED], totalResults: 1 })
+      // First section pick → [FEATURED, FRESH] — first one is used,
+      // dedupe should pick FRESH.
+      .mockResolvedValueOnce({
+        results: [FEATURED, FRESH],
+        totalResults: 2,
+      })
+      // FAQ section search returns empty so it doesn't write.
+      .mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts).toHaveLength(1);
+    expect(sectionInserts[0]![0]!.metadata).toMatchObject({
+      providerPhotoId: "fresh-id",
+      imageUrl: "https://x.com/fresh.jpg",
+    });
+  });
+
+  it("treats a duplicate regularUrl as a duplicate even when providerPhotoId differs", async () => {
+    // Same hosted URL, different provider ids. The fallback `url:` key
+    // must catch this so two sections can't share the same `<img src>`.
+    const PHOTO_A = sampleResult({
+      providerPhotoId: "id-a",
+      regularUrl: "https://x.com/dup.jpg",
+    });
+    const PHOTO_B_SAME_URL = sampleResult({
+      providerPhotoId: "id-b",
+      regularUrl: "https://x.com/dup.jpg",
+    });
+    mockedSearchImages
+      // Featured pick → PHOTO_A.
+      .mockResolvedValueOnce({ results: [PHOTO_A], totalResults: 1 })
+      // Section pick #1 → [PHOTO_B_SAME_URL] (different id, same URL)
+      // — must be filtered out by the URL-fallback key.
+      .mockResolvedValueOnce({
+        results: [PHOTO_B_SAME_URL],
+        totalResults: 1,
+      })
+      .mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    // No section image committed — the only candidate was a URL
+    // collision with the featured pick.
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts).toHaveLength(0);
+    expect(result.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT reuse a section image across multiple sections", async () => {
+    // Both sections see PHOTO-A first. Section 1 commits it; section 2
+    // must skip it and try the rest of the page.
+    const PHOTO_A = sampleResult({
+      providerPhotoId: "shared",
+      regularUrl: "https://x.com/shared.jpg",
+    });
+    const PHOTO_B = sampleResult({
+      providerPhotoId: "fresh",
+      regularUrl: "https://x.com/fresh.jpg",
+    });
+    mockedSearchImages
+      // Section 1 picks PHOTO-A from a 1-photo response.
+      .mockResolvedValueOnce({ results: [PHOTO_A], totalResults: 1 })
+      // Section 2 sees [PHOTO-A, PHOTO-B] — PHOTO-A is now used,
+      // dedupe must fall through to PHOTO-B.
+      .mockResolvedValueOnce({
+        results: [PHOTO_A, PHOTO_B],
+        totalResults: 2,
+      });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+      includeFeatured: false,
+    });
+
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts).toHaveLength(2);
+    expect(sectionInserts[0]![0]!.metadata).toMatchObject({
+      providerPhotoId: "shared",
+    });
+    expect(sectionInserts[1]![0]!.metadata).toMatchObject({
+      providerPhotoId: "fresh",
+    });
+  });
+
+  it("seeds the dedupe set with EXISTING section rows so a force=false re-run doesn't pick the same image", async () => {
+    // Existing FAQ row already used PHOTO-X (URL: https://x.com/x.jpg).
+    // A force=false re-run picks ONLY for the Intro section. The
+    // search returns PHOTO-X (now seeded as used) at index 0 and a
+    // fresh PHOTO-Y at index 1; Intro must commit PHOTO-Y.
+    mockedListSections.mockResolvedValueOnce([
+      {
+        section_key: "faq",
+        provider: "pexels",
+        provider_photo_id: "x",
+        image_url: "https://x.com/x.jpg",
+      },
+    ] as never);
+    const PHOTO_X_DUP = sampleResult({
+      providerPhotoId: "x",
+      regularUrl: "https://x.com/x.jpg",
+    });
+    const PHOTO_Y = sampleResult({
+      providerPhotoId: "y",
+      regularUrl: "https://x.com/y.jpg",
+    });
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [PHOTO_X_DUP, PHOTO_Y],
+      totalResults: 2,
+    });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+      includeFeatured: false,
+    });
+
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts).toHaveLength(1);
+    expect(sectionInserts[0]![0]!.metadata).toMatchObject({
+      providerPhotoId: "y",
+      sectionKey: "intro",
+    });
+  });
+
+  it("seeds dedupe with the existing manual featured image so the section pass doesn't reuse it", async () => {
+    // Article already has a manually-pasted featured image. With
+    // force=false the picker doesn't replace it — but it MUST seed
+    // the dedupe set with the URL so a section pick doesn't end up
+    // showing the same image as the featured slot.
+    const FEATURED_URL = "https://manual.example.com/hero.jpg";
+    const article: ArticleRowFixture = {
+      ...defaultArticle,
+      featured_image_url: FEATURED_URL,
+    };
+    const PHOTO_DUP = sampleResult({
+      providerPhotoId: "from-search",
+      regularUrl: FEATURED_URL,
+    });
+    const PHOTO_FRESH = sampleResult({
+      providerPhotoId: "fresh",
+      regularUrl: "https://x.com/fresh.jpg",
+    });
+    mockedSearchImages
+      .mockResolvedValueOnce({
+        results: [PHOTO_DUP, PHOTO_FRESH],
+        totalResults: 2,
+      })
+      .mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient({
+      articleReads: [{ data: article, error: null }],
+    });
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    // First section commits the FRESH photo, not the URL collision.
+    expect(sectionInserts.length).toBeGreaterThanOrEqual(1);
+    expect(sectionInserts[0]![0]!.metadata).toMatchObject({
+      providerPhotoId: "fresh",
+    });
   });
 });

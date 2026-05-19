@@ -362,6 +362,30 @@ describe("ArticleDetail", () => {
     expect(unsplashLink).toHaveAttribute("href", "https://unsplash.com");
   });
 
+  it("renders Pexels attribution with the pexels.com fallback host when photoUrl is null", () => {
+    // Hits the Pexels arm of the per-provider fallback URL chain.
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          featuredImageUrl: "https://example.com/img.jpg",
+          featuredImageAttribution: {
+            provider: "pexels",
+            photographerName: "Sam Person",
+            photographerProfileUrl: "https://www.pexels.com/@sam",
+            // No photoUrl → falls back to the provider host.
+            photoUrl: null,
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: /Sam Person/i }),
+    ).toBeInTheDocument();
+    const pexelsLink = screen.getByRole("link", { name: /^Pexels$/i });
+    expect(pexelsLink).toHaveAttribute("href", "https://www.pexels.com");
+  });
+
   it("renders attribution for a non-Unsplash provider WITHOUT the 'on Unsplash' suffix", () => {
     render(
       <ArticleDetail

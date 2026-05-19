@@ -15,6 +15,8 @@ beforeEach(() => {
   mockedRun.mockReset();
   mockedRun.mockResolvedValue({
     blogsChecked: 0,
+    blogsSkippedDueToLimit: 0,
+    blogsEligibleTotal: 0,
     runsCreated: 0,
     runsSkipped: 0,
     runsFailed: 0,
@@ -83,6 +85,8 @@ describe("/api/cron/autopilot", () => {
   it("returns the scheduler summary on a valid GET", async () => {
     mockedRun.mockResolvedValueOnce({
       blogsChecked: 3,
+      blogsSkippedDueToLimit: 0,
+      blogsEligibleTotal: 3,
       runsCreated: 1,
       runsSkipped: 2,
       runsFailed: 0,

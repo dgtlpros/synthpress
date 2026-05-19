@@ -88,10 +88,7 @@ export default async function ArticleDetailPage({
   //     (carries `sortOrder` so the editor renders slots in the
   //     same order as the body). The connector forwards it to
   //     `useArticleEdit`.
-  const sectionRows = await listSectionImageRowsForArticle(
-    articleId,
-    supabase,
-  );
+  const sectionRows = await listSectionImageRowsForArticle(articleId, supabase);
   const sectionImagesByKey: Record<string, MarkdownPreviewSectionImage> = {};
   const initialSectionImages: InitialSectionImage[] = [];
   for (const row of sectionRows) {

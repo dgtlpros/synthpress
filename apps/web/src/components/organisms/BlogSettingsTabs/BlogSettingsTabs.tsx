@@ -1315,7 +1315,7 @@ function MediaTab({
             })
           }
           options={[
-            { value: "unsplash", label: "Unsplash" },
+            { value: "pexels", label: "Pexels" },
             { value: "none", label: "None (manual picks only)" },
           ]}
         />

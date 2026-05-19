@@ -43,9 +43,10 @@ afterEach(() => {
 describe("AutopilotRunRow", () => {
   it("renders the status badge + trigger source + relative time", () => {
     render(<AutopilotRunRow run={makeRun()} />);
-    // "Completed" appears twice — once as the status badge, once as
-    // the current_step label. Both are correct.
-    expect(screen.getAllByText("Completed").length).toBe(2);
+    // "Completed" appears three times in this fixture: the status
+    // badge, the `current_step` label, and the friendly `Reason:`
+    // label resolved from `output.reason: "ok"`.
+    expect(screen.getAllByText("Completed").length).toBe(3);
     expect(screen.getByText("Scheduled")).toBeInTheDocument();
     expect(screen.getByText("29m ago")).toBeInTheDocument();
   });
@@ -149,7 +150,7 @@ describe("AutopilotRunRow", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
-  it("renders output.reason for skipped runs (when no error)", () => {
+  it("renders the friendly label for output.reason on skipped runs (NOT the raw key)", () => {
     render(
       <AutopilotRunRow
         run={makeRun({
@@ -160,7 +161,73 @@ describe("AutopilotRunRow", () => {
         })}
       />,
     );
-    expect(screen.getByText(/daily_article_cap_reached/)).toBeInTheDocument();
+    // Friendly label appears in the body — not the raw snake_case key.
+    expect(
+      screen.getByText(/Daily article target reached/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/daily_article_cap_reached/i),
+    ).not.toBeInTheDocument();
+    // Raw key is still pinned on a `data-*` attribute so e2e tests
+    // and analytics integrations can target the underlying value.
+    expect(
+      screen.getByTestId("autopilot-run-run-1-reason"),
+    ).toHaveAttribute("data-reason-key", "daily_article_cap_reached");
+  });
+
+  it("renders backpressure copy (NOT plan-cap copy) for active_article_job_limit_reached", () => {
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          status: "skipped",
+          articlesStarted: 0,
+          tokensSpent: 0,
+          output: { reason: "active_article_job_limit_reached" },
+        })}
+      />,
+    );
+    const reasonNode = screen.getByTestId("autopilot-run-run-1-reason");
+    expect(reasonNode).toHaveTextContent(/waiting for current article jobs/i);
+    // No subscription / plan-cap language can leak into the row.
+    expect(reasonNode.textContent ?? "").not.toMatch(
+      /\b(plan|subscription|tier|pricing|upgrade|paywall)\b/i,
+    );
+  });
+
+  it("renders the description as muted subtext under the reason label", () => {
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          status: "skipped",
+          articlesStarted: 0,
+          tokensSpent: 0,
+          output: { reason: "no_approved_ideas_in_backlog" },
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(/No approved ideas available/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Autopilot needs approved ideas/i),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to title-case for unknown reasons (forward-compat)", () => {
+    render(
+      <AutopilotRunRow
+        run={makeRun({
+          status: "skipped",
+          articlesStarted: 0,
+          tokensSpent: 0,
+          // Hypothetical future reason added by a later PR.
+          output: { reason: "midjourney_quota_reached" },
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(/Midjourney Quota Reached/),
+    ).toBeInTheDocument();
   });
 
   it("does not render the reason line when output.reason is missing", () => {
@@ -529,9 +596,7 @@ describe("AutopilotRunRow", () => {
         />,
       );
       const el = screen.getByTestId("autopilot-run-wp-mix-wp-draft-summary");
-      expect(el).toHaveTextContent(
-        "3/5 WordPress drafts created · 2 failed",
-      );
+      expect(el).toHaveTextContent("3/5 WordPress drafts created · 2 failed");
       expect(el).toHaveClass("text-error");
     });
 
@@ -563,9 +628,7 @@ describe("AutopilotRunRow", () => {
           })}
         />,
       );
-      const el = screen.getByTestId(
-        "autopilot-run-wp-noconn-wp-draft-summary",
-      );
+      const el = screen.getByTestId("autopilot-run-wp-noconn-wp-draft-summary");
       expect(el).toHaveTextContent("WordPress not connected");
       expect(el).toHaveClass("text-warning");
     });
@@ -584,7 +647,9 @@ describe("AutopilotRunRow", () => {
       const el = screen.getByTestId(
         "autopilot-run-wp-mixedok-wp-draft-summary",
       );
-      expect(el).toHaveTextContent("2 WordPress drafts created · 2 already sent");
+      expect(el).toHaveTextContent(
+        "2 WordPress drafts created · 2 already sent",
+      );
     });
 
     it("renders only the 'already sent' fragment when nothing new was created (no failures, no skips)", () => {
@@ -601,9 +666,7 @@ describe("AutopilotRunRow", () => {
           })}
         />,
       );
-      const el = screen.getByTestId(
-        "autopilot-run-wp-allold-wp-draft-summary",
-      );
+      const el = screen.getByTestId("autopilot-run-wp-allold-wp-draft-summary");
       expect(el).toHaveTextContent("2 already sent");
       expect(el).not.toHaveTextContent("created");
     });

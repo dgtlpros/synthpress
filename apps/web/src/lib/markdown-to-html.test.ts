@@ -392,7 +392,7 @@ describe("markdownToHtml — section image injection", () => {
     expect(html).not.toContain("<figcaption");
   });
 
-  it("uses raw provider id as the label for non-unsplash providers", async () => {
+  it("renders the friendly 'Pexels' label (not the raw id) for the active provider", async () => {
     const html = await markdownToHtml(SAMPLE_BODY, {
       sectionImagesByKey: {
         intro: {
@@ -407,7 +407,47 @@ describe("markdownToHtml — section image injection", () => {
         },
       },
     });
-    expect(html).toContain(">pexels<");
+    // Capitalized brand label, anchored to the figcaption link
+    // (so we don't accidentally match the photographer name 'Sam'
+    // which would also satisfy a loose contains).
+    expect(html).toContain(">Pexels<");
+    expect(html).not.toContain(">pexels<");
+  });
+
+  it("renders the historical 'Unsplash' label for legacy attribution rows", async () => {
+    const html = await markdownToHtml(SAMPLE_BODY, {
+      sectionImagesByKey: {
+        intro: {
+          imageUrl: "https://example.com/intro.jpg",
+          altText: "Hero",
+          attribution: {
+            provider: "unsplash",
+            photographerName: "Annie Spratt",
+            photographerProfileUrl: "https://unsplash.com/@anniespratt",
+            photoUrl: "https://unsplash.com/photos/abc",
+          },
+        },
+      },
+    });
+    expect(html).toContain(">Unsplash<");
+  });
+
+  it("falls through to the raw provider id for unknown / future providers", async () => {
+    const html = await markdownToHtml(SAMPLE_BODY, {
+      sectionImagesByKey: {
+        intro: {
+          imageUrl: "https://example.com/intro.jpg",
+          altText: "Hero",
+          attribution: {
+            provider: "midjourney",
+            photographerName: "Bot",
+            photographerProfileUrl: "https://example.com/@bot",
+            photoUrl: "https://example.com/photos/123",
+          },
+        },
+      },
+    });
+    expect(html).toContain(">midjourney<");
   });
 
   it("escapes HTML-unsafe characters in alt text (attribute context: quotes + ampersand)", async () => {
@@ -423,7 +463,9 @@ describe("markdownToHtml — section image injection", () => {
     // Quote inside attribute value must be escaped so it doesn't
     // close the alt="..." attribute mid-value.
     expect(html).not.toContain('"A "quoted" & dangerous alt"');
-    expect(html).toMatch(/alt="A &(quot|#x22|#34);quoted&(quot|#x22|#34); &(amp|#x26|#38); dangerous alt"/);
+    expect(html).toMatch(
+      /alt="A &(quot|#x22|#34);quoted&(quot|#x22|#34); &(amp|#x26|#38); dangerous alt"/,
+    );
   });
 
   it("escapes HTML-unsafe characters in photographer name (text context: <, >, &)", async () => {

@@ -1263,15 +1263,18 @@ describe("updateArticleFields", () => {
             sortOrder: 1,
             imageUrl: "https://example.com/ghost.jpg",
             altText: "Ghost",
-            metadata: { ...SECTION_METADATA, imageUrl: "https://example.com/ghost.jpg" },
+            metadata: {
+              ...SECTION_METADATA,
+              imageUrl: "https://example.com/ghost.jpg",
+            },
           },
         ],
       },
       client: client as never,
     });
 
-    const insertCalls = client.__chains.article_image_uploads!.insert.mock
-      .calls;
+    const insertCalls =
+      client.__chains.article_image_uploads!.insert.mock.calls;
     expect(insertCalls).toHaveLength(1);
     expect(insertCalls[0]![0]).toMatchObject({ section_key: "intro" });
   });

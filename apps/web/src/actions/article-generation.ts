@@ -330,9 +330,15 @@ export interface GenerateArticleFromIdeaResult {
    * the UI reads `article_jobs` (the `start()` call returns as soon as
    * the run is enqueued), so callers should treat both values as
    * "work in progress".
+   *
+   * `'completed'` is returned when an already-completed job exists
+   * for the idea (autopilot dedupe path) — the action layer returns
+   * it verbatim so the caller can distinguish "we just queued" from
+   * "this idea already has an article". `alreadyQueued` is `true`
+   * in that case.
    */
-  status: "pending" | "processing";
-  /** True when an in-flight job already existed for this idea. */
+  status: "pending" | "processing" | "completed";
+  /** True when a `pending` / `processing` / `completed` job already existed for this idea. */
   alreadyQueued: boolean;
   /** Workflow run id if the SDK exposed one. */
   workflowRunId: string | null;

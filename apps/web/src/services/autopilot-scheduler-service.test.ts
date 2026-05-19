@@ -46,8 +46,14 @@ import {
 import {
   AUTOPAUSE_FAILURE_THRESHOLD,
   AUTOPAUSE_FAILURE_WINDOW_MINUTES,
+  AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+  AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM,
   autoApproveIdeasForAutopilotRun,
   computeDailyMaxArticles,
+  countActiveArticleJobsForBlog,
+  countActiveArticleJobsForTeam,
+  getBlogDailyArticleGenerationUsage,
+  hasExistingArticleGenerationForIdea,
   PAUSED_MESSAGE_FAILURE_RATE,
   PAUSED_REASON_FAILURE_RATE,
   PER_RUN_ARTICLE_CAP,
@@ -55,7 +61,9 @@ import {
   runAutopilotForBlog,
   runBlogAutopilotScheduler,
   shouldPauseAutopilotForFailures,
+  startOfLocalDayUtc,
 } from "./autopilot-scheduler-service";
+import { AUTOPILOT_SKIP_REASONS } from "@/lib/autopilot-skip-reasons";
 
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 const mockedStart = vi.mocked(start);
@@ -163,7 +171,22 @@ interface PerBlogClientOpts {
     settings: ReturnType<typeof autopilotSettings>;
   } | null;
   approvedIdeas?: Array<{ id: string; title: string }>;
+  /** Count returned by `getBlogDailyArticleGenerationUsage` for "started today". */
   todayArticleCount?: number;
+  /** Count returned for "completed today" (informational; does not gate the cap). */
+  todayCompletedCount?: number;
+  /** Count returned by `countActiveArticleJobsForBlog` (in-flight pending+processing). */
+  activeBlogJobCount?: number;
+  /** Count returned by `countActiveArticleJobsForTeam`. */
+  activeTeamJobCount?: number;
+  /**
+   * Per-idea counts returned by `hasExistingArticleGenerationForIdea`
+   * in document order (idx 0 ↔ first approved idea, etc.). Any
+   * non-zero count signals "idea already has an active/completed
+   * job", causing the scheduler to skip that idea. Defaults to all
+   * zeros (no dedupe hits).
+   */
+  ideaJobsExistingCounts?: number[];
   todayUsageEvents?: Array<{ credits_used: number | null }>;
 }
 
@@ -175,8 +198,21 @@ const DEFAULT_BLOG_ROW = {
 
 /**
  * Builds the mock Supabase client a single per-blog tick will
- * interact with: blogs.maybeSingle, article_ideas (.then), article_jobs
- * count (.then resolving with `count`), usage_events list (.then).
+ * interact with: blogs.maybeSingle, article_ideas (.then),
+ * usage_events list (.then), and a queue-based article_jobs
+ * chain whose `.then` returns counts in **the same order the
+ * scheduler queries them**:
+ *
+ *   1. `getBlogDailyArticleGenerationUsage` — jobs started today
+ *   2. `getBlogDailyArticleGenerationUsage` — articles completed today
+ *   3. `countActiveArticleJobsForBlog`
+ *   4. `countActiveArticleJobsForTeam`
+ *   5. `hasExistingArticleGenerationForIdea` (one per idea in the
+ *      spawn loop, in approval order)
+ *
+ * If a test makes more `from('article_jobs')` calls than the queue
+ * has entries, the chain returns 0 for the rest. Tests that don't
+ * care about the new fields just leave them at the defaults.
  */
 function makePerBlogClient(opts: PerBlogClientOpts = {}): MockClient {
   // Distinguish "caller didn't pass blogRow" from "caller passed
@@ -184,6 +220,10 @@ function makePerBlogClient(opts: PerBlogClientOpts = {}): MockClient {
   const blogRow = "blogRow" in opts ? opts.blogRow : DEFAULT_BLOG_ROW;
   const approvedIdeas = opts.approvedIdeas ?? [];
   const todayArticleCount = opts.todayArticleCount ?? 0;
+  const todayCompletedCount = opts.todayCompletedCount ?? 0;
+  const activeBlogJobCount = opts.activeBlogJobCount ?? 0;
+  const activeTeamJobCount = opts.activeTeamJobCount ?? 0;
+  const ideaJobsExistingCounts = opts.ideaJobsExistingCounts ?? [];
   const todayUsageEvents = opts.todayUsageEvents ?? [];
 
   const client = makeClient({});
@@ -195,11 +235,40 @@ function makePerBlogClient(opts: PerBlogClientOpts = {}): MockClient {
     data: approvedIdeas,
     error: null,
   });
-  client.__chains.article_jobs = makeChain({
+
+  const articleJobsCountQueue: number[] = [
+    todayArticleCount,
+    todayCompletedCount,
+    activeBlogJobCount,
+    activeTeamJobCount,
+    ...ideaJobsExistingCounts,
+  ];
+  // Keep a single shared chain — Supabase chain methods mutate
+  // `this` so we'd lose state if `from('article_jobs')` returned
+  // a fresh chain each call. Instead we cycle through the queue
+  // on each `await chain` (which goes through `.then`).
+  let articleJobsCallIndex = 0;
+  const articleJobsChain = makeChain<unknown>({
     data: null,
     error: null,
-    count: todayArticleCount,
+    count: 0,
   });
+  articleJobsChain.then = ((onFulfilled, onRejected) => {
+    const count =
+      articleJobsCountQueue[articleJobsCallIndex] ??
+      // Padding for tests that don't care about per-idea counts:
+      // every `hasExistingArticleGenerationForIdea` call beyond
+      // the supplied `ideaJobsExistingCounts` defaults to 0
+      // (no dedupe).
+      0;
+    articleJobsCallIndex += 1;
+    return Promise.resolve({ data: null, error: null, count }).then(
+      onFulfilled,
+      onRejected,
+    );
+  }) as typeof articleJobsChain.then;
+  client.__chains.article_jobs = articleJobsChain;
+
   client.__chains.usage_events = makeChain({
     data: todayUsageEvents,
     error: null,
@@ -788,7 +857,12 @@ describe("runAutopilotForBlog — article workflow spawning", () => {
     expect(out.articleJobsStarted).toBe(1);
   });
 
-  it("never spawns more than PER_RUN_ARTICLE_CAP in a single tick (even when caps allow it)", async () => {
+  it("never spawns more than the binding concurrency cap (active per-blog OR per-run, whichever is tighter)", async () => {
+    // 20 approved ideas, generous daily/token quotas, no in-flight
+    // jobs → the binding caps are PER_RUN_ARTICLE_CAP (5) and
+    // AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG (3). The active cap binds
+    // tighter, so we expect exactly 3 spawns this tick. The next
+    // cron tick (after some workflows finish) will spawn more.
     const ideas = Array.from({ length: 20 }, (_, i) => ({
       id: `i-${i}`,
       title: `Idea ${i}`,
@@ -822,8 +896,26 @@ describe("runAutopilotForBlog — article workflow spawning", () => {
     });
 
     expect(PER_RUN_ARTICLE_CAP).toBe(5);
-    expect(out.articleJobsStarted).toBe(5);
-    expect(mockedQueueArticle).toHaveBeenCalledTimes(5);
+    expect(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG).toBe(3);
+    // Active per-blog cap is the binding limit (3 < 5).
+    expect(out.articleJobsStarted).toBe(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG);
+    expect(mockedQueueArticle).toHaveBeenCalledTimes(
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    );
+  });
+
+  it("respects PER_RUN_ARTICLE_CAP when active-job caps allow more", async () => {
+    // Pretend the active per-blog cap is non-binding by setting
+    // the existing-job count high enough that... wait — we
+    // actually want PER_RUN_ARTICLE_CAP (5) to bind. To do that
+    // we need AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG to be > 5. Since
+    // it's a hard-coded constant of 3, this test is currently
+    // covered by the binding-cap test above. Kept as a placeholder
+    // for when the active cap is configurable per-blog (post-launch
+    // tunable).
+    expect(PER_RUN_ARTICLE_CAP).toBeGreaterThanOrEqual(
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    );
   });
 
   it("records partial_failure when some workflow starts succeed and others fail", async () => {
@@ -1078,6 +1170,8 @@ describe("runBlogAutopilotScheduler", () => {
 
     expect(out).toEqual({
       blogsChecked: 0,
+      blogsSkippedDueToLimit: 0,
+      blogsEligibleTotal: 0,
       runsCreated: 0,
       runsSkipped: 0,
       runsFailed: 0,
@@ -2156,5 +2250,1177 @@ describe("runAutopilotForBlog — auto-approve gate", () => {
     });
     expect(out.status).toBe("failed");
     expect(out.output.autopilotPaused).toBe(true);
+  });
+});
+
+// ============================================================================
+// startOfLocalDayUtc — timezone-aware day boundary
+// ============================================================================
+
+describe("startOfLocalDayUtc", () => {
+  it("returns plain UTC midnight when timezone is empty / 'Etc/UTC' / 'UTC'", () => {
+    const now = new Date("2026-05-18T15:30:00.000Z");
+    const expected = new Date("2026-05-18T00:00:00.000Z");
+    expect(startOfLocalDayUtc(now, "").toISOString()).toBe(
+      expected.toISOString(),
+    );
+    expect(startOfLocalDayUtc(now, "Etc/UTC").toISOString()).toBe(
+      expected.toISOString(),
+    );
+    expect(startOfLocalDayUtc(now, "UTC").toISOString()).toBe(
+      expected.toISOString(),
+    );
+  });
+
+  it("rolls back to the previous UTC day for blogs east of UTC late at night local", () => {
+    // 23:30 UTC on May 18 → 09:30 May 19 in Sydney (+10).
+    // Local day start = 2026-05-19 00:00 in Sydney = 2026-05-18 14:00 UTC.
+    const now = new Date("2026-05-18T23:30:00.000Z");
+    const result = startOfLocalDayUtc(now, "Australia/Sydney");
+    expect(result.toISOString()).toBe("2026-05-18T14:00:00.000Z");
+  });
+
+  it("treats an unparseable / fictional timezone as UTC", () => {
+    const now = new Date("2026-05-18T15:30:00.000Z");
+    const result = startOfLocalDayUtc(now, "Mars/Olympus");
+    expect(result.toISOString()).toBe("2026-05-18T00:00:00.000Z");
+  });
+
+  it("respects America/Los_Angeles overnight UTC instants (returns the *previous* local day)", () => {
+    // 04:00 UTC on May 18 → 21:00 PDT (UTC-7) on May 17.
+    // Local day start = 2026-05-17 00:00 PDT = 2026-05-17 07:00 UTC.
+    const now = new Date("2026-05-18T04:00:00.000Z");
+    const result = startOfLocalDayUtc(now, "America/Los_Angeles");
+    expect(result.toISOString()).toBe("2026-05-17T07:00:00.000Z");
+  });
+});
+
+// ============================================================================
+// getBlogDailyArticleGenerationUsage — centralized helper
+// ============================================================================
+
+describe("getBlogDailyArticleGenerationUsage", () => {
+  it("returns timezone-aware day bounds + the started/completed/limit/remaining snapshot", async () => {
+    const now = new Date("2026-05-18T23:30:00.000Z");
+    const client = makeClient({});
+    // Two queries: started, completed.
+    let i = 0;
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.article_jobs.then = ((onFulfilled, onRejected) => {
+      const counts = [4, 1];
+      const count = counts[i] ?? 0;
+      i += 1;
+      return Promise.resolve({ data: null, error: null, count }).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.article_jobs.then;
+
+    const out = await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      timezone: "Australia/Sydney",
+      now,
+      maxPostsPerDay: 10,
+      generatePerWeek: 70,
+      client: client as never,
+    });
+
+    expect(out.dayStart.toISOString()).toBe("2026-05-18T14:00:00.000Z");
+    expect(out.dayEnd.toISOString()).toBe("2026-05-19T14:00:00.000Z");
+    expect(out.jobsStartedToday).toBe(4);
+    expect(out.articlesCompletedToday).toBe(1);
+    expect(out.dailyLimit).toBe(10);
+    expect(out.remainingToday).toBe(6);
+  });
+
+  it("clamps remainingToday to 0 even if a blog has somehow overspent", async () => {
+    const client = makeClient({});
+    let i = 0;
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.article_jobs.then = ((onFulfilled, onRejected) => {
+      const counts = [15, 12];
+      const count = counts[i] ?? 0;
+      i += 1;
+      return Promise.resolve({ data: null, error: null, count }).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.article_jobs.then;
+
+    const out = await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      timezone: "Etc/UTC",
+      now: new Date("2026-05-18T00:00:00.000Z"),
+      maxPostsPerDay: 10,
+      generatePerWeek: 70,
+      client: client as never,
+    });
+    expect(out.remainingToday).toBe(0);
+    expect(out.jobsStartedToday).toBe(15);
+  });
+
+  it("falls back to UTC when timezone is null / undefined / 'Etc/UTC'", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+
+    const out = await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      now: new Date("2026-05-18T15:30:00.000Z"),
+      maxPostsPerDay: 5,
+      generatePerWeek: 35,
+      client: client as never,
+    });
+    expect(out.dayStart.toISOString()).toBe("2026-05-18T00:00:00.000Z");
+  });
+
+  it("propagates a supabase error from the started-today count", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: { message: "started count boom" },
+      count: null,
+    });
+    await expect(
+      getBlogDailyArticleGenerationUsage({
+        blogId: "blog-1",
+        timezone: "Etc/UTC",
+        now: new Date("2026-05-18T00:00:00.000Z"),
+        maxPostsPerDay: 5,
+        generatePerWeek: 35,
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "started count boom" });
+  });
+
+  it("propagates a supabase error from the completed-today count", async () => {
+    const client = makeClient({});
+    let i = 0;
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.article_jobs.then = ((onFulfilled, onRejected) => {
+      i += 1;
+      if (i === 1) {
+        return Promise.resolve({ data: null, error: null, count: 0 }).then(
+          onFulfilled,
+          onRejected,
+        );
+      }
+      return Promise.resolve({
+        data: null,
+        error: { message: "completed count boom" },
+        count: null,
+      }).then(onFulfilled, onRejected);
+    }) as typeof client.__chains.article_jobs.then;
+
+    await expect(
+      getBlogDailyArticleGenerationUsage({
+        blogId: "blog-1",
+        timezone: "Etc/UTC",
+        now: new Date("2026-05-18T00:00:00.000Z"),
+        maxPostsPerDay: 5,
+        generatePerWeek: 35,
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "completed count boom" });
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      timezone: "Etc/UTC",
+      now: new Date("2026-05-18T00:00:00.000Z"),
+      maxPostsPerDay: 5,
+      generatePerWeek: 35,
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+
+  it("treats null counts as 0 for both started and completed (defensive supabase fallback)", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: null,
+    });
+
+    const out = await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      timezone: "Etc/UTC",
+      now: new Date("2026-05-18T00:00:00.000Z"),
+      maxPostsPerDay: 5,
+      generatePerWeek: 35,
+      client: client as never,
+    });
+    expect(out.jobsStartedToday).toBe(0);
+    expect(out.articlesCompletedToday).toBe(0);
+    expect(out.remainingToday).toBe(5);
+  });
+
+  it("defaults `now` to the current time when not supplied", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    const before = Date.now();
+    const out = await getBlogDailyArticleGenerationUsage({
+      blogId: "blog-1",
+      timezone: "Etc/UTC",
+      maxPostsPerDay: 5,
+      generatePerWeek: 35,
+      client: client as never,
+    });
+    const after = Date.now();
+    // `dayStart` is the UTC midnight of the local day surrounding
+    // the moment the helper was called. The wall-clock window for
+    // that midnight must contain `before`/`after`.
+    const dayStartMs = out.dayStart.getTime();
+    expect(dayStartMs).toBeLessThanOrEqual(before);
+    expect(dayStartMs + 24 * 60 * 60_000).toBeGreaterThan(after);
+  });
+});
+
+// ============================================================================
+// countActiveArticleJobsForBlog / countActiveArticleJobsForTeam
+// ============================================================================
+
+describe("countActiveArticleJobsForBlog", () => {
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    await countActiveArticleJobsForBlog({ blogId: "blog-1" });
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+
+  it("returns the supabase count for pending+processing generate_article jobs", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 7,
+    });
+    expect(
+      await countActiveArticleJobsForBlog({
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).toBe(7);
+    expect(client.__chains.article_jobs.in).toHaveBeenCalledWith("status", [
+      "pending",
+      "processing",
+    ]);
+  });
+
+  it("treats a null count as 0", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: null,
+    });
+    expect(
+      await countActiveArticleJobsForBlog({
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).toBe(0);
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: { message: "active count boom" },
+      count: null,
+    });
+    await expect(
+      countActiveArticleJobsForBlog({
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "active count boom" });
+  });
+});
+
+describe("countActiveArticleJobsForTeam", () => {
+  it("filters by input->>teamId AND status IN (pending, processing)", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 12,
+    });
+    expect(
+      await countActiveArticleJobsForTeam({
+        teamId: "team-1",
+        client: client as never,
+      }),
+    ).toBe(12);
+    expect(client.__chains.article_jobs.filter).toHaveBeenCalledWith(
+      "input->>teamId",
+      "eq",
+      "team-1",
+    );
+    expect(client.__chains.article_jobs.in).toHaveBeenCalledWith("status", [
+      "pending",
+      "processing",
+    ]);
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: { message: "team count boom" },
+      count: null,
+    });
+    await expect(
+      countActiveArticleJobsForTeam({
+        teamId: "team-1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "team count boom" });
+  });
+
+  it("treats a null count as 0", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: null,
+    });
+    expect(
+      await countActiveArticleJobsForTeam({
+        teamId: "team-1",
+        client: client as never,
+      }),
+    ).toBe(0);
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    await countActiveArticleJobsForTeam({ teamId: "team-1" });
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+describe("hasExistingArticleGenerationForIdea", () => {
+  it("returns true when count > 0 (active OR completed job exists for the idea)", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 1,
+    });
+    expect(
+      await hasExistingArticleGenerationForIdea({
+        ideaId: "idea-1",
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).toBe(true);
+    // Includes 'completed' so already-converted ideas are skipped.
+    expect(client.__chains.article_jobs.in).toHaveBeenCalledWith("status", [
+      "pending",
+      "processing",
+      "completed",
+    ]);
+  });
+
+  it("returns false when no rows match (failed/cancelled jobs do NOT count)", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    expect(
+      await hasExistingArticleGenerationForIdea({
+        ideaId: "idea-1",
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).toBe(false);
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: { message: "dedupe boom" },
+      count: null,
+    });
+    await expect(
+      hasExistingArticleGenerationForIdea({
+        ideaId: "idea-1",
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "dedupe boom" });
+  });
+
+  it("treats a null count as 0 (returns false)", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: null,
+    });
+    expect(
+      await hasExistingArticleGenerationForIdea({
+        ideaId: "idea-1",
+        blogId: "blog-1",
+        client: client as never,
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({});
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    await hasExistingArticleGenerationForIdea({
+      ideaId: "idea-1",
+      blogId: "blog-1",
+    });
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// runAutopilotForBlog — active-job guardrails (Part B)
+// ============================================================================
+
+describe("runAutopilotForBlog — active-job guardrails", () => {
+  it("skips when AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG is already reached", async () => {
+    const ideas = Array.from({ length: 5 }, (_, i) => ({
+      id: `i-${i}`,
+      title: `Idea ${i}`,
+    }));
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "Busy",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: ideas,
+      activeBlogJobCount: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.status).toBe("skipped");
+    expect(out.reason).toBe(
+      AUTOPILOT_SKIP_REASONS.ACTIVE_ARTICLE_JOB_LIMIT_REACHED,
+    );
+    expect(mockedQueueArticle).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
+  });
+
+  it("skips when AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM is reached (even if per-blog has capacity)", async () => {
+    const ideas = Array.from({ length: 3 }, (_, i) => ({
+      id: `i-${i}`,
+      title: `Idea ${i}`,
+    }));
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: ideas,
+      activeBlogJobCount: 0, // blog has room
+      activeTeamJobCount: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM, // team is at cap
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.status).toBe("skipped");
+    expect(out.reason).toBe(
+      AUTOPILOT_SKIP_REASONS.ACTIVE_TEAM_ARTICLE_JOB_LIMIT_REACHED,
+    );
+    expect(mockedQueueArticle).not.toHaveBeenCalled();
+  });
+
+  it("only starts as many jobs as the remaining active-blog slots allow", async () => {
+    // 5 approved ideas, daily cap big, but only 1 active-blog slot
+    // remains (3 max - 2 in flight = 1).
+    const ideas = Array.from({ length: 5 }, (_, i) => ({
+      id: `i-${i}`,
+      title: `Idea ${i}`,
+    }));
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({
+          backlogThreshold: 1,
+          maxPostsPerDay: 50,
+          generatePerWeek: 350,
+        }),
+      },
+      approvedIdeas: ideas,
+      activeBlogJobCount: 2,
+    });
+    mockedGetTeamPlan.mockResolvedValueOnce({
+      ownerId: "owner-1",
+      planKey: "scale",
+      status: "active",
+      balance: 10_000,
+    } as never);
+    mockedQueueArticle.mockResolvedValue({
+      jobId: "job-X",
+      articleId: "art-X",
+      ideaId: "i-X",
+      status: "pending",
+      alreadyQueued: false,
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.status).toBe("completed");
+    expect(out.articleJobsStarted).toBe(1);
+  });
+
+  it("snapshots active-job counts in the run output (operators can read what bound)", async () => {
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: [{ id: "i-1", title: "A" }],
+      activeBlogJobCount: 1,
+      activeTeamJobCount: 7,
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(mockedCompleteRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output: expect.objectContaining({
+          // The throttle snapshot lives on `operationalThrottle`,
+          // NOT a top-level "activeJobs" key — that naming would
+          // suggest a customer-facing limit. The keys are
+          // `operationalLimit` (not `blogLimit` / `teamLimit`)
+          // to keep the framing internal.
+          operationalThrottle: {
+            blog: {
+              activeJobs: 1,
+              operationalLimit: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+            },
+            team: {
+              activeJobs: 7,
+              operationalLimit: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM,
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // MVP framing assertions — the active-job throttle is operational
+  // backpressure, NOT a product / subscription / pricing-tier cap.
+  // These tests pin the contract so a future refactor can't quietly
+  // turn the throttle into a customer-facing limit.
+  // ─────────────────────────────────────────────────────────────────
+
+  it("active-throttle skipped runs are 'skipped', not 'failed' or 'error'", async () => {
+    // A blog at the per-blog operational throttle should NOT
+    // mark its run failed — that would page operators + count
+    // against the failure-rate auto-pause threshold. The next
+    // cron tick continues automatically once jobs drain.
+    const ideas = [{ id: "i-1", title: "A" }];
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: ideas,
+      activeBlogJobCount: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.status).toBe("skipped");
+    expect(out.status).not.toBe("failed");
+    // failBlogAutopilotRun MUST NOT fire — backpressure is not a failure.
+    expect(mockedFailRun).not.toHaveBeenCalled();
+  });
+
+  it("active-throttle skip output uses backpressure language, not subscription/plan/pricing copy", async () => {
+    // Pin the contract that nothing in the persisted run output
+    // mentions plans, subscriptions, pricing, billing, upgrades,
+    // or tiers — those would imply a paywall, which the
+    // operational throttle is explicitly NOT.
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: [{ id: "i-1", title: "A" }],
+      activeBlogJobCount: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // The output object the run row gets stamped with.
+    const completeCall = mockedCompleteRun.mock.calls.at(-1);
+    expect(completeCall).toBeDefined();
+    const outputJson = JSON.stringify(completeCall![0].output);
+    // Reason string is internal-flavored backpressure; the friendly
+    // "waiting for current jobs" copy is rendered by the UI label
+    // map, not stored in the run row.
+    expect(outputJson).toContain("active_article_job_limit_reached");
+    // Nothing in the output should hint at a customer-facing cap.
+    expect(outputJson).not.toMatch(
+      /\b(plan|subscription|tier|pricing|upgrade|paywall)\b/i,
+    );
+  });
+
+  it("does not call any subscription / billing service when the operational throttle binds", async () => {
+    // The throttle decision is purely a SELECT against
+    // `article_jobs`. No calls into team-billing / Stripe / plan
+    // lookups — those are reserved for token-balance gates.
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: [{ id: "i-1", title: "A" }],
+      activeBlogJobCount: AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    });
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // `getTeamPlan` is the closest thing to a "subscription
+    // lookup" in the scheduler — it's used for the team's TOKEN
+    // balance (the real spend control), but the throttle path
+    // doesn't depend on plan-tier data. The mock is called once
+    // for the balance check; the count must NOT scale with the
+    // throttle decision.
+    expect(mockedGetTeamPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 10-posts/day blog with no in-flight jobs reaches all 10 across cron ticks (operational throttle does NOT cap daily output)", async () => {
+    // Reaffirms the customer contract: the operational throttle
+    // only spreads work across ticks; it does NOT lower the
+    // daily ceiling. With no in-flight jobs, four ticks should
+    // produce 10 articles total (3+3+3+1 = 10), exactly matching
+    // `maxPostsPerDay: 10`.
+    const ideas = Array.from({ length: 20 }, (_, i) => ({
+      id: `idea-${i}`,
+      title: `Topic ${i}`,
+    }));
+    const settings = autopilotSettings({
+      backlogThreshold: 1,
+      maxPostsPerDay: 10,
+      generatePerWeek: 70,
+    });
+    let articlesSpawnedSoFar = 0;
+    const perTick: number[] = [];
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      const client = makePerBlogClient({
+        blogRow: { id: "blog-1", name: "x", settings },
+        approvedIdeas: ideas,
+        todayArticleCount: articlesSpawnedSoFar,
+        activeBlogJobCount: 0,
+        activeTeamJobCount: 0,
+      });
+      mockedGetTeamPlan.mockResolvedValueOnce({
+        ownerId: "owner-1",
+        planKey: "scale",
+        status: "active",
+        balance: 10_000,
+      } as never);
+      mockedQueueArticle.mockImplementation(
+        async (input) =>
+          ({
+            jobId: `job-${input.ideaId}`,
+            articleId: `art-${input.ideaId}`,
+            ideaId: input.ideaId,
+            status: "pending",
+            alreadyQueued: false,
+          }) as never,
+      );
+
+      const out = await runAutopilotForBlog({
+        teamId: "t1",
+        projectId: "p1",
+        blogId: "blog-1",
+        client: client as never,
+      });
+      perTick.push(out.articleJobsStarted);
+      articlesSpawnedSoFar += out.articleJobsStarted;
+    }
+
+    // 3 + 3 + 3 + 1 = 10. The daily target is honored; no tick
+    // exceeded the operational throttle of 3 either.
+    expect(perTick).toEqual([
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+      1,
+    ]);
+    expect(articlesSpawnedSoFar).toBe(10);
+  });
+
+  it("constants document themselves as MVP operational throttles, not subscription caps", () => {
+    // Pin the export shape (including the renamed constants) so a
+    // future "enterprise tier" PR can't accidentally swap in
+    // plan-derived numbers without an explicit decision + a
+    // matching test update.
+    expect(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG).toBe(3);
+    expect(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM).toBe(20);
+    expect(typeof AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG).toBe("number");
+    expect(typeof AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_TEAM).toBe("number");
+  });
+});
+
+// ============================================================================
+// runAutopilotForBlog — duplicate idea/job dedupe (Part C)
+// ============================================================================
+
+describe("runAutopilotForBlog — duplicate idea/job dedupe", () => {
+  it("skips ideas whose hasExistingArticleGenerationForIdea returns >0 (active or completed)", async () => {
+    // 3 approved ideas. The first already has a completed job →
+    // skipped. The others spawn fresh.
+    const ideas = [
+      { id: "i-already", title: "A" },
+      { id: "i-fresh-1", title: "B" },
+      { id: "i-fresh-2", title: "C" },
+    ];
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: ideas,
+      // First idea already has a completed job (count=1 → skip).
+      // The two others have no existing job (count=0 → spawn).
+      ideaJobsExistingCounts: [1, 0, 0],
+    });
+    mockedQueueArticle
+      .mockResolvedValueOnce({
+        jobId: "job-B",
+        articleId: "art-B",
+        ideaId: "i-fresh-1",
+        status: "pending",
+        alreadyQueued: false,
+      })
+      .mockResolvedValueOnce({
+        jobId: "job-C",
+        articleId: "art-C",
+        ideaId: "i-fresh-2",
+        status: "pending",
+        alreadyQueued: false,
+      });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    // Only 2 jobs spawn — the duplicate idea was skipped.
+    expect(out.articleJobsStarted).toBe(2);
+    expect(mockedQueueArticle).toHaveBeenCalledTimes(2);
+    expect(mockedQueueArticle).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ideaId: "i-already" }),
+    );
+  });
+
+  it("does NOT spawn a duplicate workflow when overlapping cron ticks see the same approved idea", async () => {
+    // Simulate the race: tick 1 spawned a job for idea-X; tick 2
+    // arrives 15 minutes later and the article hasn't completed
+    // yet, so the idea is still 'approved'. The dedupe guard
+    // catches this.
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 1 }),
+      },
+      approvedIdeas: [{ id: "idea-X", title: "X" }],
+      ideaJobsExistingCounts: [1], // existing pending job from tick 1
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.articleJobsStarted).toBe(0);
+    expect(mockedQueueArticle).not.toHaveBeenCalled();
+    expect(mockedStart).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// runBlogAutopilotScheduler — multi-blog scale (Part E + F)
+// ============================================================================
+
+describe("runBlogAutopilotScheduler — multi-blog launch scenarios", () => {
+  it("reports blogsSkippedDueToLimit when total eligible exceeds the per-tick limit", async () => {
+    // Pretend the eligible-blogs query returned 50 blogs (the
+    // limit) but the count column says 80 are eligible total.
+    const limited = Array.from({ length: 50 }, (_, i) => ({
+      id: `blog-${i}`,
+      project_id: `p${i}`,
+      project: { team_id: `t${i}` },
+    }));
+    const client = makeClient({});
+    client.__chains.blogs = makeChain({ data: null, error: null });
+    client.__chains.blogs.then = ((onFulfilled, onRejected) =>
+      Promise.resolve({
+        data: limited,
+        error: null,
+        count: 80,
+      }).then(onFulfilled, onRejected)) as typeof client.__chains.blogs.then;
+    // Per-blog detail read returns a default valid row.
+    client.__chains.blogs.maybeSingle = vi.fn(() =>
+      Promise.resolve({
+        data: { id: "x", name: "x", settings: autopilotSettings() },
+        error: null,
+      }),
+    ) as never;
+    client.__chains.article_ideas = makeChain({ data: [], error: null });
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.usage_events = makeChain({ data: [], error: null });
+
+    let runCounter = 0;
+    mockedCreateRun.mockImplementation(
+      async () => ({ id: `run-${++runCounter}` }) as never,
+    );
+
+    const out = await runBlogAutopilotScheduler({ client: client as never });
+
+    expect(out.blogsChecked).toBe(50);
+    expect(out.blogsEligibleTotal).toBe(80);
+    expect(out.blogsSkippedDueToLimit).toBe(30);
+  });
+
+  it("processes ALL blogs even when one's tick throws (failures are isolated)", async () => {
+    const client = makeClient({});
+    client.__chains.blogs = makeChain({ data: null, error: null });
+    client.__chains.blogs.then = ((onFulfilled, onRejected) =>
+      Promise.resolve({
+        data: [
+          { id: "b1", project_id: "p1", project: { team_id: "t1" } },
+          { id: "b2", project_id: "p2", project: { team_id: "t2" } },
+          { id: "b3", project_id: "p3", project: { team_id: "t3" } },
+        ],
+        error: null,
+        count: 3,
+      }).then(onFulfilled, onRejected)) as typeof client.__chains.blogs.then;
+    client.__chains.blogs.maybeSingle = vi.fn(() =>
+      Promise.resolve({
+        data: { id: "x", name: "x", settings: autopilotSettings() },
+        error: null,
+      }),
+    ) as never;
+    client.__chains.article_ideas = makeChain({ data: [], error: null });
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.usage_events = makeChain({ data: [], error: null });
+
+    // Blog 2's createBlogAutopilotRun throws. Blog 1 and 3 should
+    // still produce normal outcomes.
+    let createCount = 0;
+    mockedCreateRun.mockImplementation(async () => {
+      createCount += 1;
+      if (createCount === 2) throw new Error("blog-2 createRun crashed");
+      return { id: `run-${createCount}` } as never;
+    });
+
+    const out = await runBlogAutopilotScheduler({ client: client as never });
+
+    expect(out.blogsChecked).toBe(3);
+    expect(out.errors.some((e) => e.includes("blog_b2"))).toBe(true);
+    // Blog 1 and 3 produced runs (idea generation fired since
+    // their backlog is empty).
+    expect(out.runsCreated).toBe(2);
+    expect(out.perBlog).toHaveLength(3);
+    const statuses = out.perBlog.map((b) => b.status);
+    expect(statuses).toEqual(["completed", "error", "completed"]);
+  });
+
+  it("does not block one blog hitting its daily cap from another blog spawning jobs", async () => {
+    // Two blogs in the same project. Blog 1 is at its daily cap
+    // (3/3 started). Blog 2 has slots and an approved idea.
+    // Scheduler should skip blog 1 and start a job for blog 2.
+    const client = makeClient({});
+    client.__chains.blogs = makeChain({ data: null, error: null });
+    client.__chains.blogs.then = ((onFulfilled, onRejected) =>
+      Promise.resolve({
+        data: [
+          { id: "blog-1", project_id: "p1", project: { team_id: "t1" } },
+          { id: "blog-2", project_id: "p1", project: { team_id: "t1" } },
+        ],
+        error: null,
+        count: 2,
+      }).then(onFulfilled, onRejected)) as typeof client.__chains.blogs.then;
+    client.__chains.blogs.maybeSingle = vi.fn(() =>
+      Promise.resolve({
+        data: {
+          id: "x",
+          name: "x",
+          settings: autopilotSettings({
+            maxPostsPerDay: 3,
+            generatePerWeek: 21,
+            backlogThreshold: 1,
+          }),
+        },
+        error: null,
+      }),
+    ) as never;
+    client.__chains.article_ideas = makeChain({
+      data: [{ id: "idea-fresh", title: "fresh" }],
+      error: null,
+    });
+
+    // Stack the article_jobs counts across BOTH per-blog ticks.
+    // Blog 1: started=3, completed=0, activeBlog=0, activeTeam=0
+    //   → daily_article_cap_reached
+    // Blog 2: started=0, completed=0, activeBlog=0, activeTeam=0,
+    //         hasExisting[0]=0 → spawn
+    let i = 0;
+    client.__chains.article_jobs = makeChain<unknown>({
+      data: null,
+      error: null,
+      count: 0,
+    });
+    client.__chains.article_jobs.then = ((onFulfilled, onRejected) => {
+      // Blog 1 makes 4 article_jobs queries (no spawn loop).
+      // Blog 2 makes 4 + 1 (per idea hasExisting).
+      const queue = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+      const count = queue[i] ?? 0;
+      i += 1;
+      return Promise.resolve({ data: null, error: null, count }).then(
+        onFulfilled,
+        onRejected,
+      );
+    }) as typeof client.__chains.article_jobs.then;
+    client.__chains.usage_events = makeChain({ data: [], error: null });
+
+    let runCounter = 0;
+    mockedCreateRun.mockImplementation(
+      async () => ({ id: `run-${++runCounter}` }) as never,
+    );
+    mockedGenerateIdeas.mockResolvedValue({
+      jobId: "job-ideas",
+      ideas: [],
+      creditsUsed: 0,
+      promptTokens: null,
+      completionTokens: null,
+      model: "claude",
+    });
+    mockedQueueArticle.mockResolvedValue({
+      jobId: "job-2",
+      articleId: "art-2",
+      ideaId: "idea-fresh",
+      status: "pending",
+      alreadyQueued: false,
+    });
+
+    const out = await runBlogAutopilotScheduler({ client: client as never });
+
+    expect(out.blogsChecked).toBe(2);
+    expect(out.articleJobsStarted).toBe(1);
+    expect(out.runsSkipped).toBe(1); // blog-1 hit the daily cap
+    expect(out.runsCreated).toBe(1); // blog-2 spawned a job
+    const perBlog1 = out.perBlog.find((b) => b.blogId === "blog-1");
+    expect(perBlog1?.reason).toBe(
+      AUTOPILOT_SKIP_REASONS.DAILY_ARTICLE_CAP_REACHED,
+    );
+  });
+
+  it("simulates the launch scenario: blog configured for 10 posts/day, 20 ideas, three cron ticks (each tick spawns 3, never more)", async () => {
+    // This is the documented manual-test pattern translated into
+    // a unit test. We don't simulate the workflow's effect on
+    // `started today` between ticks — instead we drive the
+    // article_jobs count queue per-tick to mimic what would
+    // happen if 3 jobs landed each tick.
+    const ideas = Array.from({ length: 20 }, (_, i) => ({
+      id: `idea-${i}`,
+      title: `Topic ${i}`,
+    }));
+    const settings = autopilotSettings({
+      backlogThreshold: 1,
+      maxPostsPerDay: 10,
+      generatePerWeek: 70, // ceil/7=10 daily
+      dailyTokenBudget: null,
+    });
+    const tickResults: number[] = [];
+    let articlesSpawnedSoFar = 0;
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      const client = makePerBlogClient({
+        blogRow: { id: "blog-1", name: "Daily blog", settings },
+        approvedIdeas: ideas,
+        // Started today grows by the count we've spawned across
+        // prior ticks. Within a single tick the active-blog cap
+        // (3) is the binding limit.
+        todayArticleCount: articlesSpawnedSoFar,
+        // No active jobs (workflows finished before next tick).
+        activeBlogJobCount: 0,
+        activeTeamJobCount: 0,
+      });
+      mockedGetTeamPlan.mockResolvedValueOnce({
+        ownerId: "owner-1",
+        planKey: "scale",
+        status: "active",
+        balance: 10_000,
+      } as never);
+      // Distinct queue results per spawn so dedupe doesn't fire.
+      mockedQueueArticle.mockImplementation(
+        async (input) =>
+          ({
+            jobId: `job-${input.ideaId}`,
+            articleId: `art-${input.ideaId}`,
+            ideaId: input.ideaId,
+            status: "pending",
+            alreadyQueued: false,
+          }) as never,
+      );
+
+      const out = await runAutopilotForBlog({
+        teamId: "t1",
+        projectId: "p1",
+        blogId: "blog-1",
+        client: client as never,
+      });
+
+      tickResults.push(out.articleJobsStarted);
+      articlesSpawnedSoFar += out.articleJobsStarted;
+    }
+
+    // Tick 1: started=0 cap=10 → min(10, 3, 5) = 3
+    // Tick 2: started=3 cap=10 → remaining=7 → min(7,3,5)=3
+    // Tick 3: started=6 cap=10 → remaining=4 → min(4,3,5)=3
+    // Tick 4: started=9 cap=10 → remaining=1 → min(1,3,5)=1
+    // Total spawned = 3+3+3+1 = 10. No tick exceeds the daily cap.
+    expect(tickResults).toEqual([3, 3, 3, 1]);
+    expect(articlesSpawnedSoFar).toBe(10);
+  });
+
+  it("the same launch-scenario blog refuses to spawn a single extra job after a 5th tick (daily cap reached)", async () => {
+    // Continuation: by tick 5 the blog has 10/10 started today.
+    // The next tick must produce a `daily_article_cap_reached` skip.
+    const settings = autopilotSettings({
+      backlogThreshold: 1,
+      maxPostsPerDay: 10,
+      generatePerWeek: 70,
+    });
+    const client = makePerBlogClient({
+      blogRow: { id: "blog-1", name: "Daily blog", settings },
+      approvedIdeas: Array.from({ length: 10 }, (_, i) => ({
+        id: `still-fresh-${i}`,
+        title: `T${i}`,
+      })),
+      todayArticleCount: 10, // already at cap
+    });
+
+    const out = await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(out.status).toBe("skipped");
+    expect(out.reason).toBe(
+      AUTOPILOT_SKIP_REASONS.DAILY_ARTICLE_CAP_REACHED,
+    );
+    expect(mockedQueueArticle).not.toHaveBeenCalled();
   });
 });

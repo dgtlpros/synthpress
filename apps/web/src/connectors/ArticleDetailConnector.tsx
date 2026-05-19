@@ -372,9 +372,7 @@ export function ArticleDetailConnector({
           onSectionImageAltChange={
             sectionsEnabled ? setSectionImageAlt : undefined
           }
-          onClearSectionImage={
-            sectionsEnabled ? clearSectionImage : undefined
-          }
+          onClearSectionImage={sectionsEnabled ? clearSectionImage : undefined}
         />
         <UnsplashPicker
           open={pickerOpen}

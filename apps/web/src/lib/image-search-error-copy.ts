@@ -16,15 +16,17 @@ import type { ImageSearchErrorCode } from "@/services/image-providers/types";
  * this module directly to compare friendly copy against the
  * action's returned error string.
  *
- * Note: copy is currently Unsplash-leaning because Unsplash is the
- * only registered provider. When we add a second provider, swap to
- * a `(providerDisplayName) => string` factory so the messages can
- * say "Pexels rate limit reached" etc.
+ * Copy is provider-neutral except for `missing_access_key`, which
+ * names the active provider's env var so operators can act on it
+ * without grep-tracing through the codebase. Today the active
+ * provider is Pexels (`PEXELS_API_KEY`); legacy Unsplash rows still
+ * resolve via the registry but the picker / autopilot only ever
+ * trigger this code for the active provider.
  */
 export const IMAGE_SEARCH_ERROR_COPY: Record<ImageSearchErrorCode, string> = {
   query_required: "Type something to search images.",
   missing_access_key:
-    "Image search is not configured. Add UNSPLASH_ACCESS_KEY to your environment to enable image search.",
+    "Image search is not configured. Add PEXELS_API_KEY to your environment to enable image search.",
   rate_limited: "Image search rate limit reached. Wait a minute and try again.",
   request_failed:
     "Couldn't reach the image provider. Check your connection and try again.",

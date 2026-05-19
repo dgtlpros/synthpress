@@ -208,9 +208,20 @@ describe("loadBlogSettings", () => {
     expect(DEFAULT_BLOG_SETTINGS.automation.pausedMessage).toBeNull();
   });
 
-  it("defaults autopilot image picker to ON with Unsplash", () => {
+  it("defaults autopilot image picker to ON with Pexels", () => {
     expect(DEFAULT_BLOG_SETTINGS.media.autoPickImages).toBe(true);
-    expect(DEFAULT_BLOG_SETTINGS.media.imageProvider).toBe("unsplash");
+    expect(DEFAULT_BLOG_SETTINGS.media.imageProvider).toBe("pexels");
+  });
+
+  it("coerces legacy media.imageProvider='unsplash' to 'pexels'", () => {
+    // Existing blogs persisted `imageProvider: 'unsplash'` before
+    // Pexels became the active provider. The runtime normalizer
+    // rolls them forward so the picker / autopilot route through
+    // Pexels even before the next per-blog settings save.
+    const out = loadBlogSettings({
+      media: { imageProvider: "unsplash" },
+    } as never);
+    expect(out.media.imageProvider).toBe("pexels");
   });
 
   it("defaults autopilot WordPress draft send to OFF (opt-in posture)", () => {
@@ -257,8 +268,15 @@ describe("loadBlogSettings", () => {
   it("falls back to defaults when media.imageProvider is an unknown value", () => {
     const out = loadBlogSettings({
       media: { imageProvider: "midjourney" },
-    });
-    expect(out.media.imageProvider).toBe("unsplash");
+    } as never);
+    expect(out.media.imageProvider).toBe("pexels");
+  });
+
+  it("falls back to defaults when media.imageProvider is the wrong type", () => {
+    const out = loadBlogSettings({
+      media: { imageProvider: 42 },
+    } as never);
+    expect(out.media.imageProvider).toBe("pexels");
   });
 
   it("falls back to defaults when media.autoPickImages is the wrong type", () => {
@@ -274,7 +292,9 @@ describe("loadBlogSettings", () => {
     });
     expect(out.media.autoPickImages).toBe(false);
     // Other keys keep their defaults.
-    expect(out.media.imageProvider).toBe(DEFAULT_BLOG_SETTINGS.media.imageProvider);
+    expect(out.media.imageProvider).toBe(
+      DEFAULT_BLOG_SETTINGS.media.imageProvider,
+    );
     expect(out.media.imageSource).toBe(DEFAULT_BLOG_SETTINGS.media.imageSource);
     expect(out.media.generateAltText).toBe(
       DEFAULT_BLOG_SETTINGS.media.generateAltText,

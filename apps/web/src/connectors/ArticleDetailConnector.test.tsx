@@ -451,7 +451,9 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
     mockedUseArticleEdit.mockReturnValue(defaultHookValue({ isEditing: true }));
 
     render(<ArticleDetailConnector {...baseProps} />);
-    const button = screen.getByRole("button", { name: /pick from unsplash/i });
+    const button = screen.getByRole("button", {
+      name: /pick from image library/i,
+    });
     expect(button).toBeInTheDocument();
 
     fireEvent.click(button);
@@ -517,7 +519,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
 
     const lastCall = mockedUnsplashPicker.mock.calls.at(-1)!;
@@ -553,7 +555,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -570,7 +572,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -598,7 +600,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -615,7 +617,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -639,7 +641,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -668,7 +670,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: ReturnType<typeof fullPhoto>) => void;
@@ -687,7 +689,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     // Wait for the effect to settle (it's async even on the error path).
     await vi.waitFor(() => expect(mockedGetRecents).toHaveBeenCalled());
@@ -719,7 +721,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
 
     expect(mockedGetRecents).toHaveBeenCalledWith("t1", "b1");
@@ -752,7 +754,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     await vi.waitFor(() => {
       const lastCall = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
@@ -800,7 +802,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     await vi.waitFor(() => expect(mockedUnsplashPicker).toHaveBeenCalled());
 
@@ -819,7 +821,7 @@ describe("ArticleDetailConnector — Unsplash picker", () => {
 
     render(<ArticleDetailConnector {...baseProps} />);
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     expect(screen.getByTestId("unsplash-picker")).toBeInTheDocument();
 
@@ -847,7 +849,9 @@ describe("ArticleDetailConnector — section image picker", () => {
    * (`intro`, `faq`).
    */
   function renderWithSections(
-    overrides: { sectionImages?: Record<string, { imageUrl: string; altText: string }> } = {},
+    overrides: {
+      sectionImages?: Record<string, { imageUrl: string; altText: string }>;
+    } = {},
   ) {
     mockedUseArticleEdit.mockReturnValue(
       defaultHookValue({
@@ -878,10 +882,7 @@ describe("ArticleDetailConnector — section image picker", () => {
       }),
     );
     return render(
-      <ArticleDetailConnector
-        {...baseProps}
-        initialSectionImages={[]}
-      />,
+      <ArticleDetailConnector {...baseProps} initialSectionImages={[]} />,
     );
   }
 
@@ -1036,9 +1037,7 @@ describe("ArticleDetailConnector — section image picker", () => {
         sectionImages: {},
       }),
     );
-    render(
-      <ArticleDetailConnector {...baseProps} initialSectionImages={[]} />,
-    );
+    render(<ArticleDetailConnector {...baseProps} initialSectionImages={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /^Pick image$/i }));
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: unknown) => void;
@@ -1170,7 +1169,7 @@ describe("ArticleDetailConnector — section image picker", () => {
     );
   });
 
-  it("clicking the featured 'Pick from Unsplash' button after a section pick re-targets the picker", () => {
+  it("clicking the featured 'Pick from image library' button after a section pick re-targets the picker", () => {
     renderWithSections();
     // First open the picker for the intro section.
     fireEvent.click(
@@ -1178,7 +1177,7 @@ describe("ArticleDetailConnector — section image picker", () => {
     );
     // Then click the featured-image picker button.
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     // The query should now be the featured default (target keyword).
     expect(unsplashSetQuery).toHaveBeenLastCalledWith("launch b2b blog");
@@ -1218,7 +1217,7 @@ describe("ArticleDetailConnector — section image picker", () => {
     // Open the featured picker — should route the next selection to
     // selectFeaturedImage, NOT selectSectionImage.
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     const { onSelect } = mockedUnsplashPicker.mock.calls.at(-1)![0] as {
       onSelect: (p: unknown) => void;

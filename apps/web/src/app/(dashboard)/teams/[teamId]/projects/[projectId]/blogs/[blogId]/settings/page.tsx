@@ -49,8 +49,8 @@ export default async function BlogSettingsPage({
   // never expose the password — only the boolean.
   const hasWordPressConnection = Boolean(
     blog.wp_url?.trim() &&
-      blog.wp_username?.trim() &&
-      blog.wp_app_password?.trim(),
+    blog.wp_username?.trim() &&
+    blog.wp_app_password?.trim(),
   );
   const autopilotEnabled =
     settings.automation.mode === "autopilot" && settings.automation.enabled;

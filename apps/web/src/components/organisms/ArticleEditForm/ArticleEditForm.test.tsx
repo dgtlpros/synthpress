@@ -287,7 +287,7 @@ describe("ArticleEditForm", () => {
     expect(screen.getByLabelText(/featured image alt text/i)).toBeDisabled();
   });
 
-  it("does NOT render 'Pick from Unsplash' when no callback is provided", () => {
+  it("does NOT render 'Pick from image library' when no callback is provided", () => {
     render(
       <ArticleEditForm
         value={baseValue}
@@ -297,11 +297,11 @@ describe("ArticleEditForm", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: /pick from unsplash/i }),
+      screen.queryByRole("button", { name: /pick from image library/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("renders 'Pick from Unsplash' when onPickFromUnsplash is provided", () => {
+  it("renders 'Pick from image library' when onPickFromUnsplash is provided", () => {
     render(
       <ArticleEditForm
         value={baseValue}
@@ -312,7 +312,7 @@ describe("ArticleEditForm", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     ).toBeInTheDocument();
   });
 
@@ -328,12 +328,12 @@ describe("ArticleEditForm", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     );
     expect(onPick).toHaveBeenCalledOnce();
   });
 
-  it("disables the Pick from Unsplash button while saving", () => {
+  it("disables the Pick from image library button while saving", () => {
     render(
       <ArticleEditForm
         value={baseValue}
@@ -345,7 +345,7 @@ describe("ArticleEditForm", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: /pick from unsplash/i }),
+      screen.getByRole("button", { name: /pick from image library/i }),
     ).toBeDisabled();
   });
 
@@ -404,9 +404,7 @@ describe("ArticleEditForm", () => {
           isSaving={overrides.isSaving}
           sectionImages={overrides.sectionImages ?? {}}
           onPickSectionImage={overrides.onPickSectionImage ?? vi.fn()}
-          onSectionImageAltChange={
-            overrides.onSectionImageAltChange ?? vi.fn()
-          }
+          onSectionImageAltChange={overrides.onSectionImageAltChange ?? vi.fn()}
           onClearSectionImage={overrides.onClearSectionImage ?? vi.fn()}
         />,
       );
@@ -482,9 +480,8 @@ describe("ArticleEditForm", () => {
       // Alt input (scoped to "Section image alt text" so it
       // doesn't collide with the Featured image alt label).
       expect(
-        (
-          screen.getByLabelText(/section image alt text/i) as HTMLInputElement
-        ).value,
+        (screen.getByLabelText(/section image alt text/i) as HTMLInputElement)
+          .value,
       ).toBe("Intro alt");
       // Remove button on the intro slot
       expect(
@@ -546,9 +543,7 @@ describe("ArticleEditForm", () => {
         screen.getByRole("button", { name: /Replace image/i }),
       ).toBeDisabled();
       expect(screen.getByRole("button", { name: /^Remove$/i })).toBeDisabled();
-      expect(
-        screen.getByLabelText(/section image alt text/i),
-      ).toBeDisabled();
+      expect(screen.getByLabelText(/section image alt text/i)).toBeDisabled();
     });
 
     it("uses a fallback display label when a heading is empty", () => {

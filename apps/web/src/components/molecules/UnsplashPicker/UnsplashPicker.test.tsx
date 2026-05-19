@@ -24,7 +24,24 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
-const SAMPLE_PHOTO: NormalizedImageSearchResult = {
+const SAMPLE_PEXELS_PHOTO: NormalizedImageSearchResult = {
+  provider: "pexels",
+  providerPhotoId: "12345",
+  description: "Desk with laptop",
+  altDescription: "Desk with laptop",
+  thumbUrl: "https://images.pexels.com/photos/12345/medium.jpg",
+  regularUrl: "https://images.pexels.com/photos/12345/large.jpg",
+  fullUrl: "https://images.pexels.com/photos/12345/original.jpg",
+  photographerName: "Sam Person",
+  photographerProfileUrl: "https://www.pexels.com/@sam",
+  photoUrl: "https://www.pexels.com/photo/12345/",
+  downloadLocation: null,
+};
+
+// Legacy provider sample — historical attribution rows whose
+// `provider='unsplash'` still need to render correctly through the
+// generic picker thumbnail.
+const SAMPLE_UNSPLASH_PHOTO: NormalizedImageSearchResult = {
   provider: "unsplash",
   providerPhotoId: "abc",
   description: null,
@@ -51,12 +68,14 @@ const baseProps = {
 };
 
 describe("UnsplashPicker", () => {
-  it("renders the title + description", () => {
+  it("renders the provider-neutral title + description", () => {
     render(<UnsplashPicker {...baseProps} />);
-    expect(screen.getByText("Pick from Unsplash")).toBeInTheDocument();
+    expect(screen.getByText("Pick image")).toBeInTheDocument();
     expect(
       screen.getByText(/Selecting an image only updates the form/i),
     ).toBeInTheDocument();
+    // Title + description must NOT mention Unsplash anymore.
+    expect(screen.queryByText(/Pick from Unsplash/i)).not.toBeInTheDocument();
   });
 
   it("calls onQueryChange as the user types", () => {
@@ -109,7 +128,7 @@ describe("UnsplashPicker", () => {
     render(
       <UnsplashPicker
         {...baseProps}
-        errorMessage="Unsplash rate limit reached. Wait a minute and try again."
+        errorMessage="Image search rate limit reached. Wait a minute and try again."
         hasSearched
       />,
     );
@@ -148,11 +167,11 @@ describe("UnsplashPicker", () => {
     expect(screen.queryByText(/No matches for/i)).not.toBeInTheDocument();
   });
 
-  it("renders the results grid with photographer credits", () => {
+  it("renders Pexels thumbnails with 'Photo by X on Pexels' credit", () => {
     render(
       <UnsplashPicker
         {...baseProps}
-        results={[SAMPLE_PHOTO]}
+        results={[SAMPLE_PEXELS_PHOTO]}
         totalResults={1}
         hasSearched
       />,
@@ -160,16 +179,28 @@ describe("UnsplashPicker", () => {
     expect(
       screen.getByRole("img", { name: /Desk with laptop/i }),
     ).toBeInTheDocument();
-    const profileLink = screen.getByRole("link", {
-      name: /Annie Spratt/i,
-    });
-    expect(profileLink).toHaveAttribute(
+    const profileLink = screen.getByRole("link", { name: /Sam Person/i });
+    expect(profileLink).toHaveAttribute("href", "https://www.pexels.com/@sam");
+    const photoLink = screen.getByRole("link", { name: /^Pexels$/i });
+    expect(photoLink).toHaveAttribute(
       "href",
-      "https://unsplash.com/@anniespratt",
+      "https://www.pexels.com/photo/12345/",
     );
-    const photoLink = screen.getByRole("link", {
-      name: /Unsplash/i,
-    });
+  });
+
+  it("still renders legacy Unsplash attribution correctly for historical rows", () => {
+    // Legacy rows persisted with `provider='unsplash'` keep showing
+    // "on Unsplash" so an existing post's credit stays accurate
+    // even though the active picker is Pexels.
+    render(
+      <UnsplashPicker
+        {...baseProps}
+        results={[SAMPLE_UNSPLASH_PHOTO]}
+        totalResults={1}
+        hasSearched
+      />,
+    );
+    const photoLink = screen.getByRole("link", { name: /^Unsplash$/i });
     expect(photoLink).toHaveAttribute(
       "href",
       "https://unsplash.com/photos/abc",
@@ -182,22 +213,20 @@ describe("UnsplashPicker", () => {
       <UnsplashPicker
         {...baseProps}
         onSelect={onSelect}
-        results={[SAMPLE_PHOTO]}
+        results={[SAMPLE_PEXELS_PHOTO]}
         totalResults={1}
         hasSearched
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", {
-        name: /Select Unsplash photo by Annie Spratt/i,
-      }),
+      screen.getByRole("button", { name: /Select photo by Sam Person/i }),
     );
-    expect(onSelect).toHaveBeenCalledWith(SAMPLE_PHOTO);
+    expect(onSelect).toHaveBeenCalledWith(SAMPLE_PEXELS_PHOTO);
   });
 
   it("falls back to description when altDescription is missing", () => {
-    const photo = {
-      ...SAMPLE_PHOTO,
+    const photo: NormalizedImageSearchResult = {
+      ...SAMPLE_PEXELS_PHOTO,
       altDescription: null,
       description: "A modern home office",
     };
@@ -214,9 +243,9 @@ describe("UnsplashPicker", () => {
     ).toBeInTheDocument();
   });
 
-  it("falls back to a generic alt when both descriptions are missing", () => {
-    const photo = {
-      ...SAMPLE_PHOTO,
+  it("falls back to a 'Photo by <name>' alt when both descriptions are missing", () => {
+    const photo: NormalizedImageSearchResult = {
+      ...SAMPLE_PEXELS_PHOTO,
       altDescription: null,
       description: null,
     };
@@ -229,17 +258,16 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(
-      screen.getByRole("img", {
-        name: /Unsplash photo by Annie Spratt/i,
-      }),
+      screen.getByRole("img", { name: /^Photo by Sam Person$/i }),
     ).toBeInTheDocument();
   });
 
-  it("falls back to a neutral alt + aria when the provider has no photographer name", () => {
-    // Mirrors a future non-Unsplash provider (e.g. AI image gen) that
-    // doesn't carry a photographer field.
+  it("falls back to a neutral alt + aria when the photo has no photographer name", () => {
+    // Mirrors a future provider (e.g. AI image gen, or a Pexels row
+    // with a missing photographer field) — the picker degrades to
+    // "Image from Pexels" instead of leaking 'null' into the alt.
     const photo: NormalizedImageSearchResult = {
-      ...SAMPLE_PHOTO,
+      ...SAMPLE_PEXELS_PHOTO,
       altDescription: null,
       description: null,
       photographerName: null,
@@ -253,16 +281,16 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(
-      screen.getByRole("img", { name: "Unsplash photo" }),
+      screen.getByRole("img", { name: "Image from Pexels" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Select this Unsplash photo" }),
+      screen.getByRole("button", { name: "Select this photo" }),
     ).toBeInTheDocument();
   });
 
   it("renders a span (not an anchor) when photographerProfileUrl is null", () => {
     const photo: NormalizedImageSearchResult = {
-      ...SAMPLE_PHOTO,
+      ...SAMPLE_PEXELS_PHOTO,
       photographerProfileUrl: null,
     };
     render(
@@ -275,14 +303,14 @@ describe("UnsplashPicker", () => {
     );
     // Photographer name still renders, but not as a link.
     expect(
-      screen.queryByRole("link", { name: "Annie Spratt" }),
+      screen.queryByRole("link", { name: "Sam Person" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Annie Spratt")).toBeInTheDocument();
+    expect(screen.getByText("Sam Person")).toBeInTheDocument();
   });
 
-  it("falls back to 'an Unsplash photographer' when both name and profile URL are missing", () => {
+  it("falls back to 'a Pexels photographer' when both name and profile URL are missing", () => {
     const photo: NormalizedImageSearchResult = {
-      ...SAMPLE_PHOTO,
+      ...SAMPLE_PEXELS_PHOTO,
       photographerName: null,
       photographerProfileUrl: null,
     };
@@ -294,14 +322,12 @@ describe("UnsplashPicker", () => {
         hasSearched
       />,
     );
-    expect(
-      screen.getByText("an Unsplash photographer"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("a Pexels photographer")).toBeInTheDocument();
   });
 
-  it("renders 'Unsplash' as a span (not a link) when photoUrl is null", () => {
+  it("renders 'Pexels' as a span (not a link) when photoUrl is null", () => {
     const photo: NormalizedImageSearchResult = {
-      ...SAMPLE_PHOTO,
+      ...SAMPLE_PEXELS_PHOTO,
       photoUrl: null,
     };
     render(
@@ -313,7 +339,7 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(
-      screen.queryByRole("link", { name: /^Unsplash$/ }),
+      screen.queryByRole("link", { name: /^Pexels$/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -321,16 +347,14 @@ describe("UnsplashPicker", () => {
     render(
       <UnsplashPicker
         {...baseProps}
-        results={[SAMPLE_PHOTO]}
+        results={[SAMPLE_PEXELS_PHOTO]}
         totalResults={1}
         hasSearched
         isSearching
       />,
     );
     expect(
-      screen.getByRole("button", {
-        name: /Select Unsplash photo by Annie Spratt/i,
-      }),
+      screen.getByRole("button", { name: /Select photo by Sam Person/i }),
     ).toBeDisabled();
   });
 
@@ -350,7 +374,7 @@ describe("UnsplashPicker", () => {
     render(
       <UnsplashPicker
         {...baseProps}
-        results={[SAMPLE_PHOTO]}
+        results={[SAMPLE_PEXELS_PHOTO]}
         totalResults={42}
         hasSearched
       />,
@@ -362,7 +386,7 @@ describe("UnsplashPicker", () => {
     render(
       <UnsplashPicker
         {...baseProps}
-        results={[SAMPLE_PHOTO]}
+        results={[SAMPLE_PEXELS_PHOTO]}
         totalResults={1}
         hasSearched
       />,
@@ -370,14 +394,22 @@ describe("UnsplashPicker", () => {
     expect(screen.queryByText(/Showing/i)).not.toBeInTheDocument();
   });
 
-  it("renders the help/credits hint on first render (no search yet, no error)", () => {
+  it("renders the search-tip helper on first render (no search yet, no error) WITHOUT mentioning Unsplash", () => {
     render(<UnsplashPicker {...baseProps} />);
-    expect(screen.getByText(/Photos courtesy of/i)).toBeInTheDocument();
+    // Generic tip is shown.
+    expect(
+      screen.getByText(/Tip:.*search for the subject/i),
+    ).toBeInTheDocument();
+    // Old "Photos courtesy of Unsplash" line is gone.
+    expect(screen.queryByText(/Photos courtesy of/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unsplash/i)).not.toBeInTheDocument();
   });
 
-  it("hides the help/credits hint after a search has been fired", () => {
+  it("hides the help/tip text after a search has been fired", () => {
     render(<UnsplashPicker {...baseProps} hasSearched />);
-    expect(screen.queryByText(/Photos courtesy of/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Tip:.*search for the subject/i),
+    ).not.toBeInTheDocument();
   });
 
   // ---------- Recently used section ----------
@@ -386,19 +418,19 @@ describe("UnsplashPicker", () => {
     id: "row-1",
     imageUrl: "https://example.com/used.jpg",
     altText: "Previously used photo",
-    provider: "unsplash",
-    providerPhotoId: "abc",
-    photographerName: "Annie Spratt",
-    photographerProfileUrl: "https://unsplash.com/@anniespratt",
-    photoUrl: "https://unsplash.com/photos/abc",
-    downloadLocation: "https://api.unsplash.com/photos/abc/download",
+    provider: "pexels",
+    providerPhotoId: "12345",
+    photographerName: "Sam Person",
+    photographerProfileUrl: "https://www.pexels.com/@sam",
+    photoUrl: "https://www.pexels.com/photo/12345/",
+    downloadLocation: null,
     wpMediaId: 99,
   };
 
   it("does NOT render the Recently used section when no recents are supplied", () => {
     render(<UnsplashPicker {...baseProps} />);
     expect(
-      screen.queryByTestId("unsplash-picker-recents"),
+      screen.queryByTestId("image-picker-recents"),
     ).not.toBeInTheDocument();
   });
 
@@ -411,7 +443,7 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(
-      screen.queryByTestId("unsplash-picker-recents"),
+      screen.queryByTestId("image-picker-recents"),
     ).not.toBeInTheDocument();
   });
 
@@ -424,7 +456,7 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(screen.getByText(/Recently used/i)).toBeInTheDocument();
-    expect(screen.getByTestId("unsplash-picker-recents")).toBeInTheDocument();
+    expect(screen.getByTestId("image-picker-recents")).toBeInTheDocument();
     expect(
       screen.getByRole("img", { name: /Previously used photo/i }),
     ).toBeInTheDocument();
@@ -440,7 +472,7 @@ describe("UnsplashPicker", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /Reuse image by Annie Spratt/i }),
+      screen.getByRole("button", { name: /Reuse image by Sam Person/i }),
     );
     expect(onSelectRecent).toHaveBeenCalledWith(SAMPLE_RECENT);
   });
@@ -473,7 +505,7 @@ describe("UnsplashPicker", () => {
     );
     expect(
       screen.getByRole("img", {
-        name: /Previously used image by Annie Spratt/i,
+        name: /Previously used image by Sam Person/i,
       }),
     ).toBeInTheDocument();
   });
@@ -506,14 +538,14 @@ describe("UnsplashPicker", () => {
       />,
     );
     expect(
-      screen.queryByTestId("unsplash-picker-recents"),
+      screen.queryByTestId("image-picker-recents"),
     ).not.toBeInTheDocument();
   });
 
   it("does NOT render the Recently used section when onSelectRecent is omitted (defensive)", () => {
     render(<UnsplashPicker {...baseProps} recentUploads={[SAMPLE_RECENT]} />);
     expect(
-      screen.queryByTestId("unsplash-picker-recents"),
+      screen.queryByTestId("image-picker-recents"),
     ).not.toBeInTheDocument();
   });
 });

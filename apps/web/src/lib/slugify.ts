@@ -39,10 +39,7 @@ export function slugify(value: string, options: SlugifyOptions = {}): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 
-  if (
-    options.maxLength === undefined ||
-    slugged.length <= options.maxLength
-  ) {
+  if (options.maxLength === undefined || slugged.length <= options.maxLength) {
     return slugged;
   }
   // If the cut landed mid-hyphen, peel it off so we never end on

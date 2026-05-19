@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
 import { extractArticleSections } from "@/lib/extract-article-sections";
+import { providerDisplayLabel } from "@/lib/image-provider-label";
 
 /**
  * Renders Markdown as styled HTML.
@@ -21,13 +22,18 @@ import { extractArticleSections } from "@/lib/extract-article-sections";
  * Section images (optional):
  *   When `sectionImagesByKey` is supplied, the custom `h2` renderer
  *   injects an `<img>` block (plus optional attribution credit) ABOVE
- *   each H2 whose slugified key matches a map entry. The list of
- *   keys-in-document-order is computed once via
- *   {@link extractArticleSections}; the renderer increments a local
- *   counter as it sees each H2 to know which key it's on. That
- *   counter resets per render (it's a `let` inside the component
- *   function), so React Strict Mode's double-render also produces
- *   correct output.
+ *   each H2 whose slugified key matches a map entry. We match each
+ *   rendered `<h2>` to its image by its **source offset** —
+ *   {@link extractArticleSections} stamps `startOffset` from the
+ *   mdast `position.start.offset`, and react-markdown forwards the
+ *   same offset on `node.position.start.offset` of the hast node
+ *   passed to the override (remark-rehype carries positions through
+ *   verbatim). A position-based join is purely functional with no
+ *   per-render state, so it stays correct under React's StrictMode
+ *   double-invoke (which a previous index-counter implementation
+ *   broke — the second pass kept incrementing a shared counter,
+ *   skipping past the trailing entries and leaving late sections
+ *   imageless + producing a hydration mismatch against the SSR pass).
  */
 
 /**
@@ -74,22 +80,28 @@ export function MarkdownPreview({
   sectionImagesByKey,
   className,
 }: MarkdownPreviewProps) {
-  // Pre-extract the H2 keys in document order so the H2 renderer
-  // can look them up by index. Memoized on `markdown` to avoid
-  // re-parsing per parent re-render when the body hasn't changed.
-  const orderedSectionKeys = useMemo(() => {
+  // Pre-build a `Map<sourceOffset, image>` so the H2 renderer can
+  // join its hast node back to the correct row in pure (no per-
+  // render counter) lookup. Memoized on `markdown` +
+  // `sectionImagesByKey`; rebuilds when either changes.
+  //
+  // Empty/undefined map short-circuits to an empty Map so the H2
+  // override degrades to a plain `<h2>` render without touching the
+  // parser at all (saves a remark-parse pass on legacy articles
+  // that have no section picks).
+  const imagesByOffset = useMemo(() => {
+    const out = new Map<number, MarkdownPreviewSectionImage>();
     if (!sectionImagesByKey || Object.keys(sectionImagesByKey).length === 0) {
-      return [];
+      return out;
     }
-    return extractArticleSections(markdown).map((s) => s.sectionKey);
+    for (const section of extractArticleSections(markdown)) {
+      /* v8 ignore next 1 -- defensive: extractArticleSections always stamps a numeric `startOffset` on real string input (remark-parse always populates `position.start.offset`); the `null` branch is an unreachable forward-compat guard */
+      if (section.startOffset === null) continue;
+      const image = sectionImagesByKey[section.sectionKey];
+      if (image) out.set(section.startOffset, image);
+    }
+    return out;
   }, [markdown, sectionImagesByKey]);
-
-  // Counter wrapper for the H2 renderer. Wrapped in an object so
-  // the renderer can mutate `.value` per H2 it sees without
-  // tripping the "no let reassignment after render" lint rule.
-  // Fresh per render → strict-mode double-renders each get their
-  // own counter + produce identical output.
-  const h2Counter = { value: 0 };
 
   return (
     <div className={cn("text-sm text-foreground", className)}>
@@ -101,13 +113,20 @@ export function MarkdownPreview({
               {children}
             </h1>
           ),
-          h2: ({ children }) => {
-            // Look up the section image by this H2's document
-            // index. The list is empty when no section images were
-            // supplied, so this short-circuits to the plain H2.
-            const key = orderedSectionKeys[h2Counter.value];
-            h2Counter.value += 1;
-            const image = key ? sectionImagesByKey?.[key] : undefined;
+          h2: ({ node, children }) => {
+            // Look up the section image by this H2's source offset.
+            // `node.position.start.offset` is the same UTF-16 index
+            // remark-parse stamps on the mdast heading node;
+            // remark-rehype copies it onto the hast node verbatim,
+            // so the join lines up 1:1 with `extractArticleSections`'s
+            // `startOffset` (computed off the same parser).
+            const offset = node?.position?.start?.offset;
+            /* v8 ignore start -- defensive: react-markdown 10 always passes `node.position.start.offset` as a number for hast nodes derived from string input (remark-rehype copies the value verbatim from mdast); the `undefined` branch only fires for nodes without source positions, which can't happen in production */
+            const image =
+              typeof offset === "number"
+                ? imagesByOffset.get(offset)
+                : undefined;
+            /* v8 ignore stop */
             return (
               <>
                 {image ? <SectionImageBlock image={image} /> : null}
@@ -216,11 +235,7 @@ export function MarkdownPreview({
  * Margins mirror the H1/H2 spacing so the figure sits naturally
  * between the previous section's body and the next heading.
  */
-function SectionImageBlock({
-  image,
-}: {
-  image: MarkdownPreviewSectionImage;
-}) {
+function SectionImageBlock({ image }: { image: MarkdownPreviewSectionImage }) {
   const credit = renderAttribution(image.attribution);
   return (
     <figure className="mt-6 mb-2 first:mt-0">
@@ -250,8 +265,14 @@ function renderAttribution(
   attribution: MarkdownPreviewImageAttribution | null,
 ): React.ReactNode {
   if (!attribution) return null;
+  // Provider label resolves: 'pexels' → 'Pexels' (active),
+  // 'unsplash' → 'Unsplash' (legacy historical rows continue
+  // rendering correctly), anything else → raw id (forward-compat
+  // for future providers without a code change here).
+  /* v8 ignore start -- defensive: providerDisplayLabel only returns "" for empty/null/non-string input, but `attribution.provider` is typed `string` and required; the `|| attribution.provider` fallback guards against a malformed jsonb row leaking through but is unreachable from the typed call path */
   const providerLabel =
-    attribution.provider === "unsplash" ? "Unsplash" : attribution.provider;
+    providerDisplayLabel(attribution.provider) || attribution.provider;
+  /* v8 ignore stop */
   const photographerName = attribution.photographerName?.trim() || null;
   // Manual-paste rows with no photographer + no link have nothing
   // to credit; skip the figcaption entirely.

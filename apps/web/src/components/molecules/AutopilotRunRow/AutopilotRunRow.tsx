@@ -1,5 +1,6 @@
 import { type HTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
+import { formatAutopilotSkipReason } from "@/lib/autopilot-skip-reason-labels";
 import {
   AutopilotRunStatusBadge,
   type AutopilotRunStatus,
@@ -151,6 +152,12 @@ export function AutopilotRunRow({
   const triggerLabel = formatTriggerSource(run.triggerSource);
   const jobCount = spawnedJobsCount(run.output);
   const reason = readReason(run.output);
+  // Resolve the friendly label / description from the raw reason
+  // key. The raw key stays in `output.reason` for grep + analysis;
+  // this helper is the presentation layer. Operational throttle
+  // reasons get backpressure-flavored copy here (NOT plan-cap
+  // language); see `autopilot-skip-reason-labels.ts`.
+  const reasonCopy = formatAutopilotSkipReason(reason);
   const autoApprovedCount = readAutoApprovedCount(run.output);
 
   // Only show the secondary metric line when there's something to
@@ -248,10 +255,28 @@ export function AutopilotRunRow({
         )
       ) : null}
 
-      {reason && !run.errorMessage ? (
-        <p className="text-xs text-muted">
-          <span className="font-medium text-foreground">Reason:</span> {reason}
-        </p>
+      {reason && !run.errorMessage && reasonCopy.label ? (
+        // Friendly label first; the (optional) description sits on
+        // its own line as muted subtext so the row stays scannable.
+        // The raw `reason` key is intentionally not surfaced here —
+        // operators who need it can open the detail drawer's "Raw
+        // run output" section.
+        <div
+          className="text-xs text-muted"
+          data-testid={`autopilot-run-${run.id}-reason`}
+          data-reason-key={reason}
+          data-reason-tone={reasonCopy.tone}
+        >
+          <p>
+            <span className="font-medium text-foreground">Reason:</span>{" "}
+            {reasonCopy.label}
+          </p>
+          {reasonCopy.description ? (
+            <p className="text-[11px] text-muted/80">
+              {reasonCopy.description}
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import { formatAutopilotSkipReason } from "@/lib/autopilot-skip-reason-labels";
 import { Drawer } from "@/components/atoms/Drawer";
 import {
   AutopilotRunStatusBadge,
@@ -291,18 +292,9 @@ function DetailBody({
             className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3"
             data-testid="autopilot-run-wp-summary"
           >
-            <Counter
-              label="Expected"
-              value={run.wp_drafts_expected}
-            />
-            <Counter
-              label="Drafts created"
-              value={run.wp_drafts_created}
-            />
-            <Counter
-              label="Already sent"
-              value={run.wp_drafts_already_sent}
-            />
+            <Counter label="Expected" value={run.wp_drafts_expected} />
+            <Counter label="Drafts created" value={run.wp_drafts_created} />
+            <Counter label="Already sent" value={run.wp_drafts_already_sent} />
             <Counter
               label="Skipped"
               value={run.wp_drafts_skipped}
@@ -326,8 +318,8 @@ function DetailBody({
               role="alert"
               data-testid="autopilot-run-wp-failed-warning"
             >
-              Some articles could not be sent to WordPress drafts.
-              Check the article job rows below.
+              Some articles could not be sent to WordPress drafts. Check the
+              article job rows below.
             </p>
           ) : null}
           {run.wp_drafts_skipped > 0 ? (
@@ -335,8 +327,8 @@ function DetailBody({
               className="mt-2 text-sm text-warning"
               data-testid="autopilot-run-wp-skipped-warning"
             >
-              Some WordPress draft sends were skipped because
-              WordPress was not connected.
+              Some WordPress draft sends were skipped because WordPress was not
+              connected.
             </p>
           ) : null}
         </Section>
@@ -353,8 +345,14 @@ function DetailBody({
           </p>
         </Section>
       ) : reason ? (
+        // Resolve the friendly label + description for the raw
+        // reason key. Raw key stays in the "Raw run output" section
+        // below for operators / debugging — this section is the
+        // user-facing presentation. Operational throttle keys get
+        // backpressure-flavored copy (no plan-cap language); see
+        // `autopilot-skip-reason-labels.ts`.
         <Section title="Reason">
-          <p className="text-muted">{reason}</p>
+          <ReasonCard rawReason={reason} />
         </Section>
       ) : null}
 
@@ -610,6 +608,35 @@ function DetailBody({
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
+
+/**
+ * Renders the "Reason" section's body: friendly label as the
+ * primary line, optional description as muted subtext underneath.
+ *
+ * Falls back to the raw key (title-cased) when an unknown reason
+ * lands here — better than showing nothing while the next deploy
+ * adds the official copy. Stamps the raw key onto a `data-*`
+ * attribute so end-to-end / Playwright tests can still pin against
+ * the underlying value.
+ */
+function ReasonCard({ rawReason }: { rawReason: string }) {
+  const formatted = formatAutopilotSkipReason(rawReason);
+  /* v8 ignore next 1 -- defensive: caller already gated on a non-empty `rawReason` string, so `label` is always non-null here; the fallback exists for forward-compat with future formatter changes */
+  const label = formatted.label ?? rawReason;
+  return (
+    <div
+      className="space-y-1"
+      data-testid="autopilot-detail-reason"
+      data-reason-key={rawReason}
+      data-reason-tone={formatted.tone}
+    >
+      <p className="font-medium text-foreground">{label}</p>
+      {formatted.description ? (
+        <p className="text-muted">{formatted.description}</p>
+      ) : null}
+    </div>
+  );
+}
 
 function Section({
   title,

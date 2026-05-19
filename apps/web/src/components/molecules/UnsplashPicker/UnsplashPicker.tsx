@@ -7,25 +7,35 @@ import { Label } from "@/components/atoms/Label";
 import { Modal } from "@/components/atoms/Modal";
 import { Spinner } from "@/components/atoms/Spinner";
 import { cn } from "@/lib/cn";
+import { providerDisplayLabel } from "@/lib/image-provider-label";
 import type { NormalizedImageSearchResult } from "@/services/image-providers/types";
 
 /**
- * Modal that lets the user search Unsplash and pick a featured image
- * for the article they're editing. Pure presentational — the parent
- * connector wires up state via `useUnsplashSearch`.
+ * Modal that lets the user search the active image provider and
+ * pick a featured / section image for the article they're editing.
+ * Pure presentational — the parent connector wires up state via
+ * `useUnsplashSearch` (the hook name is internal-historical; it
+ * routes through the registry's default provider, which is now
+ * Pexels).
+ *
+ * Why the file is still named `UnsplashPicker`:
+ *   v12 swapped Pexels in as the active provider but kept this
+ *   molecule's file name to avoid a churny rename across ~15 test
+ *   ids, stories, and connector imports that don't affect users.
+ *   All visible copy here is provider-neutral OR derived from the
+ *   actual `photo.provider` field — never hard-coded to "Unsplash".
  *
  * UX choices worth calling out:
  *   * Submit-driven search (form `onSubmit`), NOT keystroke-driven.
- *     Unsplash's free tier caps at 50 requests/hour per app and a
- *     per-keystroke search would burn that within seconds.
+ *     Stock-photo APIs cap free-tier traffic per hour and a per-
+ *     keystroke search would burn that within seconds.
  *   * Click anywhere on a thumbnail to select. There's no separate
  *     "Use this image" button — the surface is small and a single
  *     click is faster.
  *   * Photographer credit is rendered under each thumbnail per
- *     Unsplash's API guidelines (https://help.unsplash.com/en/articles/2511315).
- *     The credit links to the photographer's profile + the photo
- *     page so the attribution is satisfied even without the
- *     downstream "store + ping download_location" follow-up PR.
+ *     each provider's attribution guidelines. The credit links to
+ *     the photographer's profile + the photo page when the provider
+ *     supplies them.
  *   * The previously-fetched grid stays visible while a new search
  *     is in flight (the parent hook keeps `results` until a fresh
  *     successful search lands) — gives the picker a calmer "swap-in"
@@ -94,8 +104,8 @@ export function UnsplashPicker({
     <Modal
       open={open}
       onClose={onClose}
-      title="Pick from Unsplash"
-      description="Search Unsplash for a featured image. Selecting an image only updates the form — you still need to click Save to persist the change."
+      title="Pick image"
+      description="Search the image library for a photo. Selecting an image only updates the form — you still need to click Save to persist the change."
       maxWidth="xl"
       className={className}
     >
@@ -113,7 +123,7 @@ export function UnsplashPicker({
             </p>
           </div>
           <ul
-            data-testid="unsplash-picker-recents"
+            data-testid="image-picker-recents"
             className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6"
           >
             {recentUploads!.map((row) => (
@@ -136,9 +146,9 @@ export function UnsplashPicker({
       >
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <Label htmlFor="unsplash-picker-query">Search</Label>
+            <Label htmlFor="image-picker-query">Search</Label>
             <Input
-              id="unsplash-picker-query"
+              id="image-picker-query"
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               placeholder="e.g. modern smart home cameras"
@@ -182,23 +192,14 @@ export function UnsplashPicker({
         {!hasSearched && !errorMessage ? (
           <p className="text-xs text-muted">
             Tip: search for the subject of the article (e.g. the target
-            keyword). Photos courtesy of{" "}
-            <a
-              href="https://unsplash.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand-blue underline-offset-2 hover:underline"
-            >
-              Unsplash
-            </a>
-            .
+            keyword).
           </p>
         ) : null}
       </form>
 
       {results.length > 0 ? (
         <ul
-          aria-label="Unsplash search results"
+          aria-label="Image search results"
           className={cn(
             "mt-4 grid gap-3",
             // 2 columns on phones, 3 on tablets, 4 on desktop — keeps
@@ -248,6 +249,11 @@ interface UnsplashPickerThumbnailProps {
  * the generic provider type — the picker falls back to neutral copy
  * when they're missing rather than rendering "by null" / a broken
  * link, so future providers (AI gen, manual upload) plug in cleanly.
+ *
+ * Provider label comes from {@link providerDisplayLabel}, which
+ * resolves `'pexels'` → `'Pexels'`, `'unsplash'` → `'Unsplash'`
+ * (legacy historical rows still render correctly), and falls
+ * through to the raw id for any unknown future provider.
  */
 function UnsplashPickerThumbnail({
   photo,
@@ -255,15 +261,18 @@ function UnsplashPickerThumbnail({
   disabled,
 }: UnsplashPickerThumbnailProps) {
   const photographerName = photo.photographerName?.trim() || null;
+  /* v8 ignore start -- defensive: providerDisplayLabel only returns "" for empty/null/non-string input, but `photo.provider` is typed `ImageProviderId` (string) and required by the picker results pipe; the `|| "image library"` fallback guards against a malformed jsonb row but is unreachable from the typed call path */
+  const providerLabel = providerDisplayLabel(photo.provider) || "image library";
+  /* v8 ignore stop */
   const altText =
     photo.altDescription ||
     photo.description ||
     (photographerName
-      ? `Unsplash photo by ${photographerName}`
-      : "Unsplash photo");
+      ? `Photo by ${photographerName}`
+      : `Image from ${providerLabel}`);
   const ariaLabel = photographerName
-    ? `Select Unsplash photo by ${photographerName}`
-    : "Select this Unsplash photo";
+    ? `Select photo by ${photographerName}`
+    : "Select this photo";
 
   return (
     <li className="flex flex-col gap-1.5 text-xs">
@@ -281,7 +290,7 @@ function UnsplashPickerThumbnail({
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- third-party
             URL; we don't want next/image's domain allow-list pinned to
-            unsplash.com just for the picker */}
+            stock-photo CDNs just for the picker */}
         <img
           src={photo.thumbUrl}
           alt={altText}
@@ -302,7 +311,7 @@ function UnsplashPickerThumbnail({
           </a>
         ) : (
           <span className="text-foreground">
-            {photographerName ?? "an Unsplash photographer"}
+            {photographerName ?? `a ${providerLabel} photographer`}
           </span>
         )}{" "}
         on{" "}
@@ -313,10 +322,10 @@ function UnsplashPickerThumbnail({
             rel="noopener noreferrer"
             className="text-foreground hover:underline"
           >
-            Unsplash
+            {providerLabel}
           </a>
         ) : (
-          <span className="text-foreground">Unsplash</span>
+          <span className="text-foreground">{providerLabel}</span>
         )}
       </p>
     </li>
