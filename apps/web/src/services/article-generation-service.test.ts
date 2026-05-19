@@ -4,11 +4,70 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(),
 }));
 
-vi.mock("@/lib/ai/provider", () => ({
-  generateIdeas: vi.fn(),
-  generateArticleDraft: vi.fn(),
-  IDEA_DEFAULT_COUNT: 10,
-}));
+vi.mock("@/lib/ai/provider", () => {
+  // Stand-in for the SDK's NoObjectGeneratedError so tests can throw
+  // a recognized schema-failure shape without importing the real SDK.
+  // The detection helper below `instanceof`-checks against
+  // SchemaRetryFailedError directly (not this stand-in), so the
+  // class identity doesn't matter for orchestration coverage —
+  // only `isStructuredArticleGenerationSchemaError` needs to
+  // recognize the error message.
+  class SchemaRetryFailedError extends Error {
+    readonly kind = "schema_mismatch" as const;
+    readonly retried = true as const;
+    readonly retryCount: number;
+    readonly originalError: unknown;
+    readonly retryError: unknown;
+    readonly originalErrorMessage: string;
+    readonly finalErrorMessage: string;
+    constructor(opts: {
+      originalError: unknown;
+      retryError: unknown;
+      retryCount: number;
+    }) {
+      const originalErrorMessage =
+        opts.originalError instanceof Error
+          ? opts.originalError.message
+          : String(opts.originalError);
+      const finalErrorMessage =
+        opts.retryError instanceof Error
+          ? opts.retryError.message
+          : String(opts.retryError);
+      super(
+        `Article schema retry failed (attempt ${opts.retryCount + 1}). ` +
+          `Original: ${originalErrorMessage}. Final: ${finalErrorMessage}.`,
+      );
+      this.name = "SchemaRetryFailedError";
+      this.retryCount = opts.retryCount;
+      this.originalError = opts.originalError;
+      this.retryError = opts.retryError;
+      this.originalErrorMessage = originalErrorMessage;
+      this.finalErrorMessage = finalErrorMessage;
+    }
+  }
+  // Match the real helper's narrowness contract — only flag values
+  // whose message matches the canonical schema-failure phrases OR
+  // are SchemaRetryFailedError instances.
+  const SCHEMA_PATTERNS = [
+    /\bno object generated\b/i,
+    /\bresponse did not match (the )?schema\b/i,
+    /\bschema validation (failed|failure)\b/i,
+    /\binvalid structured output\b/i,
+  ];
+  const isStructuredArticleGenerationSchemaError = (err: unknown): boolean => {
+    if (err instanceof SchemaRetryFailedError) return true;
+    if (err instanceof Error)
+      return SCHEMA_PATTERNS.some((p) => p.test(err.message));
+    return false;
+  };
+  return {
+    generateIdeas: vi.fn(),
+    generateArticleDraft: vi.fn(),
+    IDEA_DEFAULT_COUNT: 10,
+    isStructuredArticleGenerationSchemaError,
+    SchemaRetryFailedError,
+  };
+});
 
 // Mock the image picker so we can drive its return value per test.
 // Defaults to a healthy "no images picked + no warnings" result so
@@ -53,7 +112,11 @@ vi.mock("./team-billing-service", () => ({
 }));
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateArticleDraft, generateIdeas } from "@/lib/ai/provider";
+import {
+  generateArticleDraft,
+  generateIdeas,
+  SchemaRetryFailedError,
+} from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 import { pickImagesForArticle } from "./article-image-picker-service";
 import {
@@ -2110,6 +2173,10 @@ const draftStub = {
   completionTokens: 1800,
   cachedReadTokens: 0,
   cachedWriteTokens: 0,
+  // One-shot success shape from `generateArticleDraft`. Tests that
+  // exercise the schema-repair retry path override these per-call.
+  retried: false,
+  retryCount: 0,
 };
 
 const ideaRowStub = {
@@ -2629,6 +2696,246 @@ describe("generateArticleDraftFromIdea", () => {
     const output = refundedUpdate!.output as Record<string, unknown>;
     expect(output.refundedCredits).toBe(5);
     expect(typeof output.refundedAt).toBe("string");
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Schema-repair retry — Part B/C/F regression tests for the
+  // autopilot QA bug ("No object generated: response did not match
+  // schema."). The orchestration must:
+  //   1. Pass `retried`/`retryCount` through to `output` on success.
+  //   2. Stamp `failureKind: 'schema_mismatch'` + retry metadata
+  //      onto `output` BEFORE marking the job failed when the
+  //      retry is exhausted.
+  //   3. Refund tokens once + log usage once regardless of retries.
+  //   4. Never call generateArticleDraft more than once from the
+  //      orchestration layer (the retry lives inside the helper —
+  //      duplicating it here would double-bill Synth tokens).
+  // ─────────────────────────────────────────────────────────────────
+
+  it("propagates retried=true / retryCount=1 onto the completed job's output when the schema-repair retry succeeded", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockResolvedValueOnce({
+      title: "Retry winner",
+      slug: "retry-winner",
+      excerpt: "x".repeat(20),
+      metaDescription: "m".repeat(50),
+      contentMarkdown: "# Retry winner\n\n" + "body ".repeat(80),
+      targetKeyword: "retry",
+      wordCount: 1500,
+      outline: [{ heading: "H2", summary: "Summary." }],
+      model: "claude-test",
+      promptTokens: 100,
+      completionTokens: 200,
+      cachedReadTokens: null,
+      cachedWriteTokens: null,
+      retried: true,
+      retryCount: 1,
+    } as never);
+
+    await generateArticleDraftFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    // Locate the completion update (status='completed' with `output`).
+    const completionUpdate = client.__chains
+      .article_jobs!.update.mock.calls.map((c) => c[0])
+      .find((u) => u.status === "completed");
+    expect(completionUpdate).toBeDefined();
+    const completionOutput = completionUpdate!.output as Record<
+      string,
+      unknown
+    >;
+    expect(completionOutput.retried).toBe(true);
+    expect(completionOutput.retryCount).toBe(1);
+
+    // The orchestration calls generateArticleDraft EXACTLY ONCE —
+    // the retry happens inside the helper, not at this layer.
+    expect(mockedGenerateArticleDraft).toHaveBeenCalledOnce();
+    // One consume + one usage event regardless of retry.
+    expect(mockedConsumeTeamTokens).toHaveBeenCalledOnce();
+    expect(mockedRefundTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("does NOT stamp retried/retryCount on output for a one-shot success (keeps output clean for the common path)", async () => {
+    const client = makeArticleOrchestrationClient();
+    // Default mock from `beforeEach` returns `retried: false`.
+
+    await generateArticleDraftFromIdea({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      ideaId: "idea-1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    const completionUpdate = client.__chains
+      .article_jobs!.update.mock.calls.map((c) => c[0])
+      .find((u) => u.status === "completed");
+    const completionOutput = completionUpdate!.output as Record<
+      string,
+      unknown
+    >;
+    // Neither key is set on the happy path — keeps the recent-jobs
+    // queue clean. Operators only see retry metadata on jobs that
+    // actually needed it.
+    expect(completionOutput).not.toHaveProperty("retried");
+    expect(completionOutput).not.toHaveProperty("retryCount");
+  });
+
+  it("stamps failureKind=schema_mismatch + retried=true + originalErrorMessage + finalErrorMessage when SchemaRetryFailedError reaches the catch block", async () => {
+    const client = makeArticleOrchestrationClient();
+    const wrapped = new SchemaRetryFailedError({
+      originalError: new Error(
+        "No object generated: response did not match schema (slug)",
+      ),
+      retryError: new Error(
+        "No object generated: response did not match schema (slug)",
+      ),
+      retryCount: 1,
+    });
+    mockedGenerateArticleDraft.mockRejectedValueOnce(wrapped);
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/Article schema retry failed/);
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+
+    // The catch block stamps the structured failure metadata via
+    // mergeArticleJobOutput BEFORE failArticleAndJob marks the row
+    // failed. Find the update that carries the schema metadata.
+    const schemaUpdate = updateCalls.find((u) => {
+      const out = u.output as Record<string, unknown> | undefined;
+      return out?.failureKind === "schema_mismatch";
+    });
+    expect(schemaUpdate).toBeDefined();
+    const out = schemaUpdate!.output as Record<string, unknown>;
+    expect(out.failureKind).toBe("schema_mismatch");
+    expect(out.retried).toBe(true);
+    expect(out.retryCount).toBe(1);
+    expect(typeof out.originalErrorMessage).toBe("string");
+    expect(typeof out.finalErrorMessage).toBe("string");
+    expect(out.originalErrorMessage).toMatch(/No object generated/);
+    expect(out.finalErrorMessage).toMatch(/No object generated/);
+
+    // Article + job still marked failed.
+    expect(client.__chains.articles!.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        error_message: expect.stringContaining("schema retry failed"),
+      }),
+    );
+    expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
+    // Refund still fires (consume happened before the AI call).
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+  });
+
+  it("stamps failureKind=schema_mismatch + retried=false when the FIRST attempt's NoObjectGeneratedError surfaces directly (no retry happened — defensive future path)", async () => {
+    // Today the helper always retries on NoObjectGeneratedError, so
+    // this branch fires only when the helper bubbles a bare schema
+    // error WITHOUT wrapping it (e.g. a future test seam or a
+    // NoObjectGeneratedError thrown from a code path we haven't
+    // wired the retry into yet). Pin the orchestration's behavior
+    // so the `retried: false` branch is exercised.
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockRejectedValueOnce(
+      new Error("No object generated: bare schema failure"),
+    );
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/No object generated/);
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+    const schemaUpdate = updateCalls.find((u) => {
+      const out = u.output as Record<string, unknown> | undefined;
+      return out?.failureKind === "schema_mismatch";
+    });
+    expect(schemaUpdate).toBeDefined();
+    const out = schemaUpdate!.output as Record<string, unknown>;
+    expect(out.failureKind).toBe("schema_mismatch");
+    expect(out.retried).toBe(false);
+    expect(out.retryCount).toBe(0);
+    expect(out.originalErrorMessage).toBe(out.finalErrorMessage);
+  });
+
+  it("does NOT stamp failureKind on a non-schema failure (rate limit / auth / network)", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockRejectedValueOnce(
+      new Error("rate_limit_exceeded"),
+    );
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/rate_limit_exceeded/);
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+    const schemaUpdate = updateCalls.find((u) => {
+      const out = u.output as Record<string, unknown> | undefined;
+      return out?.failureKind === "schema_mismatch";
+    });
+    expect(schemaUpdate).toBeUndefined();
+    // Refund still fires.
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT duplicate the article placeholder row on schema-retry failure (queue inserts once, run doesn't re-insert)", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockRejectedValueOnce(
+      new SchemaRetryFailedError({
+        originalError: new Error("No object generated"),
+        retryError: new Error("No object generated"),
+        retryCount: 1,
+      }),
+    );
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow();
+
+    // ONE article insert — the queue's placeholder. Run phase
+    // never re-inserts, only updates.
+    expect(client.__chains.articles!.insert).toHaveBeenCalledOnce();
   });
 
   it("fails the job (no consume, no refund) when the article placeholder insert fails in the queue phase", async () => {

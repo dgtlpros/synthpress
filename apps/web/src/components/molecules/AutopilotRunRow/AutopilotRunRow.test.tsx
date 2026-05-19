@@ -170,9 +170,10 @@ describe("AutopilotRunRow", () => {
     ).not.toBeInTheDocument();
     // Raw key is still pinned on a `data-*` attribute so e2e tests
     // and analytics integrations can target the underlying value.
-    expect(
-      screen.getByTestId("autopilot-run-run-1-reason"),
-    ).toHaveAttribute("data-reason-key", "daily_article_cap_reached");
+    expect(screen.getByTestId("autopilot-run-run-1-reason")).toHaveAttribute(
+      "data-reason-key",
+      "daily_article_cap_reached",
+    );
   });
 
   it("renders backpressure copy (NOT plan-cap copy) for active_article_job_limit_reached", () => {
@@ -225,9 +226,7 @@ describe("AutopilotRunRow", () => {
         })}
       />,
     );
-    expect(
-      screen.getByText(/Midjourney Quota Reached/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Midjourney Quota Reached/)).toBeInTheDocument();
   });
 
   it("does not render the reason line when output.reason is missing", () => {

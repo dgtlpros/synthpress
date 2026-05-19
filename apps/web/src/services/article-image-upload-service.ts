@@ -262,6 +262,126 @@ export async function listRecentImageUploadsForBlog(
   return out;
 }
 
+export interface ListRecentImageKeysForBlogInput {
+  blogId: string;
+  /**
+   * Article whose own image rows should NOT be considered "used"
+   * — autopilot is currently picking for this article, so the
+   * picker's per-article dedupe (existing rows seeded inside
+   * `pickImagesForArticle`) handles same-article duplicates.
+   * Including the current article here would double-count and
+   * possibly block the picker from re-using a manual featured
+   * pick for a section image (rare but possible).
+   */
+  excludeArticleId?: string;
+  /**
+   * When supplied, only seed keys for rows whose `provider`
+   * column matches. Useful when the active provider is Pexels
+   * but the blog has historical Unsplash rows that we don't want
+   * to dedupe against (Pexels and Unsplash live in disjoint id
+   * spaces, so a `pexels:123` photo won't ever collide with an
+   * `unsplash:abc` row's `provider:photo_id` key — but the URL
+   * key `url:<imageUrl>` is global and would still match cross-
+   * provider hosts coincidentally). Default unfiltered.
+   */
+  providerId?: string;
+  /** Lookback window in days. Defaults to 30 (~1 month of posts). */
+  sinceDays?: number;
+  /**
+   * Maximum rows to read. Defaults to 250 — enough headroom for
+   * a blog publishing 5 articles/day × 6 images/article × 30
+   * days = 900 images, but capped to avoid pulling the entire
+   * table on busy blogs. The diversity guarantee softens past
+   * the cap (older images outside the limit can still be
+   * re-picked); operators can raise the limit per-call if
+   * needed.
+   */
+  limit?: number;
+  /** Override `Date.now()` so tests can pin the lookback window. */
+  now?: Date;
+  client?: Client;
+}
+
+/**
+ * Returns the dedupe-key set the autopilot image picker should
+ * seed `usedImageKeys` with so it doesn't pick photos the blog
+ * already used in another recent article.
+ *
+ * Keys mirror what `pickImagesForArticle` builds per candidate
+ * photo (see `imageDedupeKeys` in `article-image-picker-service.ts`):
+ *
+ *   * `provider:<provider>:<providerPhotoId>` — strong identity
+ *     key. Only emitted when both columns are non-empty (manual
+ *     paste rows often have a null `provider_photo_id` and we
+ *     don't want a key like `pexels:`).
+ *   * `url:<imageUrl>` — fallback key. Catches the case where two
+ *     provider rows coincidentally point at the same hosted URL
+ *     (rare in practice; most useful for legacy Unsplash data
+ *     where the provider id schema changed).
+ *
+ * Rows missing `image_url` (corrupted seeds, future
+ * forward-compat) are skipped entirely — they contribute no key.
+ *
+ * Server-only: this helper reads via the supplied (or admin)
+ * client and runs through the same RLS posture as the rest of
+ * the service. The keys themselves are tiny strings, but the
+ * read happens on the orchestration code path so client bundles
+ * never see this module.
+ */
+export async function listRecentImageKeysForBlog(
+  input: ListRecentImageKeysForBlogInput,
+): Promise<Set<string>> {
+  const supabase = input.client ?? createAdminClient();
+  const sinceDays = input.sinceDays ?? 30;
+  const limit = input.limit ?? 250;
+  const now = input.now ?? new Date();
+  const cutoffIso = new Date(
+    now.getTime() - sinceDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  let query = supabase
+    .from("article_image_uploads")
+    .select("provider, provider_photo_id, image_url, article_id")
+    .eq("blog_id", input.blogId)
+    .gte("created_at", cutoffIso);
+  if (input.excludeArticleId) {
+    query = query.neq("article_id", input.excludeArticleId);
+  }
+  if (input.providerId) {
+    query = query.eq("provider", input.providerId);
+  }
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const keys = new Set<string>();
+  const rows =
+    (data as
+      | Pick<
+          ArticleImageUploadRow,
+          "provider" | "provider_photo_id" | "image_url" | "article_id"
+        >[]
+      | null) ?? [];
+  for (const row of rows) {
+    // Drop rows with a missing/empty image_url — there's no URL
+    // key to emit AND such rows are usually corrupted seeds.
+    // The provider+id key would still be emittable but without
+    // the URL key the dedupe is weaker; safer to skip the row
+    // entirely than emit a half-complete signature.
+    if (!row.image_url || !row.image_url.trim()) continue;
+    keys.add(`url:${row.image_url}`);
+    if (
+      row.provider &&
+      row.provider_photo_id &&
+      row.provider_photo_id.trim().length > 0
+    ) {
+      keys.add(`${row.provider}:${row.provider_photo_id}`);
+    }
+  }
+  return keys;
+}
+
 /**
  * Returns every section-image row attached to an article, ordered
  * by `sort_order` then `created_at` (oldest first). Powers:

@@ -159,10 +159,33 @@ export function ArticleDetail({
         ) : null}
       </header>
 
-      {article.status === "failed" && article.errorMessage ? (
+      {article.status === "failed" ? (
         <Card className="border-error/50 bg-error/5">
-          <p className="text-sm font-semibold text-error">Generation failed</p>
-          <p className="mt-1 text-sm text-error/80">{article.errorMessage}</p>
+          <p className="text-sm font-semibold text-error">
+            {hasBody(article)
+              ? "Generation failed"
+              : "Generation failed before article content was created"}
+          </p>
+          {article.errorMessage ? (
+            <p className="mt-1 text-sm text-error/80">{article.errorMessage}</p>
+          ) : null}
+          {!hasBody(article) ? (
+            // No body means there's nothing to edit / publish — point
+            // the user at the regenerate path instead of the
+            // misleading "Click Edit" empty-state below. The retry
+            // surface today lives on the **Ideas** tab: click
+            // **Generate article** on the source idea card and the
+            // app queues a fresh job + new article row. We don't
+            // expose an inline regenerate button on this page yet —
+            // a future PR can add it once we have the action wired.
+            <p className="mt-2 text-xs text-error/80">
+              The article body is empty because generation failed before any
+              content was saved. Open this article&apos;s source idea on the
+              <span className="mx-1 font-semibold">Ideas</span>tab and click
+              <span className="mx-1 font-semibold">Generate article</span>to try
+              again. Sending to WordPress is disabled until a body is generated.
+            </p>
+          ) : null}
         </Card>
       ) : null}
 
@@ -243,16 +266,39 @@ export function ArticleDetail({
               sectionImagesByKey={article.sectionImagesByKey}
             />
           ) : (
+            // Three empty-state variants:
+            //   * `generating` — "still in progress, refresh"
+            //   * `failed`     — "generation failed, regenerate from
+            //                    the Ideas tab" (the failure card
+            //                    above already explains why; this
+            //                    avoids the misleading "Click Edit"
+            //                    copy that would otherwise suggest
+            //                    the user can hand-write a body and
+            //                    publish it)
+            //   * everything else — "Click Edit to add Markdown content."
             <p className="text-sm text-muted">
-              No body yet.{" "}
               {article.status === "generating"
                 ? "Generation is still in progress — refresh in a moment."
-                : "Click Edit to add Markdown content."}
+                : article.status === "failed"
+                  ? "No body was generated. See the failure card above for next steps."
+                  : "No body yet. Click Edit to add Markdown content."}
             </p>
           )}
         </div>
       </Card>
     </article>
+  );
+}
+
+/**
+ * Returns true when the article has a non-empty Markdown body.
+ * Mirrors the gate `ArticleDetailConnector` uses to compute
+ * `hasBody` for the WordPress publish card so the failure-card
+ * copy and the publish-disabled state stay in sync.
+ */
+function hasBody(article: ArticleDetailData): boolean {
+  return Boolean(
+    article.contentMarkdown && article.contentMarkdown.trim().length > 0,
   );
 }
 

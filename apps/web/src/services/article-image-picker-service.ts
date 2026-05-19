@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 import { extractArticleSections } from "@/lib/extract-article-sections";
 import {
+  listRecentImageKeysForBlog,
   listSectionImageRowsForArticle,
   recordArticleImageUpload,
   type SelectedImageMetadata,
@@ -46,7 +47,7 @@ import {
  *     by clearing their picks + re-running the picker without us
  *     overwriting an in-progress manual selection.
  *
- * Diversity (v12):
+ * Diversity:
  *   The featured + every section pick share a single
  *   `usedImageKeys: Set<string>`. Each successful pick adds two
  *   keys to it: a strong `provider:providerPhotoId` key AND a
@@ -59,6 +60,15 @@ import {
  *   same article looked obviously stale, which is why we widen
  *   `perPage` to {@link AUTO_IMAGE_SEARCH_PER_PAGE} (15) so the
  *   provider has room to surface alternatives.
+ *
+ *   Cross-article diversity (v13): the `usedImageKeys` set is
+ *   ALSO seeded at the start of `pickImagesForArticle` from
+ *   `article_image_uploads` rows belonging to OTHER recent
+ *   articles in the same blog (see
+ *   {@link RECENT_IMAGE_DIVERSITY_WINDOW_DAYS} +
+ *   {@link RECENT_IMAGE_DIVERSITY_LIMIT}). Without that seed,
+ *   Pexels' top result for a recurring keyword could land on
+ *   five articles in a row.
  *
  * Query derivation:
  *   * Featured: `article.target_keyword` → `article.title` → `blog.niche`.
@@ -81,6 +91,35 @@ import {
  * because the user only selects one image per click.
  */
 export const AUTO_IMAGE_SEARCH_PER_PAGE = 15;
+
+/**
+ * Lookback window (in days) used to seed `usedImageKeys` with
+ * images already chosen for OTHER recent articles in the same
+ * blog. Stops Pexels' top hit for a recurring keyword (e.g. a
+ * blog's target niche) from landing as the featured image on
+ * five consecutive posts.
+ *
+ * 30 days balances diversity against the provider's library
+ * size: too short and the same photo cycles back too quickly;
+ * too long and a small-niche blog runs out of fresh candidates
+ * mid-month. Operators can override per-call via the input;
+ * there's no settings UI today.
+ */
+export const RECENT_IMAGE_DIVERSITY_WINDOW_DAYS = 30;
+
+/**
+ * Maximum number of recent image rows we read to build the
+ * cross-article dedupe seed. Capped to keep the read fast on
+ * busy blogs and to avoid pulling the entire table.
+ *
+ * Sizing heuristic: 5 articles/day × 6 images/article × 30 days
+ * = 900 images for a heavy blog, but a 250-row cap covers ~6
+ * weeks at a more realistic 1 article/day × 6 images/article =
+ * 180 images. The diversity guarantee weakens past the cap
+ * (older images outside the limit can be re-picked), which we
+ * accept for v1.
+ */
+export const RECENT_IMAGE_DIVERSITY_LIMIT = 250;
 
 type Client = SupabaseClient<Database>;
 
@@ -328,11 +367,28 @@ function pickFirstUnused(
  * photo was found. The caller writes a single warning per failed
  * pick (not one per query) so the autopilot-warnings list stays
  * digestible.
+ *
+ * Three failure variants:
+ *   * `provider_error` — the provider threw an `ImageSearchError`
+ *     (rate limit, missing access key, malformed response). We
+ *     short-circuit the chain so a 429 on query #1 doesn't burn
+ *     the rest of the rate-limit window.
+ *   * `no_results` — every query in the chain returned an empty
+ *     candidate list. Suggests a too-niche query, a typo, or a
+ *     genuinely small library for the topic.
+ *   * `all_used` — the provider returned candidates for at least
+ *     one query, but every candidate was already in
+ *     `usedImageKeys` (recent-blog seed + within-article picks).
+ *     Distinct from `no_results` because the recovery hint is
+ *     different: "library is small / blog has saturated the
+ *     provider's top hits for this niche" not "your query is
+ *     wrong".
  */
 type FallbackSearchOutcome =
   | { photo: NormalizedImageSearchResult; query: string }
   | { photo: null; reason: "provider_error"; details: string }
-  | { photo: null; reason: "no_results"; lastQuery: string };
+  | { photo: null; reason: "no_results"; lastQuery: string }
+  | { photo: null; reason: "all_used"; lastQuery: string };
 
 /**
  * Walks a query chain calling `searchImages` in sequence until one
@@ -347,8 +403,8 @@ type FallbackSearchOutcome =
  *
  * `usedImageKeys` is read-only inside this function. The caller
  * adds the chosen photo's keys to the set after deciding to commit
- * the pick (so a "no_results" outcome doesn't accidentally poison
- * the set with photos we ended up not using).
+ * the pick (so a `no_results` / `all_used` outcome doesn't
+ * accidentally poison the set with photos we ended up not using).
  */
 async function searchWithFallback(
   provider: ImageSearchProvider,
@@ -357,6 +413,11 @@ async function searchWithFallback(
   fetchImpl?: typeof fetch,
 ): Promise<FallbackSearchOutcome> {
   let lastQuery = "";
+  // Tracks whether ANY query returned at least one candidate
+  // photo. Lets us distinguish `no_results` (zero photos
+  // anywhere in the chain) from `all_used` (photos came back
+  // but every one was filtered out by the recent-blog dedupe).
+  let sawAnyCandidate = false;
   for (const query of queries) {
     lastQuery = query;
     try {
@@ -365,6 +426,7 @@ async function searchWithFallback(
         perPage: AUTO_IMAGE_SEARCH_PER_PAGE,
         fetchImpl,
       });
+      if (result.results.length > 0) sawAnyCandidate = true;
       const photo = pickFirstUnused(result.results, usedImageKeys);
       if (photo) return { photo, query };
     } catch (err) {
@@ -377,7 +439,11 @@ async function searchWithFallback(
       };
     }
   }
-  return { photo: null, reason: "no_results", lastQuery };
+  return {
+    photo: null,
+    reason: sawAnyCandidate ? "all_used" : "no_results",
+    lastQuery,
+  };
 }
 
 /**
@@ -468,6 +534,13 @@ async function pickSectionImages(opts: {
       if (outcome.reason === "provider_error") {
         warnings.push(
           `Skipped section "${section.sectionHeading}": provider search failed (${outcome.details}).`,
+        );
+      } else if (outcome.reason === "all_used") {
+        // Provider returned candidates but they all matched the
+        // dedupe set — typically because the recent-blog seed
+        // has consumed the provider's top hits for this niche.
+        warnings.push(
+          `Skipped section "${section.sectionHeading}": no unused images found in recent blog history.`,
         );
       } else {
         warnings.push(
@@ -586,9 +659,48 @@ export async function pickImagesForArticle(
 
   // Shared dedupe set for the whole article. Mutated by both
   // `pickFeaturedImageInner` and `pickSectionImages` so they pick
-  // disjoint photos. Seeded with any pre-existing featured /
-  // section picks so a partial re-run also stays disjoint.
+  // disjoint photos. Three sources of seed data feed this set:
+  //
+  //   1. Cross-article diversity (this PR, v13): every image
+  //      already chosen for ANOTHER recent article in the same
+  //      blog. Stops Pexels' top hit for a recurring keyword
+  //      from landing on five posts in a row. Bounded by
+  //      {@link RECENT_IMAGE_DIVERSITY_WINDOW_DAYS} +
+  //      {@link RECENT_IMAGE_DIVERSITY_LIMIT} so the read stays
+  //      cheap on busy blogs.
+  //   2. Within-article re-pick guard: existing featured /
+  //      section rows from THIS article (added inside
+  //      `pickFeaturedImageInner` + `pickSectionImages` when
+  //      they read existing rows for the `force=false` short-
+  //      circuit). Keeps a partial re-run from picking a manual
+  //      featured photo as a section image.
+  //   3. Within-pick disjoint guard: each successful pick adds
+  //      its own keys before the next pick runs.
+  //
+  // The recent-blog seed is best-effort: a transient supabase
+  // failure here would weaken diversity, not break the picker.
+  // We catch and warn rather than aborting the run — the
+  // article's tokens are already settled and users would rather
+  // see a slightly-repeated image than no images at all.
   const usedImageKeys = new Set<string>();
+  try {
+    const recentKeys = await listRecentImageKeysForBlog({
+      blogId: input.blogId,
+      excludeArticleId: input.articleId,
+      providerId: input.providerId ?? providerId,
+      sinceDays: RECENT_IMAGE_DIVERSITY_WINDOW_DAYS,
+      limit: RECENT_IMAGE_DIVERSITY_LIMIT,
+      client,
+    });
+    for (const key of recentKeys) usedImageKeys.add(key);
+    /* v8 ignore start -- defensive: recent-history seed failure is best-effort; the picker continues without cross-article diversity rather than failing the article job */
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(
+      `Recent-image diversity seed failed (${message}); continuing without cross-article dedupe.`,
+    );
+  }
+  /* v8 ignore stop */
 
   // Featured. Wrapped in try so an unexpected DB write error (e.g.
   // RLS misconfig) doesn't kill the section-image pass.
@@ -703,6 +815,10 @@ async function pickFeaturedImageInner(opts: {
     if (outcome.reason === "provider_error") {
       warnings.push(
         `Skipped featured image: provider search failed (${outcome.details}).`,
+      );
+    } else if (outcome.reason === "all_used") {
+      warnings.push(
+        "Skipped featured image: no unused images found in recent blog history.",
       );
     } else {
       warnings.push(

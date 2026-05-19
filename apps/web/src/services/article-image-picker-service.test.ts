@@ -31,6 +31,7 @@ vi.mock("@/services/image-providers/types", () => {
 vi.mock("./article-image-upload-service", () => ({
   recordArticleImageUpload: vi.fn(),
   listSectionImageRowsForArticle: vi.fn(),
+  listRecentImageKeysForBlog: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -41,6 +42,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getImageProvider } from "@/services/image-providers/registry";
 import { ImageSearchError } from "@/services/image-providers/types";
 import {
+  listRecentImageKeysForBlog,
   listSectionImageRowsForArticle,
   recordArticleImageUpload,
 } from "./article-image-upload-service";
@@ -49,6 +51,7 @@ import { pickImagesForArticle } from "./article-image-picker-service";
 const mockedGetProvider = vi.mocked(getImageProvider);
 const mockedRecord = vi.mocked(recordArticleImageUpload);
 const mockedListSections = vi.mocked(listSectionImageRowsForArticle);
+const mockedListRecentKeys = vi.mocked(listRecentImageKeysForBlog);
 const mockedCreateAdmin = vi.mocked(createAdminClient);
 
 const mockedSearchImages = vi.fn();
@@ -202,6 +205,12 @@ beforeEach(() => {
   mockedGetProvider.mockReturnValue(fakeProvider as never);
   mockedListSections.mockResolvedValue([]);
   mockedRecord.mockResolvedValue({} as never);
+  // Default the recent-blog diversity seed to an empty set so
+  // tests that don't care about cross-article dedupe behave
+  // identically to the v12 picker. Tests that DO exercise the
+  // recent-history path override per-test via
+  // `mockedListRecentKeys.mockResolvedValueOnce(new Set([...]))`.
+  mockedListRecentKeys.mockResolvedValue(new Set<string>());
   // Reset the per-test photo-id counter so each test starts from
   // photo-1 / photo-2 / ... — keeps assertions on
   // `providerPhotoId` predictable when a test cares.
@@ -1358,10 +1367,15 @@ describe("pickImagesForArticle — auto-pick diversity", () => {
     // Every section image attempt only had PHOTO-A available, which
     // is now in the used set, so none committed.
     expect(result.sectionImagesSelected).toBe(0);
-    // Section warnings explain "no results" (the per-page candidate
-    // list collapsed after dedupe).
+    // Section warnings explain that all candidates were already
+    // used (the "all_used" outcome from `searchWithFallback`).
+    // Distinct from the genuine "no results from the provider"
+    // case so an operator can tell whether to broaden the niche
+    // or top up the provider's library.
     expect(result.warnings.length).toBeGreaterThan(0);
-    expect(result.warnings.join(" ")).toMatch(/no results/);
+    expect(result.warnings.join(" ")).toMatch(
+      /no unused images found in recent blog history/i,
+    );
 
     // Exactly ONE attribution-row insert happened (the featured pick).
     // No section row recorded for PHOTO-A.
@@ -1577,5 +1591,248 @@ describe("pickImagesForArticle — auto-pick diversity", () => {
     expect(sectionInserts[0]![0]!.metadata).toMatchObject({
       providerPhotoId: "fresh",
     });
+  });
+});
+
+// ============================================================================
+// Cross-article diversity (Part B/F): seeds usedImageKeys from the
+// blog's recent image rows so Pexels' top hit can't land on five
+// articles in a row.
+// ============================================================================
+
+describe("pickImagesForArticle — cross-article diversity (recent blog history)", () => {
+  it("calls listRecentImageKeysForBlog with the right input + seeds the dedupe set", async () => {
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(mockedListRecentKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blogId: "b1",
+        excludeArticleId: "a1",
+        // Default provider id from the registry mock.
+        providerId: "pexels",
+        sinceDays: 30,
+        limit: 250,
+      }),
+    );
+  });
+
+  it("forwards a custom providerId to the recent-keys helper (so Pexels picks dedupe against Pexels rows only)", async () => {
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      providerId: "unsplash",
+      client: client as never,
+    });
+
+    expect(mockedListRecentKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "unsplash" }),
+    );
+  });
+
+  it("skips a candidate whose providerPhotoId matches a recent blog image", async () => {
+    // The blog already used `pexels:recent-id` on a different
+    // article last week. Pexels' top hit for the featured query
+    // returns that same photo — the picker must skip it and fall
+    // through to the second result.
+    mockedListRecentKeys.mockResolvedValueOnce(new Set(["pexels:recent-id"]));
+    const RECENT = sampleResult({
+      providerPhotoId: "recent-id",
+      regularUrl: "https://x.com/recent.jpg",
+    });
+    const FRESH = sampleResult({
+      providerPhotoId: "fresh-id",
+      regularUrl: "https://x.com/fresh.jpg",
+    });
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [RECENT, FRESH],
+      totalResults: 2,
+    });
+    // Section searches return empty so the test doesn't depend
+    // on section behavior.
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    // Article update went with FRESH, not RECENT.
+    expect(client.__articleUpdates[0]?.featured_image_url).toBe(
+      "https://x.com/fresh.jpg",
+    );
+  });
+
+  it("skips a candidate whose regularUrl matches a recent blog image (URL-key fallback)", async () => {
+    // Same hosted URL as a previous article's image, but a
+    // different providerPhotoId. The URL-key dedupe must catch
+    // it (e.g. legacy migrations where the provider re-issued
+    // ids for the same Pexels CDN URL).
+    mockedListRecentKeys.mockResolvedValueOnce(
+      new Set(["url:https://x.com/dup.jpg"]),
+    );
+    const URL_DUP = sampleResult({
+      providerPhotoId: "different-id",
+      regularUrl: "https://x.com/dup.jpg",
+    });
+    const FRESH = sampleResult({
+      providerPhotoId: "fresh",
+      regularUrl: "https://x.com/fresh.jpg",
+    });
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [URL_DUP, FRESH],
+      totalResults: 2,
+    });
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(client.__articleUpdates[0]?.featured_image_url).toBe(
+      "https://x.com/fresh.jpg",
+    );
+  });
+
+  it("warns 'no unused images found in recent blog history' when ALL candidates collide with the recent seed", async () => {
+    // Recent seed contains both candidates; Pexels has nothing
+    // else for this query.
+    mockedListRecentKeys.mockResolvedValueOnce(
+      new Set([
+        "pexels:photo-a",
+        "url:https://x.com/a.jpg",
+        "pexels:photo-b",
+        "url:https://x.com/b.jpg",
+      ]),
+    );
+    const A = sampleResult({
+      providerPhotoId: "photo-a",
+      regularUrl: "https://x.com/a.jpg",
+    });
+    const B = sampleResult({
+      providerPhotoId: "photo-b",
+      regularUrl: "https://x.com/b.jpg",
+    });
+    // Every query in the fallback chain returns the same two
+    // already-used photos. The provider returned candidates,
+    // but they were all filtered out by dedupe.
+    mockedSearchImages.mockResolvedValue({
+      results: [A, B],
+      totalResults: 2,
+    });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.featuredSelected).toBe(false);
+    // Expected `Skipped featured image: no unused images found
+    // in recent blog history.` AND a similar message per section
+    // (intro + faq).
+    expect(
+      result.warnings.some((w) =>
+        /no unused images found in recent blog history/i.test(w),
+      ),
+    ).toBe(true);
+    // No article update for the featured columns.
+    expect(client.__articleUpdates).toEqual([]);
+  });
+
+  it("uses the existing 'no results' wording when the provider literally returns zero photos (NOT the all-used wording)", async () => {
+    // A genuinely empty Pexels response is a different signal
+    // from "candidates exist but all were filtered out". The
+    // `no_results` reason path must keep its original copy so
+    // operators can still distinguish provider-side empty from
+    // dedupe-saturated.
+    mockedListRecentKeys.mockResolvedValueOnce(new Set());
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    // No "all-used" copy when nothing was even considered.
+    expect(
+      result.warnings.some((w) =>
+        /no unused images found in recent blog history/i.test(w),
+      ),
+    ).toBe(false);
+    // Original "no results for X after N attempts" copy.
+    expect(result.warnings.some((w) => /no results for/i.test(w))).toBe(true);
+  });
+
+  it("preserves within-article duplicate avoidance even when the recent-blog seed is empty", async () => {
+    // Regression guard: the per-article guard from v12 still
+    // works the same way when there is nothing in the recent
+    // history. Featured pick adds its keys; section pick skips
+    // the same photo.
+    mockedListRecentKeys.mockResolvedValueOnce(new Set());
+    const SHARED = sampleResult({
+      providerPhotoId: "shared",
+      regularUrl: "https://x.com/shared.jpg",
+    });
+    // Featured returns SHARED. Section searches return ONLY
+    // SHARED → must be skipped, no section image committed.
+    mockedSearchImages.mockResolvedValue({
+      results: [SHARED],
+      totalResults: 1,
+    });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+    expect(result.featuredSelected).toBe(true);
+    expect(result.sectionImagesSelected).toBe(0);
+  });
+
+  it("treats a recent-history seed failure as a soft warning and continues without cross-article dedupe", async () => {
+    mockedListRecentKeys.mockRejectedValueOnce(
+      new Error("recent_keys_select_boom"),
+    );
+    // With an empty seed (the helper threw, so no keys land
+    // in the set), the picker can still spawn images — verify
+    // the article update fires and a warning is recorded.
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [sampleResult()],
+      totalResults: 1,
+    });
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.featuredSelected).toBe(true);
+    expect(
+      result.warnings.some((w) =>
+        /Recent-image diversity seed failed/i.test(w),
+      ),
+    ).toBe(true);
   });
 });

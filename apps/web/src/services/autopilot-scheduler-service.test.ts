@@ -898,7 +898,9 @@ describe("runAutopilotForBlog — article workflow spawning", () => {
     expect(PER_RUN_ARTICLE_CAP).toBe(5);
     expect(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG).toBe(3);
     // Active per-blog cap is the binding limit (3 < 5).
-    expect(out.articleJobsStarted).toBe(AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG);
+    expect(out.articleJobsStarted).toBe(
+      AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
+    );
     expect(mockedQueueArticle).toHaveBeenCalledTimes(
       AUTOPILOT_OPERATIONAL_ACTIVE_JOBS_PER_BLOG,
     );
@@ -3418,9 +3420,7 @@ describe("runBlogAutopilotScheduler — multi-blog launch scenarios", () => {
     });
 
     expect(out.status).toBe("skipped");
-    expect(out.reason).toBe(
-      AUTOPILOT_SKIP_REASONS.DAILY_ARTICLE_CAP_REACHED,
-    );
+    expect(out.reason).toBe(AUTOPILOT_SKIP_REASONS.DAILY_ARTICLE_CAP_REACHED);
     expect(mockedQueueArticle).not.toHaveBeenCalled();
   });
 });

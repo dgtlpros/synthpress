@@ -47,14 +47,8 @@ describe("getAutopilotSkipReasonLabel", () => {
       AUTOPILOT_SKIP_REASONS.BACKLOG_EMPTY_NO_BUDGET_FOR_IDEAS,
       "No approved ideas and no idea budget",
     ],
-    [
-      AUTOPILOT_SKIP_REASONS.IDEA_GENERATION_FAILED,
-      "Idea generation failed",
-    ],
-    [
-      AUTOPILOT_SKIP_REASONS.INSUFFICIENT_BALANCE,
-      "Insufficient token balance",
-    ],
+    [AUTOPILOT_SKIP_REASONS.IDEA_GENERATION_FAILED, "Idea generation failed"],
+    [AUTOPILOT_SKIP_REASONS.INSUFFICIENT_BALANCE, "Insufficient token balance"],
     [
       AUTOPILOT_SKIP_REASONS.INSUFFICIENT_TOKEN_BUDGET,
       "Daily token budget reached",
@@ -88,12 +82,12 @@ describe("getAutopilotSkipReasonLabel", () => {
   });
 
   it("falls back to title-cased copy for unknown snake_case reasons (forward-compat)", () => {
-    expect(
-      getAutopilotSkipReasonLabel("midjourney_quota_reached"),
-    ).toBe("Midjourney Quota Reached");
-    expect(
-      getAutopilotSkipReasonLabel("vector_index_unavailable"),
-    ).toBe("Vector Index Unavailable");
+    expect(getAutopilotSkipReasonLabel("midjourney_quota_reached")).toBe(
+      "Midjourney Quota Reached",
+    );
+    expect(getAutopilotSkipReasonLabel("vector_index_unavailable")).toBe(
+      "Vector Index Unavailable",
+    );
   });
 
   it("title-cases a single-word unknown reason", () => {
@@ -159,8 +153,7 @@ describe("formatAutopilotSkipReason", () => {
       formatAutopilotSkipReason("active_article_job_limit_reached").tone,
     ).toBe("default");
     expect(
-      formatAutopilotSkipReason("active_team_article_job_limit_reached")
-        .tone,
+      formatAutopilotSkipReason("active_team_article_job_limit_reached").tone,
     ).toBe("default");
   });
 
@@ -176,9 +169,9 @@ describe("formatAutopilotSkipReason", () => {
       "warning",
     );
     expect(formatAutopilotSkipReason("partial_failure").tone).toBe("warning");
-    expect(
-      formatAutopilotSkipReason("team_billing_unavailable").tone,
-    ).toBe("warning");
+    expect(formatAutopilotSkipReason("team_billing_unavailable").tone).toBe(
+      "warning",
+    );
     expect(
       formatAutopilotSkipReason("backlog_empty_no_budget_for_ideas").tone,
     ).toBe("warning");
@@ -205,9 +198,11 @@ describe("formatAutopilotSkipReason", () => {
       description: null,
       tone: "default",
     });
-    expect(
-      formatAutopilotSkipReason(99 as unknown as string),
-    ).toEqual({ label: null, description: null, tone: "default" });
+    expect(formatAutopilotSkipReason(99 as unknown as string)).toEqual({
+      label: null,
+      description: null,
+      tone: "default",
+    });
   });
 
   it("returns title-cased label + null description + default tone for unknown reasons", () => {

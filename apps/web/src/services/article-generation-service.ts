@@ -22,6 +22,8 @@ import {
   IDEA_DEFAULT_COUNT,
   generateArticleDraft,
   generateIdeas,
+  isStructuredArticleGenerationSchemaError,
+  SchemaRetryFailedError,
 } from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 import {
@@ -1865,6 +1867,14 @@ export async function runGenerateArticleFromIdeaJob(
         // helpers shape-check `output.wpPublish` defensively, so
         // omitting the key on the "didn't try" path is fine.
         ...(wpPublishResult ? { wpPublish: wpPublishResult } : {}),
+        // Schema-repair retry visibility. Stamped only when the
+        // first generation attempt threw a schema validation
+        // error and the second (stricter) attempt succeeded — the
+        // bulk of jobs land here as one-shot wins and skip both
+        // keys. See `lib/ai/provider.ts` for the retry policy.
+        ...(draft.retried
+          ? { retried: true, retryCount: draft.retryCount }
+          : {}),
       },
       client: supabase,
     });
@@ -1905,6 +1915,44 @@ export async function runGenerateArticleFromIdeaJob(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+
+    // If the error is a schema-mismatch failure (the AI SDK's
+    // `NoObjectGeneratedError` survived our one-shot repair retry
+    // OR a future SDK upgrade re-threw under a different class
+    // shape that the message-pattern detector still recognizes),
+    // stamp structured metadata onto the job's `output` BEFORE
+    // marking it failed. The recent-jobs queue + autopilot run
+    // drawer surface these keys so an operator can tell at a
+    // glance whether a retry was attempted and which Claude error
+    // shape we're actually hitting.
+    //
+    // Best-effort: a transient supabase blip on the merge would
+    // mask the original `err` from the outer caller. We swallow
+    // metadata-write failures in the same posture as the existing
+    // refund + fail-marking blocks below.
+    if (isStructuredArticleGenerationSchemaError(err)) {
+      const isRetryFailure = err instanceof SchemaRetryFailedError;
+      const originalErrorMessage = isRetryFailure
+        ? err.originalErrorMessage
+        : message;
+      const finalErrorMessage = isRetryFailure
+        ? err.finalErrorMessage
+        : message;
+      try {
+        await mergeArticleJobOutput(supabase, input.jobId, {
+          failureKind: "schema_mismatch",
+          retried: isRetryFailure,
+          retryCount: isRetryFailure ? err.retryCount : 0,
+          originalErrorMessage,
+          finalErrorMessage,
+        });
+        /* v8 ignore start -- defensive: secondary failure during failure-metadata stamp */
+      } catch {
+        // Swallow.
+      }
+      /* v8 ignore stop */
+    }
+
     try {
       await failArticleAndJob(supabase, input.articleId, input.jobId, message);
       /* v8 ignore start -- defensive: secondary failure during fail-marking */
@@ -2278,6 +2326,35 @@ async function markJobRefunded(
   jobId: string,
   refundedCredits: number,
 ): Promise<void> {
+  await mergeArticleJobOutput(client, jobId, {
+    refunded: true,
+    refundedCredits,
+    refundedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Read-then-write merge of an arbitrary patch into
+ * `article_jobs.output`. Used by:
+ *   * {@link markJobRefunded} — `refunded` / `refundedCredits` /
+ *     `refundedAt` after a refund settles.
+ *   * The schema-retry failure path in
+ *     {@link runGenerateArticleFromIdeaJob} — `failureKind` /
+ *     `retried` / `retryCount` / `originalErrorMessage` /
+ *     `finalErrorMessage` so an operator reading the failed job
+ *     can tell at a glance whether the schema-repair retry was
+ *     attempted.
+ *
+ * Read-then-write is safe because each job row has exactly one
+ * writer at a time (the workflow step). Concurrent writes from a
+ * stuck-job reconciler use `markJobRefunded` instead, which adds
+ * to the same map without colliding on these keys.
+ */
+async function mergeArticleJobOutput(
+  client: Client,
+  jobId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
   const { data, error: readErr } = await client
     .from("article_jobs")
     .select("output")
@@ -2297,9 +2374,7 @@ async function markJobRefunded(
     .update({
       output: {
         ...currentOutput,
-        refunded: true,
-        refundedCredits,
-        refundedAt: new Date().toISOString(),
+        ...patch,
       } as Json,
     })
     .eq("id", jobId);

@@ -219,7 +219,7 @@ async function main() {
     "  1. Trigger the autopilot scheduler (see docs/mvp-autopilot-qa.md):",
   );
   console.log(
-    "       curl -i -H \"Authorization: Bearer $CRON_SECRET\" http://localhost:3000/api/cron/autopilot",
+    '       curl -i -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/autopilot',
   );
   console.log(
     "  2. Watch blog_autopilot_runs.output.spawnedArticleJobIds grow per tick.",

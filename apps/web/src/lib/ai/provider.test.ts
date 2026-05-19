@@ -60,8 +60,11 @@ import {
   generateArticleDraft,
   generateIdeas,
   IDEA_DEFAULT_COUNT,
+  isStructuredArticleGenerationSchemaError,
   NoObjectGeneratedError,
   resolveAnthropic,
+  SchemaRetryFailedError,
+  STRICT_SCHEMA_REPAIR_INSTRUCTION,
 } from "./provider";
 import { AI_MODELS } from "./models";
 
@@ -379,7 +382,7 @@ describe("generateArticleDraft", () => {
     expect(callArg.prompt).toContain("Why durable execution matters for AI");
   });
 
-  it("returns the parsed draft together with the model id and token usage", async () => {
+  it("returns the parsed draft together with the model id, token usage, and retried=false on first-try success", async () => {
     const result = await generateArticleDraft({
       blogName: "Acme",
       settings: buildSettings(),
@@ -392,7 +395,12 @@ describe("generateArticleDraft", () => {
       completionTokens: 850,
       cachedReadTokens: 500,
       cachedWriteTokens: 0,
+      retried: false,
+      retryCount: 0,
     });
+    // One Claude call on the happy path — the retry only fires
+    // when the first attempt throws a schema error.
+    expect(generateTextMock).toHaveBeenCalledOnce();
   });
 
   it("normalizes missing token counts to null", async () => {
@@ -421,15 +429,130 @@ describe("generateArticleDraft", () => {
     expect(result.cachedWriteTokens).toBeNull();
   });
 
-  it("propagates SDK errors so the orchestration layer can decide what to do", async () => {
-    // We construct via the runtime mock (FakeNoObjectGeneratedError takes a
-    // string), but cast at the type-system level because the real SDK class
-    // signature is broader than what the mock needs.
-    const FakeError = NoObjectGeneratedError as unknown as new (
-      message: string,
-    ) => Error;
+  it("propagates non-schema SDK errors as-is (auth/rate-limit/network bypass the retry path)", async () => {
+    // A non-schema failure must NOT trigger the schema-repair
+    // retry — a stricter prompt won't fix an auth or rate-limit
+    // error, and burning a second Claude call would just delay
+    // the orchestration's refund. The error bubbles unchanged.
+    generateTextMock.mockRejectedValueOnce(new Error("rate_limit_exceeded"));
+
+    await expect(
+      generateArticleDraft({
+        blogName: "Acme",
+        settings: buildSettings(),
+      }),
+    ).rejects.toThrow(/rate_limit_exceeded/);
+    // ONE call — no retry.
+    expect(generateTextMock).toHaveBeenCalledOnce();
+  });
+});
+
+// ============================================================================
+// Schema-repair retry — Part B / regression for the autopilot QA bug
+// ============================================================================
+
+/**
+ * Helper to construct a fake `NoObjectGeneratedError` instance.
+ * The runtime mock above defined `FakeNoObjectGeneratedError` as
+ * the class behind the SDK export — this helper is the cleanest
+ * way to produce one from inside a test without re-importing the
+ * mock factory.
+ */
+function makeNoObjectGeneratedError(message: string): Error {
+  const Cls = NoObjectGeneratedError as unknown as new (m: string) => Error;
+  return new Cls(message);
+}
+
+describe("generateArticleDraft — schema-repair retry", () => {
+  it("retries once with the stricter schema-repair instruction when the first attempt throws NoObjectGeneratedError", async () => {
+    // First attempt → schema error.
     generateTextMock.mockRejectedValueOnce(
-      new FakeError("model returned non-JSON"),
+      makeNoObjectGeneratedError(
+        "No object generated: response did not match schema",
+      ),
+    );
+    // Second attempt → success (default mock).
+
+    const result = await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.retryCount).toBe(1);
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+
+    // The second call carries the stricter repair suffix in `system`.
+    const secondCall = generateTextMock.mock.calls[1]![0] as {
+      system: string;
+      prompt: string;
+    };
+    expect(secondCall.system).toContain(STRICT_SCHEMA_REPAIR_INSTRUCTION);
+    // First call must NOT carry the repair suffix.
+    const firstCall = generateTextMock.mock.calls[0]![0] as {
+      system: string;
+    };
+    expect(firstCall.system).not.toContain(STRICT_SCHEMA_REPAIR_INSTRUCTION);
+  });
+
+  it("returns the retried draft as a normal GeneratedArticleDraft (with retried=true)", async () => {
+    generateTextMock.mockRejectedValueOnce(
+      makeNoObjectGeneratedError("response did not match schema"),
+    );
+
+    const result = await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+
+    expect(result).toEqual({
+      ...draftStub,
+      model: AI_MODELS.articleGeneration,
+      promptTokens: 1500,
+      completionTokens: 850,
+      cachedReadTokens: 500,
+      cachedWriteTokens: 0,
+      retried: true,
+      retryCount: 1,
+    });
+  });
+
+  it("throws SchemaRetryFailedError when BOTH attempts fail with a schema error (carries both inner errors)", async () => {
+    const firstErr = makeNoObjectGeneratedError(
+      "No object generated: response did not match schema",
+    );
+    const secondErr = makeNoObjectGeneratedError(
+      "schema validation failed on field `slug`",
+    );
+    generateTextMock
+      .mockRejectedValueOnce(firstErr)
+      .mockRejectedValueOnce(secondErr);
+
+    let caught: SchemaRetryFailedError | undefined;
+    try {
+      await generateArticleDraft({
+        blogName: "Acme",
+        settings: buildSettings(),
+      });
+    } catch (err) {
+      caught = err as SchemaRetryFailedError;
+    }
+
+    expect(caught).toBeInstanceOf(SchemaRetryFailedError);
+    expect(caught?.kind).toBe("schema_mismatch");
+    expect(caught?.retried).toBe(true);
+    expect(caught?.retryCount).toBe(1);
+    expect(caught?.originalError).toBe(firstErr);
+    expect(caught?.retryError).toBe(secondErr);
+    expect(caught?.originalErrorMessage).toContain("No object generated");
+    expect(caught?.finalErrorMessage).toContain("schema validation failed");
+    // We made exactly two SDK calls.
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry when the FIRST error is non-schema (auth / rate limit / network)", async () => {
+    generateTextMock.mockRejectedValueOnce(
+      new Error("ECONNRESET: socket hang up"),
     );
 
     await expect(
@@ -437,7 +560,123 @@ describe("generateArticleDraft", () => {
         blogName: "Acme",
         settings: buildSettings(),
       }),
-    ).rejects.toThrow(/non-JSON/);
+    ).rejects.toThrow(/ECONNRESET/);
+    // No retry — the second mock isn't consumed.
+    expect(generateTextMock).toHaveBeenCalledOnce();
+  });
+
+  it("rethrows the retry's NEW error verbatim when the retry hits a non-schema failure (no SchemaRetryFailedError wrap)", async () => {
+    // First attempt: schema error → triggers the retry path.
+    generateTextMock.mockRejectedValueOnce(
+      makeNoObjectGeneratedError("No object generated"),
+    );
+    // Second attempt: provider rate-limits the retry → not a
+    // schema issue. We bubble the rate-limit error as-is so the
+    // orchestration's refund path treats it like any other
+    // non-schema failure.
+    generateTextMock.mockRejectedValueOnce(
+      new Error("rate_limit_exceeded on retry"),
+    );
+
+    await expect(
+      generateArticleDraft({
+        blogName: "Acme",
+        settings: buildSettings(),
+      }),
+    ).rejects.toThrow(/rate_limit_exceeded on retry/);
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recognizes a string-message schema error (forward-compat for SDK upgrades that re-throw under a different class)", async () => {
+    // Plain Error instance with a message that matches the
+    // schema-error regex set. The SDK upgrade scenario:
+    // a future `ai` package wraps NoObjectGeneratedError under
+    // a generic AIError but keeps the message contract.
+    generateTextMock.mockRejectedValueOnce(
+      new Error("response did not match the schema"),
+    );
+
+    const result = await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+    expect(result.retried).toBe(true);
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SchemaRetryFailedError constructor", () => {
+  it("stringifies non-Error original / retry inputs (defensive — covers the String() fallbacks)", () => {
+    // Real callers always pass an Error instance, but a future
+    // refactor could feed in a raw value (e.g. a JSON-parse
+    // throw that landed as a string). The constructor must
+    // still produce readable messages.
+    const err = new SchemaRetryFailedError({
+      originalError: "first-as-string",
+      retryError: { not: "an-error" },
+      retryCount: 1,
+    });
+    expect(err.originalErrorMessage).toBe("first-as-string");
+    // Object → "[object Object]" via String() coercion. Not
+    // pretty, but stable and readable in logs.
+    expect(err.finalErrorMessage).toBe("[object Object]");
+    expect(err.message).toContain("first-as-string");
+    expect(err.message).toContain("[object Object]");
+  });
+});
+
+describe("isStructuredArticleGenerationSchemaError", () => {
+  it("recognizes a NoObjectGeneratedError instance", () => {
+    expect(
+      isStructuredArticleGenerationSchemaError(
+        makeNoObjectGeneratedError("No object generated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes a SchemaRetryFailedError instance", () => {
+    const err = new SchemaRetryFailedError({
+      originalError: new Error("first"),
+      retryError: new Error("second"),
+      retryCount: 1,
+    });
+    expect(isStructuredArticleGenerationSchemaError(err)).toBe(true);
+  });
+
+  it.each([
+    "No object generated: response did not match schema.",
+    "Response did not match the schema",
+    "Schema validation failed on field `slug`",
+    "schema validation failure",
+    "Invalid structured output from model",
+  ])("recognizes plain-Error message %j", (message) => {
+    expect(isStructuredArticleGenerationSchemaError(new Error(message))).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    "auth_failed: invalid API key",
+    "rate_limit_exceeded",
+    "ECONNRESET: socket hang up",
+    "Anthropic API timed out after 30s",
+    "Internal server error (500)",
+    "model_not_found",
+    "Schema is missing", // close but not the canonical phrase
+  ])("does NOT match unrelated error message %j", (message) => {
+    expect(isStructuredArticleGenerationSchemaError(new Error(message))).toBe(
+      false,
+    );
+  });
+
+  it("returns false for non-Error values", () => {
+    expect(isStructuredArticleGenerationSchemaError(undefined)).toBe(false);
+    expect(isStructuredArticleGenerationSchemaError(null)).toBe(false);
+    expect(isStructuredArticleGenerationSchemaError("schema mismatch")).toBe(
+      false,
+    );
+    expect(isStructuredArticleGenerationSchemaError(42)).toBe(false);
+    expect(isStructuredArticleGenerationSchemaError({})).toBe(false);
   });
 });
 

@@ -7,6 +7,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getActiveImageUploadForArticle,
+  listRecentImageKeysForBlog,
   listRecentImageUploadsForBlog,
   listSectionImageRowsForArticle,
   recordArticleImageUpload,
@@ -36,6 +37,9 @@ function makeChain<T>(result: ChainResult<T>) {
   const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    neq: vi.fn().mockReturnThis(),
+    gte: vi.fn().mockReturnThis(),
+    lt: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
@@ -1029,5 +1033,275 @@ describe("syncArticleSectionImageRows", () => {
       validSectionKeys: new Set(),
     });
     expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// listRecentImageKeysForBlog — cross-article diversity seed
+// ============================================================================
+
+describe("listRecentImageKeysForBlog", () => {
+  it("returns BOTH provider:photoId and url:image_url keys per row", async () => {
+    const client = makeClient({
+      article_image_uploads: {
+        data: [
+          {
+            provider: "pexels",
+            provider_photo_id: "12345",
+            image_url: "https://images.pexels.com/photos/12345/large.jpg",
+            article_id: "old-article-1",
+          },
+          {
+            provider: "pexels",
+            provider_photo_id: "67890",
+            image_url: "https://images.pexels.com/photos/67890/large.jpg",
+            article_id: "old-article-2",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(keys).toBeInstanceOf(Set);
+    expect(keys.size).toBe(4);
+    expect(keys.has("pexels:12345")).toBe(true);
+    expect(
+      keys.has("url:https://images.pexels.com/photos/12345/large.jpg"),
+    ).toBe(true);
+    expect(keys.has("pexels:67890")).toBe(true);
+    expect(
+      keys.has("url:https://images.pexels.com/photos/67890/large.jpg"),
+    ).toBe(true);
+  });
+
+  it("excludes the current article (autopilot picks for THIS article — its own rows are seeded separately)", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      excludeArticleId: "current-article",
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.eq).toHaveBeenCalledWith("blog_id", "b1");
+    // The .neq filter is what excludes the current article from
+    // the seed — its own rows are seeded separately via the
+    // existing per-article re-pick guard inside the picker.
+    expect(chain.neq).toHaveBeenCalledWith("article_id", "current-article");
+  });
+
+  it("does NOT call .neq when excludeArticleId is omitted", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.neq).not.toHaveBeenCalled();
+  });
+
+  it("ignores rows missing image_url (no URL key, AND no provider key — half-complete signature is worse than none)", async () => {
+    const client = makeClient({
+      article_image_uploads: {
+        data: [
+          {
+            provider: "pexels",
+            provider_photo_id: "missing-url",
+            image_url: null,
+            article_id: "a1",
+          },
+          {
+            provider: "pexels",
+            provider_photo_id: "empty-url",
+            image_url: "   ",
+            article_id: "a2",
+          },
+          {
+            provider: "pexels",
+            provider_photo_id: "complete",
+            image_url: "https://images.pexels.com/photos/c/large.jpg",
+            article_id: "a3",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+
+    // Only the "complete" row contributes; the two with bad URLs
+    // are filtered out entirely.
+    expect(keys.size).toBe(2);
+    expect(keys.has("pexels:complete")).toBe(true);
+    expect(keys.has("url:https://images.pexels.com/photos/c/large.jpg")).toBe(
+      true,
+    );
+    expect(keys.has("pexels:missing-url")).toBe(false);
+    expect(keys.has("pexels:empty-url")).toBe(false);
+  });
+
+  it("emits ONLY the URL key when provider_photo_id is null/empty (manual paste rows)", async () => {
+    const client = makeClient({
+      article_image_uploads: {
+        data: [
+          {
+            provider: "manual_url",
+            provider_photo_id: null,
+            image_url: "https://example.com/manual.jpg",
+            article_id: "a1",
+          },
+          {
+            provider: "manual_url",
+            provider_photo_id: "   ",
+            image_url: "https://example.com/whitespace-id.jpg",
+            article_id: "a2",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(keys.size).toBe(2);
+    expect(keys.has("url:https://example.com/manual.jpg")).toBe(true);
+    expect(keys.has("url:https://example.com/whitespace-id.jpg")).toBe(true);
+    // No `manual_url:` keys because the photo ids are absent /
+    // whitespace.
+    for (const key of keys) {
+      expect(key).not.toContain("manual_url:");
+    }
+  });
+
+  it("filters by providerId when supplied (so a Pexels run doesn't dedupe against legacy Unsplash rows by id)", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      providerId: "pexels",
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.eq).toHaveBeenCalledWith("provider", "pexels");
+  });
+
+  it("sorts by created_at desc and caps at the supplied limit", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      limit: 50,
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.order).toHaveBeenCalledWith("created_at", {
+      ascending: false,
+    });
+    expect(chain.limit).toHaveBeenCalledWith(50);
+  });
+
+  it("uses the configured lookback window via gte(created_at, cutoff)", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+    const now = new Date("2026-05-18T12:00:00.000Z");
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      sinceDays: 7,
+      now,
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    const expectedCutoff = new Date(
+      now.getTime() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    expect(chain.gte).toHaveBeenCalledWith("created_at", expectedCutoff);
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({
+      article_image_uploads: {
+        data: null,
+        error: { message: "select boom" },
+      },
+    });
+
+    await expect(
+      listRecentImageKeysForBlog({
+        blogId: "b1",
+        client: client as never,
+      }),
+    ).rejects.toMatchObject({ message: "select boom" });
+  });
+
+  it("falls back to the admin client when none is injected", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await listRecentImageKeysForBlog({ blogId: "b1" });
+
+    expect(mockedCreateAdmin).toHaveBeenCalled();
+  });
+
+  it("defaults sinceDays=30 and limit=250 when not specified", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.limit).toHaveBeenCalledWith(250);
+  });
+
+  it("returns an empty set when no rows are returned", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+    expect(keys.size).toBe(0);
+  });
+
+  it("returns an empty set when supabase returns null data (defensive)", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: null, error: null },
+    });
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+    expect(keys.size).toBe(0);
   });
 });

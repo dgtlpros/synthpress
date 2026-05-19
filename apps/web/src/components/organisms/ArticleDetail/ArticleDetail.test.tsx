@@ -123,7 +123,7 @@ describe("ArticleDetail", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the failure card when status is failed and an error exists", () => {
+  it("renders the failure card when status is failed and an error exists (article has a body)", () => {
     render(
       <ArticleDetail
         article={{
@@ -137,7 +137,12 @@ describe("ArticleDetail", () => {
     expect(screen.getByText("Anthropic API timed out.")).toBeInTheDocument();
   });
 
-  it("hides the failure card when status is failed but error_message is null", () => {
+  it("renders the failure card with a heading even when error_message is null (so users see a clear failure state)", () => {
+    // Previous behavior hid the card entirely when errorMessage
+    // was null — that left a `failed` article looking visually
+    // identical to a normal draft. Now the card always appears
+    // for a `failed` status; the description line is just
+    // omitted when there's no error to surface.
     render(
       <ArticleDetail
         article={{
@@ -147,7 +152,76 @@ describe("ArticleDetail", () => {
         }}
       />,
     );
-    expect(screen.queryByText("Generation failed")).not.toBeInTheDocument();
+    expect(screen.getByText("Generation failed")).toBeInTheDocument();
+  });
+
+  it("renders 'Generation failed before article content was created' when status=failed AND content_markdown is empty", () => {
+    // The autopilot QA bug repro: an article whose generation
+    // failed at `writing_article` has `status='failed'` and
+    // `content_markdown=null`. The detail page must surface the
+    // empty-body case explicitly so the user understands there's
+    // nothing to edit / publish.
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          status: "failed",
+          contentMarkdown: null,
+          errorMessage: "No object generated: response did not match schema.",
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(/Generation failed before article content was created/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/response did not match schema/i),
+    ).toBeInTheDocument();
+    // Recovery hint points at the Ideas tab regenerate path.
+    expect(screen.getByText(/Generate article/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sending to WordPress is disabled/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders 'No body was generated' empty-state in the body card (NOT 'Click Edit') for failed-no-body articles", () => {
+    // The misleading "Click Edit to add Markdown content." copy
+    // would otherwise suggest the user can hand-write a body and
+    // publish it. The failure card above explains the recovery
+    // path; the body card just defers to it.
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          status: "failed",
+          contentMarkdown: null,
+          errorMessage: "schema validation failed",
+        }}
+      />,
+    );
+    expect(screen.getByText(/No body was generated/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Click Edit/i)).not.toBeInTheDocument();
+  });
+
+  it("uses the 'Generation failed' heading (NOT the empty-body variant) when a failed article still has body content", () => {
+    // E.g. a multi-step failure where the body landed but image
+    // picking or a later step blew up. Body is intact → user
+    // CAN still edit + publish, so the empty-body recovery hint
+    // would be misleading.
+    render(
+      <ArticleDetail
+        article={{
+          ...baseArticle,
+          status: "failed",
+          // contentMarkdown comes from baseArticle (non-empty)
+          errorMessage: "downstream image picker boom",
+        }}
+      />,
+    );
+    expect(screen.getByText("Generation failed")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/before article content was created/i),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the Edit button when onEdit is provided", () => {

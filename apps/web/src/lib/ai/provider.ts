@@ -55,6 +55,126 @@ export type AnthropicLike = typeof anthropic;
 export { NoObjectGeneratedError };
 
 /**
+ * Message patterns the AI SDK uses when Claude returns text that
+ * doesn't fit the schema. We grep against these as a forward-compat
+ * fallback — the typed `NoObjectGeneratedError` instance check is
+ * the primary path, but a future SDK upgrade could re-throw the
+ * same failure under a different class name (or wrapped in a
+ * generic `Error`) and we still want to recognize it.
+ *
+ * Patterns are deliberately narrow: "auth failed", "rate limited",
+ * "ECONNRESET", and other transient/provider issues do NOT match.
+ * That keeps {@link isStructuredArticleGenerationSchemaError} from
+ * triggering the retry path on errors that won't be fixed by a
+ * stricter prompt.
+ */
+const SCHEMA_ERROR_MESSAGE_PATTERNS: readonly RegExp[] = [
+  /\bno object generated\b/i,
+  /\bresponse did not match (the )?schema\b/i,
+  /\bschema validation (failed|failure)\b/i,
+  /\binvalid structured output\b/i,
+];
+
+/**
+ * Returns `true` when an error from the AI SDK is a structured-
+ * output schema validation failure (Claude produced text that
+ * doesn't fit the requested Zod schema). Used by both:
+ *
+ *   * {@link generateArticleDraft} — to decide whether to retry
+ *     with a stricter repair instruction before bubbling up.
+ *   * `runGenerateArticleFromIdeaJob` — to stamp `failureKind:
+ *     "schema_mismatch"` + retry metadata onto
+ *     `article_jobs.output` before failing the job.
+ *
+ * Narrowness contract: this MUST NOT match generic provider
+ * errors (auth, rate limit, network). A unit test in
+ * `provider.test.ts` regex-pins the negative cases.
+ */
+export function isStructuredArticleGenerationSchemaError(
+  err: unknown,
+): boolean {
+  if (err instanceof NoObjectGeneratedError) return true;
+  if (err instanceof SchemaRetryFailedError) return true;
+  if (err instanceof Error) {
+    return SCHEMA_ERROR_MESSAGE_PATTERNS.some((pat) => pat.test(err.message));
+  }
+  return false;
+}
+
+/**
+ * Thrown by {@link generateArticleDraft} when the first attempt
+ * AND the schema-repair retry both fail with a schema validation
+ * error. Carries both errors so the orchestration layer can stamp
+ * a structured failure record onto the job before refunding
+ * tokens.
+ *
+ * Why a dedicated class (instead of just rethrowing the retry
+ * error):
+ *   * The orchestrator needs to know `retried: true` happened so
+ *     it can stamp `retryCount: 1` and `originalErrorMessage` /
+ *     `finalErrorMessage` onto `article_jobs.output`.
+ *   * `isStructuredArticleGenerationSchemaError` recognizes this
+ *     class directly — no need to re-grep the message.
+ *   * Future tooling (autopilot run drawer, support dashboard)
+ *     can branch on the class to render "Schema retry failed"
+ *     copy without parsing the message.
+ */
+export class SchemaRetryFailedError extends Error {
+  readonly kind = "schema_mismatch" as const;
+  readonly retried = true as const;
+  readonly retryCount: number;
+  readonly originalError: unknown;
+  readonly retryError: unknown;
+  readonly originalErrorMessage: string;
+  readonly finalErrorMessage: string;
+
+  constructor(opts: {
+    originalError: unknown;
+    retryError: unknown;
+    retryCount: number;
+  }) {
+    const originalErrorMessage =
+      opts.originalError instanceof Error
+        ? opts.originalError.message
+        : String(opts.originalError);
+    const finalErrorMessage =
+      opts.retryError instanceof Error
+        ? opts.retryError.message
+        : String(opts.retryError);
+    super(
+      `Article schema retry failed (attempt ${opts.retryCount + 1}). ` +
+        `Original: ${originalErrorMessage}. Final: ${finalErrorMessage}.`,
+    );
+    this.name = "SchemaRetryFailedError";
+    this.retryCount = opts.retryCount;
+    this.originalError = opts.originalError;
+    this.retryError = opts.retryError;
+    this.originalErrorMessage = originalErrorMessage;
+    this.finalErrorMessage = finalErrorMessage;
+  }
+}
+
+/**
+ * Stricter system-prompt suffix appended on the retry attempt.
+ * Designed to make Claude's second try collapse to the schema
+ * shape — most schema validation failures we've seen come from
+ * the model adding extra prose, wrapping the JSON in code fences,
+ * or omitting a required field.
+ *
+ * Exported so tests can assert it lands in the retry's `system`
+ * argument (and so a future support tool can show operators
+ * exactly what the second attempt asks).
+ */
+export const STRICT_SCHEMA_REPAIR_INSTRUCTION = [
+  "STRICT SCHEMA REPAIR INSTRUCTION (retry attempt):",
+  "Your previous response did not match the requested JSON schema.",
+  "Return ONLY a valid object matching the requested schema. Do not",
+  "include prose, markdown code fences, explanations, or any extra",
+  "keys. Every required field must be present and within its",
+  "documented length / format constraints.",
+].join(" ");
+
+/**
  * Resolves the anthropic provider to use. Defaults to the SDK's
  * env-driven singleton; callers may inject a custom one (tests, or a
  * future "per-tenant API key" feature).
@@ -317,6 +437,20 @@ export type GeneratedArticleDraft = z.infer<typeof articleDraftSchema> & {
   completionTokens: number | null;
   cachedReadTokens: number | null;
   cachedWriteTokens: number | null;
+  /**
+   * `true` when the first attempt threw a schema validation error
+   * and the second (stricter) attempt succeeded. `false` for the
+   * normal one-shot success path. The orchestration stamps this
+   * onto `article_jobs.output.retried` so an operator reading a
+   * recent job can tell which articles needed repair.
+   */
+  retried: boolean;
+  /**
+   * Number of retry attempts that fired. `0` for one-shot success
+   * (`retried === false`); `1` when the schema repair retry was
+   * needed and succeeded.
+   */
+  retryCount: number;
 };
 
 export interface GenerateArticleDraftInput {
@@ -336,33 +470,129 @@ export interface GenerateArticleDraftInput {
  * does not touch Supabase. The orchestration layer owns placeholder
  * rows, job tracking, and credit deduction.
  *
+ * Schema-repair retry (single shot):
+ *   The Anthropic API occasionally returns a response that doesn't
+ *   fit the requested Zod schema (extra prose, code-fenced JSON,
+ *   missing required field). When that happens, the SDK throws
+ *   `NoObjectGeneratedError`. Rather than refund the user
+ *   immediately we run ONE second attempt with the same model + a
+ *   stricter system-prompt suffix
+ *   ({@link STRICT_SCHEMA_REPAIR_INSTRUCTION}) telling Claude to
+ *   return ONLY a schema-conforming object.
+ *
+ *   * If the retry succeeds → we return the draft with
+ *     `retried: true, retryCount: 1` so the orchestrator can stamp
+ *     this onto `article_jobs.output` for ops visibility.
+ *   * If the retry fails with another schema error → we throw
+ *     {@link SchemaRetryFailedError}, which the orchestrator
+ *     recognizes via {@link isStructuredArticleGenerationSchemaError}
+ *     and uses to stamp structured failure metadata before refunding
+ *     tokens.
+ *
+ *   Synth-token + `usage_events` accounting is unchanged: the
+ *   orchestrator's `consumeTeamTokens` is keyed off `jobId` (not
+ *   per Claude call) so the retry costs the user nothing extra.
+ *   The Anthropic API bill IS doubled for the rare retry, but
+ *   that's a Vercel-side operational cost, not a user-visible
+ *   billing event.
+ *
+ * Non-schema errors (auth, rate limit, network) bypass the retry —
+ * a stricter prompt won't fix those. They propagate as-is so the
+ * orchestration's existing refund + FatalError flow handles them.
+ *
  * Throws:
- *   * `NoObjectGeneratedError` — Claude produced text that doesn't fit
- *     the schema (missing field, slug malformed, etc.).
- *   * Any other SDK error (network, auth, rate limit) — propagated as
- *     is so the caller can decide whether to retry / refund credits.
+ *   * `SchemaRetryFailedError` — both attempts hit a schema
+ *     validation failure. Inner `originalError` and `retryError`
+ *     carry the underlying SDK errors.
+ *   * `NoObjectGeneratedError` — only when the failure occurred on
+ *     a path where retry was disabled (none today; reserved for
+ *     future test-only injection).
+ *   * Any other SDK error — propagated as-is.
  */
 export async function generateArticleDraft(
   input: GenerateArticleDraftInput,
 ): Promise<GeneratedArticleDraft> {
   const provider = resolveAnthropic(input.anthropicProvider);
   const modelId = input.model ?? getModelForTask("articleGeneration");
-  const { system, prompt } = buildArticlePromptParts(input);
+  const { system: baseSystem, prompt } = buildArticlePromptParts(input);
 
+  // First attempt: normal prompt.
+  let firstError: unknown;
+  try {
+    const draft = await callArticleSdk({
+      provider,
+      modelId,
+      system: baseSystem,
+      prompt,
+    });
+    return { ...draft, retried: false, retryCount: 0 };
+  } catch (err) {
+    if (!isStructuredArticleGenerationSchemaError(err)) {
+      // Non-schema failure (auth / rate limit / network). Bubble
+      // as-is — a stricter prompt won't fix it and burning a
+      // second Claude call would just delay the refund.
+      throw err;
+    }
+    firstError = err;
+  }
+
+  // Second attempt: same model + prompt + stricter repair suffix.
+  const stricterSystem = `${baseSystem}\n\n${STRICT_SCHEMA_REPAIR_INSTRUCTION}`;
+  try {
+    const draft = await callArticleSdk({
+      provider,
+      modelId,
+      system: stricterSystem,
+      prompt,
+    });
+    return { ...draft, retried: true, retryCount: 1 };
+  } catch (retryErr) {
+    if (!isStructuredArticleGenerationSchemaError(retryErr)) {
+      // The retry failed with a NEW kind of error (e.g. the model
+      // recovered from schema but the API rate-limited the second
+      // call). Surface it directly — the orchestrator's refund
+      // path handles it the same way as a non-schema first-attempt
+      // failure. Stamping `retried: true` here would be misleading
+      // (we DID retry, but the failure isn't a schema issue).
+      throw retryErr;
+    }
+    throw new SchemaRetryFailedError({
+      originalError: firstError,
+      retryError: retryErr,
+      retryCount: 1,
+    });
+  }
+}
+
+/**
+ * Inner SDK call shared by the first attempt + the retry. Splits
+ * cleanly so the retry path can pass a different `system` without
+ * duplicating the `Output.object(...)` boilerplate.
+ *
+ * Returns the typed schema fields + token counts. Does NOT set
+ * `retried` / `retryCount` — those are stamped by the public
+ * {@link generateArticleDraft} based on which attempt succeeded.
+ */
+async function callArticleSdk(args: {
+  provider: AnthropicLike;
+  modelId: string;
+  system: string;
+  prompt: string;
+}): Promise<Omit<GeneratedArticleDraft, "retried" | "retryCount">> {
   const result = await generateText({
-    model: provider(modelId),
+    model: args.provider(args.modelId),
     output: Output.object({
       schema: articleDraftSchema,
       name: "article_draft",
       description: "A single article draft for the configured blog.",
     }),
-    system,
-    prompt,
+    system: args.system,
+    prompt: args.prompt,
   });
 
   return {
     ...result.output,
-    model: modelId,
+    model: args.modelId,
     promptTokens: result.usage.inputTokens ?? null,
     completionTokens: result.usage.outputTokens ?? null,
     cachedReadTokens: result.usage.inputTokenDetails.cacheReadTokens ?? null,

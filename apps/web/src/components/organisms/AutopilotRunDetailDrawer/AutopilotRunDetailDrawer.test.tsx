@@ -501,9 +501,7 @@ describe("AutopilotRunDetailDrawer — failure / reason / paused", () => {
     );
     const reasonCard = screen.getByTestId("autopilot-detail-reason");
     expect(reasonCard).toHaveTextContent(/waiting for current article jobs/i);
-    expect(reasonCard).toHaveTextContent(
-      /continue on the next scheduled run/i,
-    );
+    expect(reasonCard).toHaveTextContent(/continue on the next scheduled run/i);
     expect(reasonCard.textContent ?? "").not.toMatch(
       /\b(plan|subscription|tier|pricing|upgrade|paywall)\b/i,
     );
