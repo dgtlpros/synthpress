@@ -2,6 +2,7 @@
 
 import { WordPressConnectionForm } from "@/components/molecules/WordPressConnectionForm";
 import { useWordPressConnection } from "@/hooks/useWordPressConnection";
+import { useWordPressConnectionTest } from "@/hooks/useWordPressConnectionTest";
 
 export interface BlogConnectionsConnectorProps {
   teamId: string;
@@ -22,6 +23,11 @@ export function BlogConnectionsConnector({
 }: BlogConnectionsConnectorProps) {
   const { connect, disconnect, isSaving, isDisconnecting, error } =
     useWordPressConnection({ teamId, projectId, blogId });
+  const {
+    test,
+    isTesting,
+    state: testState,
+  } = useWordPressConnectionTest({ teamId, projectId, blogId });
 
   return (
     <WordPressConnectionForm
@@ -30,8 +36,12 @@ export function BlogConnectionsConnector({
       hasStoredPassword={hasStoredPassword}
       onSubmit={connect}
       onDisconnect={disconnect}
+      onTestConnection={test}
       isSaving={isSaving}
       isDisconnecting={isDisconnecting}
+      isTesting={isTesting}
+      testResult={testState.result}
+      testActionError={testState.actionError}
       error={error}
     />
   );

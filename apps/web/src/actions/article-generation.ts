@@ -8,14 +8,53 @@ import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
   type ActiveArticleJobRow,
   type ArticleIdeaStatus,
+  archiveArticleIdea,
   listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
   queueGenerateArticleIdeas,
+  unarchiveArticleIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
 import { generateIdeasWorkflow } from "@/workflows/generate-ideas";
 import type { ActionResult } from "./workspace";
+
+/**
+ * Manual "Generate ideas" count bounds. The action validates and
+ * clamps server-side; the UI advertises 1..20 in the modal selector
+ * (autopilot uses its own `MAX_AUTOPILOT_IDEAS_PER_RUN` cap in the
+ * scheduler).
+ *
+ * 20 was previously 50 (when the field was hidden + dev-only). 20 is
+ * deliberately conservative — the AI tends to repeat itself past
+ * ~15, and a single click that consumes the user's entire token
+ * balance is a worse UX than rejecting the request.
+ */
+export const MANUAL_GENERATE_IDEAS_MIN_COUNT = 1;
+export const MANUAL_GENERATE_IDEAS_MAX_COUNT = 20;
+/**
+ * Default the manual modal opens with. 5 strikes a balance between
+ * "useful batch" and "doesn't blow the token budget on one click";
+ * autopilot keeps its own internal default (`IDEA_DEFAULT_COUNT`)
+ * for the unconfigured path.
+ */
+export const MANUAL_GENERATE_IDEAS_DEFAULT_COUNT = 5;
+
+function clampManualGenerateIdeasCount(count: number): number {
+  /* v8 ignore next 1 -- defensive: callers reject NaN/non-finite before
+     this function is reached, so this guard is unreachable via the
+     public API and only protects against a refactor losing the
+     upstream validation. */
+  if (!Number.isFinite(count)) return MANUAL_GENERATE_IDEAS_DEFAULT_COUNT;
+  const floored = Math.floor(count);
+  if (floored < MANUAL_GENERATE_IDEAS_MIN_COUNT) {
+    return MANUAL_GENERATE_IDEAS_MIN_COUNT;
+  }
+  if (floored > MANUAL_GENERATE_IDEAS_MAX_COUNT) {
+    return MANUAL_GENERATE_IDEAS_MAX_COUNT;
+  }
+  return floored;
+}
 
 /**
  * Status values the manual review UI is allowed to assign. The full
@@ -97,15 +136,29 @@ export async function generateIdeasManual(
     };
   }
 
-  if (
-    typeof input.count === "number" &&
-    (!Number.isFinite(input.count) || input.count < 1 || input.count > 50)
-  ) {
-    return {
-      data: null,
-      error: "Count must be between 1 and 50.",
-    };
+  // Validate the explicit shape first — finite + integer-ish —
+  // then clamp into the supported range. We intentionally don't
+  // 400 on "10.5" or "out of range": clamping gives the modal a
+  // predictable contract (whatever you send, you'll get a usable
+  // batch back) while still rejecting hostile input (`NaN`,
+  // `Infinity`, negative, way-too-big as a sanity check).
+  if (input.count !== undefined) {
+    if (
+      typeof input.count !== "number" ||
+      !Number.isFinite(input.count) ||
+      input.count < 0 ||
+      input.count > 1000
+    ) {
+      return {
+        data: null,
+        error: `Count must be a number between ${MANUAL_GENERATE_IDEAS_MIN_COUNT} and ${MANUAL_GENERATE_IDEAS_MAX_COUNT}.`,
+      };
+    }
   }
+  const resolvedCount =
+    input.count !== undefined
+      ? clampManualGenerateIdeasCount(input.count)
+      : undefined;
 
   const supabase = await createClient();
   const {
@@ -127,7 +180,7 @@ export async function generateIdeasManual(
       teamId,
       userId: user.id,
       brief: input.brief,
-      count: input.count,
+      count: resolvedCount,
       triggerSource: "manual",
       client: admin,
     });
@@ -479,6 +532,171 @@ export async function generateArticleFromIdea(
         error:
           "Only approved ideas can be turned into articles. Approve the idea first.",
       };
+    }
+    if (message === "idea_archived") {
+      return {
+        data: null,
+        error:
+          "This idea is archived. Unarchive it before generating an article.",
+      };
+    }
+    return { data: null, error: message };
+  }
+}
+
+export interface ArchiveIdeaResult {
+  ideaId: string;
+  /** ISO timestamp the archive was stamped at. */
+  archivedAt: string;
+}
+
+/**
+ * Archives an idea (soft delete via `archived_at` timestamp).
+ *
+ * Mirrors {@link updateIdeaStatus} for permission + admin-client
+ * patterns:
+ *   - `manage_blog` permission (same level as approve/reject — archive
+ *     is an editorial action).
+ *   - team→project→blog chain verified through the admin client
+ *     because the service helper writes via the admin client too
+ *     (bypassing the per-blog RLS check we'd otherwise rely on).
+ *
+ * Idempotent: archiving an already-archived idea succeeds with a new
+ * timestamp (the UI doesn't expose a "re-archive" affordance, but
+ * concurrent users can race).
+ */
+export async function archiveIdea(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  ideaId: string,
+): Promise<ActionResult<ArchiveIdeaResult>> {
+  if (!ideaId) {
+    return { data: null, error: "Idea id is required." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { data: blog } = await admin
+      .from("blogs")
+      .select("id")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (!blog) {
+      return { data: null, error: "Blog not found." };
+    }
+
+    const archived = await archiveArticleIdea({
+      ideaId,
+      blogId,
+      client: admin,
+    });
+
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/ideas`,
+    );
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+
+    return {
+      data: {
+        ideaId: archived.id,
+        /* v8 ignore next 1 -- defensive: helper always writes a timestamp */
+        archivedAt: archived.archived_at ?? new Date().toISOString(),
+      },
+      error: null,
+    };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) {
+      return { data: null, error: err.code };
+    }
+    const message =
+      err instanceof Error ? err.message : "Could not archive idea.";
+    if (message === "idea_not_found") {
+      return { data: null, error: "Idea not found." };
+    }
+    return { data: null, error: message };
+  }
+}
+
+export interface UnarchiveIdeaResult {
+  ideaId: string;
+}
+
+/**
+ * Restores an archived idea by clearing `archived_at`. Status is
+ * untouched — an idea archived as `approved` returns to `approved`
+ * (still eligible for autopilot pickup, still ready to "Generate
+ * article"). Same permission + chain enforcement as
+ * {@link archiveIdea}.
+ */
+export async function unarchiveIdea(
+  teamId: string,
+  projectId: string,
+  blogId: string,
+  ideaId: string,
+): Promise<ActionResult<UnarchiveIdeaResult>> {
+  if (!ideaId) {
+    return { data: null, error: "Idea id is required." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { data: null, error: "You must be signed in." };
+  }
+
+  try {
+    const admin = createAdminClient();
+    await assertCan(teamId, user.id, "manage_blog", admin);
+
+    const { data: blog } = await admin
+      .from("blogs")
+      .select("id")
+      .eq("id", blogId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (!blog) {
+      return { data: null, error: "Blog not found." };
+    }
+
+    const restored = await unarchiveArticleIdea({
+      ideaId,
+      blogId,
+      client: admin,
+    });
+
+    revalidatePath(
+      `/teams/${teamId}/projects/${projectId}/blogs/${blogId}/ideas`,
+    );
+    revalidatePath(`/teams/${teamId}/projects/${projectId}/blogs/${blogId}`);
+
+    return {
+      data: { ideaId: restored.id },
+      error: null,
+    };
+  } catch (err) {
+    if (err instanceof TeamPermissionError) {
+      return { data: null, error: err.code };
+    }
+    const message =
+      err instanceof Error ? err.message : "Could not unarchive idea.";
+    if (message === "idea_not_found") {
+      return { data: null, error: "Idea not found." };
     }
     return { data: null, error: message };
   }

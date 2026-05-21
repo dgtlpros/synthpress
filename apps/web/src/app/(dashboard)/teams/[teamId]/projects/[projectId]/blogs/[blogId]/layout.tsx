@@ -65,7 +65,8 @@ export default async function BlogLayout({
         .from("article_ideas")
         .select("id", { count: "exact", head: true })
         .eq("blog_id", blogId)
-        .in("status", ["generated", "approved"]),
+        .in("status", ["generated", "approved"])
+        .is("archived_at", null),
     ]);
 
   const settings = loadBlogSettings(blog.settings);

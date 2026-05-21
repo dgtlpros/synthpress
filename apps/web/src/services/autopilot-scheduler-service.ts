@@ -11,6 +11,7 @@ import { getTeamPlan } from "./team-billing-service";
 import {
   type ArticleIdeaRow,
   type ArticleIdeaStatus,
+  countUsableIdeasForBacklog,
   generateArticleIdeas,
   queueGenerateArticleFromIdea,
 } from "./article-generation-service";
@@ -67,6 +68,21 @@ type Client = SupabaseClient<Database>;
  * during the first few autopilot runs after a fresh idea backlog.
  */
 export const PER_RUN_ARTICLE_CAP = 5;
+
+/**
+ * Per-run hard cap on `generate_ideas` batch size. Even if the
+ * blog's configured `backlogThreshold` is huge and `usableBacklog`
+ * is 0, a single scheduler tick won't ask the AI for more than this
+ * many ideas in one call. Keeps Claude responses on-topic (the
+ * provider tends to repeat itself past ~15) AND prevents a fresh
+ * autopilot blog from burning a large chunk of the team's token
+ * balance on a single backlog top-up.
+ *
+ * The next cron tick can keep topping up if the deficit is still
+ * non-zero, so this only spreads the work across ticks — it never
+ * blocks reaching `backlogThreshold`.
+ */
+export const MAX_AUTOPILOT_IDEAS_PER_RUN = 10;
 
 /**
  * Operational backpressure throttles for autopilot — NOT product /
@@ -737,13 +753,33 @@ export async function runAutopilotForBlog(
     );
     let approvedIdeas = initialApprovedIdeas;
 
+    // Backlog metric for top-up math is the count of USABLE ideas
+    // (`generated` + `approved`, all non-archived). Counting
+    // generated-but-not-yet-reviewed prevents a `requireReview=true`
+    // blog from re-topping-up to 10 generated ideas on every single
+    // cron tick — those ideas will become approved when a human
+    // reviews them, so they DO count toward the configured backlog.
+    // `rejected` and `converted_to_article` never count.
+    const usableBacklog = await countUsableIdeasForBacklog(
+      input.blogId,
+      supabase,
+    );
+
     let ideasGenerated = 0;
     // Tracked separately from `ideasGenerated` so the run output
     // can answer the question "did autopilot move ideas straight
     // into the article queue, or did they stop at 'generated'?"
     let ideasAutoApproved = 0;
+    // Deficit-based top-up: only generate enough to refill the gap
+    // (clamped to a per-run safety cap). With backlogThreshold=10 and
+    // usableBacklog=7, this generates 3 — not always 10. A fresh
+    // blog (usableBacklog=0) still gets a full MAX_AUTOPILOT_IDEAS_PER_RUN
+    // burst, and the next cron tick keeps topping up until the
+    // threshold is reached.
+    const deficit = Math.max(0, backlogThreshold - usableBacklog);
+    const ideasToGenerate = Math.min(deficit, MAX_AUTOPILOT_IDEAS_PER_RUN);
     if (
-      approvedIdeas.length < backlogThreshold &&
+      ideasToGenerate > 0 &&
       tokenBalance >= ideaCost &&
       (tokensRemainingFromBudget === null ||
         tokensRemainingFromBudget >= ideaCost) &&
@@ -761,7 +797,16 @@ export async function runAutopilotForBlog(
           teamId: input.teamId,
           userId: teamPlan.ownerId,
           triggerSource: "autopilot",
-          jobMetadata: { autopilotRunId: run.id },
+          // Pass the exact deficit-clamped count instead of letting
+          // `generateArticleIdeas` default to IDEA_DEFAULT_COUNT.
+          // This is the line that makes "top up to threshold" actually
+          // mean "only request the missing amount".
+          count: ideasToGenerate,
+          jobMetadata: {
+            autopilotRunId: run.id,
+            backlogThreshold,
+            usableBacklog,
+          },
           client: supabase,
         });
         ideasGenerated = batch.ideas.length;
@@ -1165,11 +1210,15 @@ async function listApprovedIdeasForBlog(
   client: Client,
   blogId: string,
 ): Promise<ArticleIdeaRow[]> {
+  // FIFO `approved`-and-not-archived ideas — the autopilot picks
+  // the oldest first. Archived ideas never come back to the article
+  // pipeline; the user explicitly hid them from the backlog.
   const { data, error } = await client
     .from("article_ideas")
     .select("*")
     .eq("blog_id", blogId)
     .eq("status", "approved" satisfies ArticleIdeaStatus)
+    .is("archived_at", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
   /* v8 ignore next 1 -- defensive: supabase returns data when error is null */

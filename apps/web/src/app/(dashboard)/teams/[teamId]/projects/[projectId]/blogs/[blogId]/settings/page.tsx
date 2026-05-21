@@ -6,10 +6,15 @@ import {
 import { BlogAutopilotPanelConnector } from "@/connectors/BlogAutopilotPanelConnector";
 import { BlogSettingsConnector } from "@/connectors/BlogSettingsConnector";
 import { BlogSettingsFormConnector } from "@/connectors/BlogSettingsFormConnector";
+import { BlogSettingsImportExportConnector } from "@/connectors/BlogSettingsImportExportConnector";
 import { Card } from "@/components/atoms/Card";
 import type { AutopilotRunRowData } from "@/components/molecules/AutopilotRunRow";
 import type { AutopilotRunStatus } from "@/components/atoms/AutopilotRunStatusBadge";
 import { loadBlogSettings } from "@/lib/blog-settings";
+import {
+  buildBlogSettingsTemplate,
+  serializeBlogSettingsTemplate,
+} from "@/lib/blog-settings-template";
 import { listBlogAutopilotRunsForBlog } from "@/services/blog-autopilot-run-service";
 import type { BlogSettingsTabsValue } from "@/components/organisms/BlogSettingsTabs";
 
@@ -100,6 +105,23 @@ export default async function BlogSettingsPage({
     settings,
   };
 
+  // Pre-render the export template server-side so the modal can show
+  // it instantly when opened (no extra round-trip for a copy/download).
+  // The same lib helper is what `exportBlogSettingsTemplate` calls, so
+  // future API callers see byte-identical output.
+  const exportTemplateJson = serializeBlogSettingsTemplate(
+    buildBlogSettingsTemplate({
+      blog: {
+        name: blog.name,
+        description: blog.description ?? "",
+        niche: blog.niche ?? "",
+        keywords: blog.keywords ?? [],
+        aiPromptTemplate: blog.ai_prompt_template ?? "",
+      },
+      settings,
+    }),
+  );
+
   return (
     <div className="space-y-6">
       <BlogSettingsFormConnector
@@ -108,6 +130,24 @@ export default async function BlogSettingsPage({
         blogId={blogId}
         initialValue={initialValue}
         hasWordPressConnection={hasWordPressConnection}
+      />
+
+      <BlogSettingsImportExportConnector
+        teamId={teamId}
+        projectId={projectId}
+        blogId={blogId}
+        exportTemplateJson={exportTemplateJson}
+        current={{
+          blog: {
+            name: blog.name,
+            description: blog.description ?? "",
+            niche: blog.niche ?? "",
+            keywords: blog.keywords ?? [],
+            aiPromptTemplate: blog.ai_prompt_template ?? "",
+          },
+          settings,
+        }}
+        aiPromptTopic={blog.niche?.trim() || undefined}
       />
 
       <BlogAutopilotPanelConnector

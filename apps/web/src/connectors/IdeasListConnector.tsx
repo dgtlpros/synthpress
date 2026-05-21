@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import {
+  MANUAL_GENERATE_IDEAS_DEFAULT_COUNT,
+  MANUAL_GENERATE_IDEAS_MAX_COUNT,
+  MANUAL_GENERATE_IDEAS_MIN_COUNT,
+} from "@/actions/article-generation";
+import {
   GenerateIdeasModal,
   type GenerateIdeasModalProps,
 } from "@/components/molecules/GenerateIdeasModal";
@@ -18,8 +23,12 @@ export interface IdeasListConnectorProps {
   projectId: string;
   blogId: string;
   initialIdeas: IdeasListProps["ideas"];
-  /** Default batch size shown in the modal CTA. */
-  defaultCount: number;
+  /**
+   * Default batch size the modal opens with. The connector overrides
+   * the prop's default for testing; in production the page passes
+   * {@link MANUAL_GENERATE_IDEAS_DEFAULT_COUNT}.
+   */
+  defaultCount?: number;
   /** Synth-token cost shown next to the modal CTA. */
   creditsCost: number;
 }
@@ -29,7 +38,8 @@ export interface IdeasListConnectorProps {
  * {@link useGenerateIdeas} hook. Owns:
  *   - whether the modal is open
  *   - the brief textarea state
- * The hook owns:
+ *   - the count selector state
+ * The hooks own:
  *   - the in-flight flag
  *   - the error message
  *   - calling the server action + refreshing
@@ -39,11 +49,12 @@ export function IdeasListConnector({
   projectId,
   blogId,
   initialIdeas,
-  defaultCount,
+  defaultCount = MANUAL_GENERATE_IDEAS_DEFAULT_COUNT,
   creditsCost,
 }: IdeasListConnectorProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [brief, setBrief] = useState("");
+  const [count, setCount] = useState<number>(defaultCount);
 
   const { generate, isGenerating, generateError, resetError } =
     useGenerateIdeas({
@@ -53,14 +64,20 @@ export function IdeasListConnector({
       onSuccess: () => {
         setModalOpen(false);
         setBrief("");
+        // Snap the count back to the connector default so the next
+        // open isn't sticky on the last submission — most users will
+        // want the same default again.
+        setCount(defaultCount);
       },
     });
 
   const {
     approve,
     reject,
+    archive,
+    unarchive,
     pendingIdeaId: actionsPendingIdeaId,
-    pendingStatus: actionsPendingStatus,
+    pendingAction: actionsPendingAction,
     errorIdeaId: actionsErrorIdeaId,
     errorMessage: actionsErrorMessage,
   } = useIdeaActions({ teamId, projectId, blogId });
@@ -78,13 +95,14 @@ export function IdeasListConnector({
   const pendingIdeaId = actionsPendingIdeaId ?? generationPendingIdeaId;
   const pendingIdeaAction: IdeasListProps["pendingIdeaAction"] =
     actionsPendingIdeaId !== null
-      ? actionsPendingStatus
+      ? actionsPendingAction
       : generationPendingIdeaId !== null
         ? "generating"
         : null;
 
   // Merge errors the same way — actions take precedence (the user just
-  // clicked Approve/Reject) but generation errors fall through.
+  // clicked Approve/Reject/Archive/Unarchive) but generation errors fall
+  // through.
   const errorIdeaId = actionsErrorIdeaId ?? generationErrorIdeaId;
   const errorMessage =
     actionsErrorIdeaId !== null ? actionsErrorMessage : generationErrorMessage;
@@ -109,6 +127,8 @@ export function IdeasListConnector({
         onApproveIdea={approve}
         onRejectIdea={reject}
         onGenerateArticleFromIdea={generateArticle}
+        onArchiveIdea={archive}
+        onUnarchiveIdea={unarchive}
         pendingIdeaId={pendingIdeaId}
         pendingIdeaAction={pendingIdeaAction}
         errorIdeaId={errorIdeaId}
@@ -119,8 +139,11 @@ export function IdeasListConnector({
         onClose={handleClose}
         brief={brief}
         onBriefChange={setBrief}
-        onSubmit={() => generate({ brief: brief || undefined })}
-        count={defaultCount}
+        count={count}
+        onCountChange={setCount}
+        minCount={MANUAL_GENERATE_IDEAS_MIN_COUNT}
+        maxCount={MANUAL_GENERATE_IDEAS_MAX_COUNT}
+        onSubmit={() => generate({ brief: brief || undefined, count })}
         creditsCost={creditsCost}
         pending={isGenerating}
         errorMessage={generateError}

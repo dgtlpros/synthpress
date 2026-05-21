@@ -468,21 +468,33 @@ export async function getBlogGenerationContext(
 export type ArticleIdeaRow = Tables<"article_ideas">;
 
 /**
- * Reads all article ideas for a blog, newest first. Used by the
- * `/blogs/[blogId]/ideas` page and any future autopilot dedupe step
+ * Reads article ideas for a blog, newest first. Used by the
+ * `/blogs/[blogId]/ideas` page (which needs archived rows so the
+ * Archived tab can render them) and any future autopilot dedupe step
  * that wants to check existing titles before generating more.
+ *
+ * `includeArchived` defaults to `true` because the Ideas dashboard
+ * does its own tab-level filtering. Other callers (autopilot,
+ * dashboards that don't care about archived ideas) can pass `false`
+ * to filter at the DB level.
  */
 export async function listArticleIdeasForBlog(
   blogId: string,
   client?: Client,
+  options: { includeArchived?: boolean } = {},
 ): Promise<ArticleIdeaRow[]> {
   const supabase = client ?? createAdminClient();
+  const includeArchived = options.includeArchived ?? true;
 
-  const { data, error } = await supabase
-    .from("article_ideas")
-    .select("*")
-    .eq("blog_id", blogId)
-    .order("created_at", { ascending: false });
+  let query = supabase.from("article_ideas").select("*").eq("blog_id", blogId);
+
+  if (!includeArchived) {
+    query = query.is("archived_at", null);
+  }
+
+  const { data, error } = await query.order("created_at", {
+    ascending: false,
+  });
 
   if (error) throw error;
   return data ?? [];
@@ -790,6 +802,136 @@ export async function convertIdeaToArticle(
     .eq("id", input.ideaId);
 
   if (ideaErr) throw ideaErr;
+}
+
+// ============================================================================
+// Archive / unarchive — soft delete for ideas
+//
+// Archive is intentionally a separate `archived_at` timestamp column
+// (see migration 00025) rather than a new `status` value. That keeps
+// the lifecycle state machine clean: an idea archived from
+// `converted_to_article` keeps its terminal status so the "View
+// article" link still works on the Archived tab, and unarchive is a
+// trivial timestamp reset that doesn't need to remember the previous
+// state.
+//
+// Filtering rules consumers should apply:
+//   * Active backlog views — `archived_at is null`.
+//   * Archived view — `archived_at is not null`.
+//   * Autopilot backlog math + idea selection — `archived_at is null`
+//     (archived ideas neither count toward the threshold nor become
+//     articles).
+// ============================================================================
+
+export interface ArchiveArticleIdeaInput {
+  ideaId: string;
+  /** Ownership scope — caller must already know the idea belongs here. */
+  blogId: string;
+  client?: Client;
+}
+
+/**
+ * Marks the idea archived by stamping `archived_at`. Idempotent: if
+ * the idea is already archived, the existing timestamp is preserved
+ * (we re-stamp to keep "archived recently" sort order honest, but the
+ * caller can't distinguish the no-op from a fresh write).
+ *
+ * Throws:
+ *   * `Error("idea_not_found")` — no row matches `(ideaId, blogId)`.
+ *   * Other supabase errors — propagated as-is.
+ *
+ * Status is NOT touched — an archived `approved` idea is still
+ * "approved" semantically, just hidden from the backlog. Unarchive
+ * restores it to wherever it was on the lifecycle.
+ */
+export async function archiveArticleIdea(
+  input: ArchiveArticleIdeaInput,
+): Promise<ArticleIdeaRow> {
+  const supabase = input.client ?? createAdminClient();
+
+  const { data, error } = await supabase
+    .from("article_ideas")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", input.ideaId)
+    .eq("blog_id", input.blogId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("idea_not_found");
+  return data as ArticleIdeaRow;
+}
+
+export interface UnarchiveArticleIdeaInput {
+  ideaId: string;
+  blogId: string;
+  client?: Client;
+}
+
+/**
+ * Clears `archived_at`, restoring the idea to its lifecycle position.
+ * Idempotent — un-archiving a non-archived idea is a no-op write.
+ *
+ * Throws:
+ *   * `Error("idea_not_found")` — no row matches `(ideaId, blogId)`.
+ *   * Other supabase errors — propagated as-is.
+ */
+export async function unarchiveArticleIdea(
+  input: UnarchiveArticleIdeaInput,
+): Promise<ArticleIdeaRow> {
+  const supabase = input.client ?? createAdminClient();
+
+  const { data, error } = await supabase
+    .from("article_ideas")
+    .update({ archived_at: null })
+    .eq("id", input.ideaId)
+    .eq("blog_id", input.blogId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("idea_not_found");
+  return data as ArticleIdeaRow;
+}
+
+/**
+ * Returns the count of ideas that COUNT TOWARD the autopilot backlog
+ * threshold for `blogId`:
+ *
+ *   * `status IN ('generated', 'approved')` — both pending-review and
+ *     already-approved ideas are usable (the former gets auto-approved
+ *     when `requireReview === false`; the latter is what the scheduler
+ *     actually picks for article generation).
+ *   * `archived_at IS NULL` — archived ideas are excluded.
+ *   * `rejected` and `converted_to_article` are NEVER usable backlog
+ *     (rejected = explicitly killed, converted = already published).
+ *
+ * Used by `runAutopilotForBlog` to compute the top-up deficit:
+ *
+ *     needed = max(0, backlogThreshold - usableCount)
+ *     batch  = min(needed, MAX_AUTOPILOT_IDEAS_PER_RUN)
+ *
+ * Uses Supabase's `count: "exact", head: true` so no rows are fetched
+ * — the query is a pure server-side aggregate.
+ */
+export async function countUsableIdeasForBacklog(
+  blogId: string,
+  client?: Client,
+): Promise<number> {
+  const supabase = client ?? createAdminClient();
+
+  const { count, error } = await supabase
+    .from("article_ideas")
+    .select("id", { count: "exact", head: true })
+    .eq("blog_id", blogId)
+    .in("status", [
+      "generated",
+      "approved",
+    ] satisfies ArticleIdeaStatus[] as string[])
+    .is("archived_at", null);
+
+  if (error) throw error;
+  return count ?? 0;
 }
 
 // ============================================================================
@@ -1489,6 +1631,16 @@ export async function queueGenerateArticleFromIdea(
   if ((ideaRow.status as ArticleIdeaStatus) !== "approved") {
     throw new Error("idea_not_approved");
   }
+  // Archived ideas are excluded from autopilot AND manual generation.
+  // The dashboard hides Generate Article on archived cards, but defend
+  // here too — a stale autopilot tick may try to queue an idea the
+  // user archived between `listApprovedIdeasForBlog` and this call.
+  // `!= null` treats `null` and `undefined` (missing column on legacy
+  // rows / older test fixtures) the same — only a real timestamp
+  // signals "archived".
+  if (ideaRow.archived_at != null) {
+    throw new Error("idea_archived");
+  }
   const idea = ideaRow as ArticleIdeaRow;
 
   // 3. Idempotency: short-circuit if a pending / processing /
@@ -1672,6 +1824,15 @@ export async function runGenerateArticleFromIdeaJob(
   // (e.g. duplicate workflow ran), bail out without touching anything.
   if ((ideaRow.status as ArticleIdeaStatus) !== "approved") {
     throw new Error("idea_not_approved");
+  }
+  // Race guard: the user can archive an approved idea after the job
+  // queued but before the workflow runs. Bail rather than generating
+  // an article the dashboard has stamped as "removed from backlog".
+  // Treat both `null` and `undefined` as "not archived" — the column
+  // is nullable in Postgres but legacy/pre-migration test fixtures
+  // may not include it in the row at all.
+  if (ideaRow.archived_at != null) {
+    throw new Error("idea_archived");
   }
   const idea = ideaRow as ArticleIdeaRow;
 

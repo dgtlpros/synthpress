@@ -1281,7 +1281,9 @@ describe("generateArticleDraft — truncation retry", () => {
 
   it("escalates a schema-then-truncation sequence as TruncationRetryFailedError (final attempt drives the label)", async () => {
     generateTextMock
-      .mockRejectedValueOnce(makeNoObjectGeneratedError("response did not match schema"))
+      .mockRejectedValueOnce(
+        makeNoObjectGeneratedError("response did not match schema"),
+      )
       .mockResolvedValueOnce({
         output: truncatedDraftStub(),
         usage: {

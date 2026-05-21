@@ -9,7 +9,7 @@ import {
 } from "@/services/article-generation-service";
 import { getArticleIdsByIdeaIds } from "@/services/article-service";
 import { getCreditCost } from "@/lib/ai/config";
-import { IDEA_DEFAULT_COUNT } from "@/lib/ai/provider";
+import { MANUAL_GENERATE_IDEAS_DEFAULT_COUNT } from "@/actions/article-generation";
 import { IdeasListConnector } from "@/connectors/IdeasListConnector";
 import type { IdeaCardIdea } from "@/components/molecules/IdeaCard";
 import type { IdeaStatus } from "@/components/atoms/IdeaStatusBadge";
@@ -39,7 +39,12 @@ export default async function BlogIdeasPage({
 
   if (!blog) notFound();
 
-  const ideas = await listArticleIdeasForBlog(blogId, supabase);
+  // Include archived ideas — the dashboard's Archived tab renders
+  // them from the same payload, and the per-bucket counts in the
+  // header need to know how many archived rows exist.
+  const ideas = await listArticleIdeasForBlog(blogId, supabase, {
+    includeArchived: true,
+  });
 
   // Resolve article ids for both converted ideas (so "View article"
   // links work) AND for ideas with an in-flight workflow (the article
@@ -48,9 +53,11 @@ export default async function BlogIdeasPage({
   //
   // We also query "which approved ideas have an active generation
   // job" so the card can render a persisted "Generating…" badge that
-  // survives a page refresh.
+  // survives a page refresh. Archived ideas can't have an active
+  // generation (autopilot ignores them, the server action rejects
+  // manual triggers), so we exclude them from that query.
   const approvedIdeaIds = ideas
-    .filter((row) => row.status === "approved")
+    .filter((row) => row.status === "approved" && row.archived_at === null)
     .map((row) => row.id);
   const convertedIdeaIds = ideas
     .filter((row) => row.status === "converted_to_article")
@@ -77,6 +84,7 @@ export default async function BlogIdeasPage({
       createdAt: row.created_at,
       viewArticleHref: articleId ? `${blogBase}/posts/${articleId}` : null,
       isGenerating,
+      isArchived: row.archived_at !== null,
     };
   });
 
@@ -86,7 +94,7 @@ export default async function BlogIdeasPage({
       projectId={projectId}
       blogId={blogId}
       initialIdeas={initialIdeas}
-      defaultCount={IDEA_DEFAULT_COUNT}
+      defaultCount={MANUAL_GENERATE_IDEAS_DEFAULT_COUNT}
       creditsCost={getCreditCost("generateIdeas")}
     />
   );

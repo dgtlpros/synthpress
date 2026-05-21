@@ -36,6 +36,7 @@ export type Database = {
     Tables: {
       article_ideas: {
         Row: {
+          archived_at: string | null;
           article_type: string | null;
           blog_id: string;
           created_at: string;
@@ -51,6 +52,7 @@ export type Database = {
           user_id: string | null;
         };
         Insert: {
+          archived_at?: string | null;
           article_type?: string | null;
           blog_id: string;
           created_at?: string;
@@ -66,6 +68,7 @@ export type Database = {
           user_id?: string | null;
         };
         Update: {
+          archived_at?: string | null;
           article_type?: string | null;
           blog_id?: string;
           created_at?: string;

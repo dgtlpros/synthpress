@@ -189,11 +189,7 @@ export function BlogSettingsTabs({
             />
           </TabsContent>
 
-          <TabsContent
-            value="automation"
-            id="automation"
-            className="space-y-6"
-          >
+          <TabsContent value="automation" id="automation" className="space-y-6">
             <AutomationTab
               value={value.settings.automation}
               onChange={(p) => patchSettings("automation", p)}

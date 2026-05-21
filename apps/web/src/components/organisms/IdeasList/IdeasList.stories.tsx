@@ -45,16 +45,58 @@ const sample = [
     estimatedWordCount: 1800,
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
   },
+  {
+    id: "i4",
+    title: "Why we deprecated our queue (lessons learned)",
+    status: "generated" as const,
+    targetKeyword: "queue deprecation",
+    executiveSummary:
+      "Lessons from migrating to durable workflows after years on a custom queue.",
+    articleType: "case_study",
+    estimatedWordCount: 1400,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString(),
+    isArchived: true,
+  },
 ];
 
+const noop = () => {};
+
 export const WithIdeas: Story = {
-  args: { ideas: sample, onGenerateClick: () => {} },
+  args: {
+    ideas: sample,
+    onGenerateClick: noop,
+    onApproveIdea: noop,
+    onRejectIdea: noop,
+    onGenerateArticleFromIdea: noop,
+    onArchiveIdea: noop,
+    onUnarchiveIdea: noop,
+  },
 };
 
 export const Empty: Story = {
-  args: { ideas: [], onGenerateClick: () => {} },
+  args: { ideas: [], onGenerateClick: noop },
 };
 
 export const Generating: Story = {
-  args: { ideas: sample, onGenerateClick: () => {}, isGenerating: true },
+  args: {
+    ideas: sample,
+    onGenerateClick: noop,
+    isGenerating: true,
+    onApproveIdea: noop,
+    onRejectIdea: noop,
+    onGenerateArticleFromIdea: noop,
+    onArchiveIdea: noop,
+    onUnarchiveIdea: noop,
+  },
+};
+
+export const PendingApprove: Story = {
+  args: {
+    ideas: sample,
+    onGenerateClick: noop,
+    onApproveIdea: noop,
+    onRejectIdea: noop,
+    pendingIdeaId: "i1",
+    pendingIdeaAction: "approved",
+  },
 };

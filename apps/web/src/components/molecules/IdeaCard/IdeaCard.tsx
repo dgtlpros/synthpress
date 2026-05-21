@@ -41,6 +41,14 @@ export interface IdeaCardIdea {
    *     row exists with status = `generating`)
    */
   isGenerating?: boolean;
+  /**
+   * `true` when `article_ideas.archived_at IS NOT NULL`. Archived
+   * ideas are visually muted, hide lifecycle actions (Approve /
+   * Reject / Generate Article), and surface an "Unarchive" button
+   * instead. Autopilot ignores archived ideas entirely (see
+   * `listApprovedIdeasForBlog` + `countUsableIdeasForBacklog`).
+   */
+  isArchived?: boolean;
 }
 
 /**
@@ -50,6 +58,8 @@ export interface IdeaCardIdea {
  *   * `"approved"`   — this card's Approve is in flight
  *   * `"rejected"`   — this card's Reject is in flight
  *   * `"generating"` — this card's Generate Article is in flight
+ *   * `"archiving"`  — this card's Archive is in flight
+ *   * `"unarchiving"`— this card's Unarchive is in flight
  *   * `"other"`      — a DIFFERENT card on the page is busy; our
  *                      buttons render disabled (without spinners) to
  *                      enforce the single-action-at-a-time policy
@@ -58,6 +68,8 @@ export type IdeaCardPendingAction =
   | "approved"
   | "rejected"
   | "generating"
+  | "archiving"
+  | "unarchiving"
   | "other";
 
 export interface IdeaCardProps extends HTMLAttributes<HTMLDivElement> {
@@ -71,6 +83,17 @@ export interface IdeaCardProps extends HTMLAttributes<HTMLDivElement> {
    * is `approved` AND this prop is provided.
    */
   onGenerate?: (ideaId: string) => void;
+  /**
+   * Archive handler. Renders an Archive button on every non-terminal,
+   * non-archived card when provided. Archive is a soft-delete: the
+   * idea is hidden from the active backlog but rows are preserved.
+   */
+  onArchive?: (ideaId: string) => void;
+  /**
+   * Unarchive handler. Renders an Unarchive button on archived cards
+   * when provided. Restores the idea to its previous lifecycle state.
+   */
+  onUnarchive?: (ideaId: string) => void;
   /** Loading / disabled hint for the action buttons. */
   pendingAction?: IdeaCardPendingAction | null;
   /** Inline error message shown beneath the action footer. */
@@ -112,6 +135,8 @@ export function IdeaCard({
   onApprove,
   onReject,
   onGenerate,
+  onArchive,
+  onUnarchive,
   pendingAction = null,
   errorMessage = null,
   className,
@@ -127,33 +152,50 @@ export function IdeaCard({
   // for our purposes: hide the action buttons, show a status pill +
   // optional "View article" link to the in-flight placeholder.
   const isGenerating = Boolean(idea.isGenerating);
+  const isArchived = Boolean(idea.isArchived);
+  // View article is independent of archive — archiving a published
+  // idea preserves the "View article" affordance so the user can
+  // still navigate to the post they tucked away.
   const showViewArticle =
     (isTerminal || isGenerating) && Boolean(idea.viewArticleHref);
   // Generate Article is only meaningful for approved ideas. Hidden
   // while a generation is already in flight (so we don't fire two
   // workflows for the same idea — the server action also prevents
-  // this, but the UI shouldn't show the button).
+  // this, but the UI shouldn't show the button). Also hidden on
+  // archived cards: the spec says archived ideas are skipped by
+  // autopilot, so manual generation on them would be inconsistent.
   const showGenerate =
     Boolean(onGenerate) &&
     !isTerminal &&
     !isGenerating &&
+    !isArchived &&
     idea.status === "approved";
   // Approve is hidden when the idea is already approved (we surface
-  // Generate Article as the primary next step instead).
+  // Generate Article as the primary next step instead) AND on
+  // archived cards (unarchive first, then approve if needed).
   const showApprove =
     Boolean(onApprove) &&
     !isTerminal &&
     !isGenerating &&
+    !isArchived &&
     idea.status !== "approved";
   const showReject =
     Boolean(onReject) &&
     !isTerminal &&
     !isGenerating &&
+    !isArchived &&
     idea.status !== "rejected";
+  // Archive lives on every non-archived, non-generating card —
+  // including converted_to_article (a user may want to hide a
+  // published topic from the backlog without re-publishing it).
+  const showArchive = Boolean(onArchive) && !isArchived && !isGenerating;
+  const showUnarchive = Boolean(onUnarchive) && isArchived;
   const hasFooter =
     showApprove ||
     showReject ||
     showGenerate ||
+    showArchive ||
+    showUnarchive ||
     showViewArticle ||
     isGenerating;
 
@@ -164,20 +206,39 @@ export function IdeaCard({
   const approvePending = pendingAction === "approved";
   const rejectPending = pendingAction === "rejected";
   const generatePending = pendingAction === "generating";
+  const archivePending = pendingAction === "archiving";
+  const unarchivePending = pendingAction === "unarchiving";
 
   return (
     <Card
       className={cn(
         "flex flex-col gap-3 transition-shadow hover:shadow-[var(--sp-shadow-md)]",
+        // Visually de-emphasize archived cards so the active backlog
+        // tabs (where archived shouldn't appear in normal use) still
+        // signal "this is special" when one does render via a search
+        // override or the Archived tab.
+        isArchived && "opacity-70",
         className,
       )}
       {...props}
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="line-clamp-2 text-base font-semibold text-foreground">
+        <h3
+          className={cn(
+            "line-clamp-2 text-base font-semibold text-foreground",
+            isArchived && "line-through decoration-muted/40",
+          )}
+        >
           {idea.title}
         </h3>
-        <IdeaStatusBadge status={idea.status} />
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          {isArchived ? (
+            <Badge variant="default" size="sm" aria-label="Idea is archived">
+              Archived
+            </Badge>
+          ) : null}
+          <IdeaStatusBadge status={idea.status} />
+        </div>
       </div>
 
       {idea.executiveSummary ? (
@@ -206,7 +267,7 @@ export function IdeaCard({
 
       {hasFooter ? (
         <>
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
             {isGenerating ? (
               <Badge
                 variant="brand"
@@ -223,6 +284,30 @@ export function IdeaCard({
               >
                 View article
               </Link>
+            ) : null}
+            {showArchive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                loading={archivePending}
+                disabled={anyPending && !archivePending}
+                onClick={() => onArchive?.(idea.id)}
+              >
+                Archive
+              </Button>
+            ) : null}
+            {showUnarchive ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                loading={unarchivePending}
+                disabled={anyPending && !unarchivePending}
+                onClick={() => onUnarchive?.(idea.id)}
+              >
+                Unarchive
+              </Button>
             ) : null}
             {showReject ? (
               <Button

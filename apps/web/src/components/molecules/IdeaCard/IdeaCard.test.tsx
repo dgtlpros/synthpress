@@ -537,3 +537,142 @@ describe("IdeaCard View article link", () => {
     });
   });
 });
+
+describe("IdeaCard archive controls", () => {
+  it("renders an Archive button when onArchive is provided", () => {
+    render(<IdeaCard idea={baseIdea} onArchive={vi.fn()} />);
+    expect(
+      screen.getByRole("button", { name: /^archive$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("calls onArchive with the idea id when Archive is clicked", () => {
+    const onArchive = vi.fn();
+    render(<IdeaCard idea={baseIdea} onArchive={onArchive} />);
+    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    expect(onArchive).toHaveBeenCalledWith(baseIdea.id);
+  });
+
+  it("does not render Archive on an already-archived card", () => {
+    render(
+      <IdeaCard idea={{ ...baseIdea, isArchived: true }} onArchive={vi.fn()} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /^archive$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders an Archived badge for archived ideas", () => {
+    render(<IdeaCard idea={{ ...baseIdea, isArchived: true }} />);
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+  });
+
+  it("renders Unarchive only on archived cards when handler is provided", () => {
+    render(
+      <IdeaCard
+        idea={{ ...baseIdea, isArchived: true }}
+        onUnarchive={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^unarchive$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not render Unarchive on non-archived cards", () => {
+    render(<IdeaCard idea={baseIdea} onUnarchive={vi.fn()} />);
+    expect(
+      screen.queryByRole("button", { name: /^unarchive$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("calls onUnarchive with the idea id when Unarchive is clicked", () => {
+    const onUnarchive = vi.fn();
+    render(
+      <IdeaCard
+        idea={{ ...baseIdea, isArchived: true }}
+        onUnarchive={onUnarchive}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
+    expect(onUnarchive).toHaveBeenCalledWith(baseIdea.id);
+  });
+
+  it("hides Approve / Reject / Generate on archived cards", () => {
+    render(
+      <IdeaCard
+        idea={{ ...baseIdea, status: "approved", isArchived: true }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onGenerate={vi.fn()}
+        onUnarchive={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /^approve$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^reject$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /generate article/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the loading state on Archive when pendingAction is 'archiving'", () => {
+    render(
+      <IdeaCard
+        idea={baseIdea}
+        onArchive={vi.fn()}
+        onReject={vi.fn()}
+        pendingAction="archiving"
+      />,
+    );
+    const archive = screen.getByRole("button", { name: /^archive$/i });
+    expect(archive).toHaveAttribute("aria-busy", "true");
+    expect(archive).toBeDisabled();
+  });
+
+  it("shows the loading state on Unarchive when pendingAction is 'unarchiving'", () => {
+    render(
+      <IdeaCard
+        idea={{ ...baseIdea, isArchived: true }}
+        onUnarchive={vi.fn()}
+        pendingAction="unarchiving"
+      />,
+    );
+    const unarchive = screen.getByRole("button", { name: /^unarchive$/i });
+    expect(unarchive).toHaveAttribute("aria-busy", "true");
+    expect(unarchive).toBeDisabled();
+  });
+
+  it("still renders the View Article link on archived ideas with a href", () => {
+    render(
+      <IdeaCard
+        idea={{
+          ...baseIdea,
+          status: "converted_to_article",
+          isArchived: true,
+          viewArticleHref: "/posts/article-1",
+        }}
+        onUnarchive={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /view article/i })).toHaveAttribute(
+      "href",
+      "/posts/article-1",
+    );
+  });
+
+  it("hides Archive when the idea is currently generating", () => {
+    render(
+      <IdeaCard
+        idea={{ ...baseIdea, status: "approved", isGenerating: true }}
+        onArchive={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /^archive$/i }),
+    ).not.toBeInTheDocument();
+  });
+});

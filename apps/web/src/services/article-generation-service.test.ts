@@ -207,9 +207,11 @@ import {
   IDEA_STATUS_TRANSITIONS,
   PROVIDER_ANTHROPIC,
   TRIGGER_SOURCES,
+  archiveArticleIdea,
   buildBriefFromIdea,
   completeArticleJob,
   convertIdeaToArticle,
+  countUsableIdeasForBacklog,
   createArticleJob,
   failArticleJob,
   generateArticleDraftFromIdea,
@@ -227,6 +229,7 @@ import {
   reconcileStuckArticleJobs,
   runGenerateArticleFromIdeaJob,
   runGenerateArticleIdeasJob,
+  unarchiveArticleIdea,
   updateArticleIdeaStatus,
   updateArticleJobStatus,
 } from "./article-generation-service";
@@ -272,6 +275,7 @@ function makeChain<T>(result: ChainResult<T>) {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     lt: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
@@ -1068,6 +1072,40 @@ describe("listArticleIdeasForBlog", () => {
     await listArticleIdeasForBlog("b1");
 
     expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+
+  it("adds `archived_at IS NULL` filter when includeArchived: false", async () => {
+    // Default is includeArchived: true (the dashboard wants every
+    // bucket, archive tab included). Opt-out is used by callers
+    // who only care about the active backlog.
+    const client = makeClient({
+      article_ideas: { data: [], error: null },
+    });
+    client.__chains.article_ideas!.order = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [], error: null });
+
+    await listArticleIdeasForBlog("b1", client as never, {
+      includeArchived: false,
+    });
+
+    expect(client.__chains.article_ideas!.is).toHaveBeenCalledWith(
+      "archived_at",
+      null,
+    );
+  });
+
+  it("does NOT add the archive filter when includeArchived defaults to true", async () => {
+    const client = makeClient({
+      article_ideas: { data: [], error: null },
+    });
+    client.__chains.article_ideas!.order = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [], error: null });
+
+    await listArticleIdeasForBlog("b1", client as never);
+
+    expect(client.__chains.article_ideas!.is).not.toHaveBeenCalled();
   });
 });
 
@@ -2224,6 +2262,246 @@ describe("updateArticleIdeaStatus", () => {
 });
 
 // ============================================================================
+// Archive helpers — archiveArticleIdea, unarchiveArticleIdea,
+// countUsableIdeasForBacklog
+// ============================================================================
+
+describe("archiveArticleIdea", () => {
+  it("stamps archived_at on the row", async () => {
+    const client = makeClient({
+      article_ideas: {
+        data: {
+          id: "i1",
+          blog_id: "b1",
+          status: "approved",
+          archived_at: "2026-05-20T00:00:00Z",
+        },
+        error: null,
+      },
+    });
+
+    const result = await archiveArticleIdea({
+      ideaId: "i1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.id).toBe("i1");
+    expect(result.archived_at).toBe("2026-05-20T00:00:00Z");
+    // The update call sets archived_at to *some* ISO timestamp string.
+    const updateCall = client.__chains.article_ideas!.update.mock.calls[0]?.[0];
+    expect(updateCall).toHaveProperty("archived_at");
+    expect(typeof (updateCall as { archived_at: string }).archived_at).toBe(
+      "string",
+    );
+  });
+
+  it("scopes the write to (ideaId, blogId)", async () => {
+    const client = makeClient({
+      article_ideas: {
+        data: { id: "i1", blog_id: "b1", archived_at: "now" },
+        error: null,
+      },
+    });
+
+    await archiveArticleIdea({
+      ideaId: "i1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith("id", "i1");
+    expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith(
+      "blog_id",
+      "b1",
+    );
+  });
+
+  it("throws idea_not_found when no matching row exists", async () => {
+    const client = makeClient({
+      article_ideas: { data: null, error: null },
+    });
+
+    await expect(
+      archiveArticleIdea({
+        ideaId: "missing",
+        blogId: "b1",
+        client: client as never,
+      }),
+    ).rejects.toThrow("idea_not_found");
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({
+      article_ideas: { data: null, error: { message: "db boom" } },
+    });
+
+    await expect(
+      archiveArticleIdea({
+        ideaId: "i1",
+        blogId: "b1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "db boom" });
+  });
+
+  it("uses the admin client when none is injected", async () => {
+    const client = makeClient({
+      article_ideas: {
+        data: { id: "i1", blog_id: "b1", archived_at: "now" },
+        error: null,
+      },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await archiveArticleIdea({ ideaId: "i1", blogId: "b1" });
+
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+});
+
+describe("unarchiveArticleIdea", () => {
+  it("clears archived_at on the row", async () => {
+    const client = makeClient({
+      article_ideas: {
+        data: {
+          id: "i1",
+          blog_id: "b1",
+          status: "approved",
+          archived_at: null,
+        },
+        error: null,
+      },
+    });
+
+    const result = await unarchiveArticleIdea({
+      ideaId: "i1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.archived_at).toBeNull();
+    expect(client.__chains.article_ideas!.update).toHaveBeenCalledWith({
+      archived_at: null,
+    });
+  });
+
+  it("throws idea_not_found when no matching row exists", async () => {
+    const client = makeClient({
+      article_ideas: { data: null, error: null },
+    });
+
+    await expect(
+      unarchiveArticleIdea({
+        ideaId: "missing",
+        blogId: "b1",
+        client: client as never,
+      }),
+    ).rejects.toThrow("idea_not_found");
+  });
+
+  it("uses the admin client when none is injected", async () => {
+    const client = makeClient({
+      article_ideas: {
+        data: { id: "i1", blog_id: "b1", archived_at: null },
+        error: null,
+      },
+    });
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    await unarchiveArticleIdea({ ideaId: "i1", blogId: "b1" });
+
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+
+  it("propagates supabase errors", async () => {
+    const client = makeClient({
+      article_ideas: { data: null, error: { message: "db boom" } },
+    });
+
+    await expect(
+      unarchiveArticleIdea({
+        ideaId: "i1",
+        blogId: "b1",
+        client: client as never,
+      }),
+    ).rejects.toEqual({ message: "db boom" });
+  });
+});
+
+describe("countUsableIdeasForBacklog", () => {
+  it("returns the supabase count for status IN (generated, approved) AND archived_at IS NULL", async () => {
+    const chain = makeChain({ data: null, error: null, count: 7 } as never);
+    const client = {
+      from: vi.fn(() => chain),
+      __chains: { article_ideas: chain },
+    } as unknown as MockClient;
+
+    const count = await countUsableIdeasForBacklog("b1", client as never);
+
+    expect(count).toBe(7);
+    expect(client.__chains.article_ideas!.select).toHaveBeenCalledWith("id", {
+      count: "exact",
+      head: true,
+    });
+    expect(client.__chains.article_ideas!.eq).toHaveBeenCalledWith(
+      "blog_id",
+      "b1",
+    );
+    expect(client.__chains.article_ideas!.in).toHaveBeenCalledWith("status", [
+      "generated",
+      "approved",
+    ]);
+    // Has the partial-index filter for `archived_at IS NULL`.
+    expect(client.__chains.article_ideas!.is).toHaveBeenCalledWith(
+      "archived_at",
+      null,
+    );
+  });
+
+  it("returns 0 when supabase returns a null count", async () => {
+    const chain = makeChain({ data: null, error: null, count: null } as never);
+    const client = {
+      from: vi.fn(() => chain),
+      __chains: { article_ideas: chain },
+    } as unknown as MockClient;
+
+    const count = await countUsableIdeasForBacklog("b1", client as never);
+
+    expect(count).toBe(0);
+  });
+
+  it("propagates supabase errors", async () => {
+    const chain = makeChain({
+      data: null,
+      error: { message: "db boom" },
+      count: 0,
+    } as never);
+    const client = {
+      from: vi.fn(() => chain),
+      __chains: { article_ideas: chain },
+    } as unknown as MockClient;
+
+    await expect(
+      countUsableIdeasForBacklog("b1", client as never),
+    ).rejects.toEqual({ message: "db boom" });
+  });
+
+  it("uses the admin client when none is injected", async () => {
+    const chain = makeChain({ data: null, error: null, count: 4 } as never);
+    const client = {
+      from: vi.fn(() => chain),
+      __chains: { article_ideas: chain },
+    } as unknown as MockClient;
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await countUsableIdeasForBacklog("b1");
+    expect(result).toBe(4);
+    expect(mockedCreateAdmin).toHaveBeenCalledOnce();
+  });
+});
+
+// ============================================================================
 // buildBriefFromIdea
 // ============================================================================
 
@@ -2319,6 +2597,13 @@ function makeArticleOrchestrationClient(opts?: {
   updateArticleError?: { message: string };
   ideaMissing?: boolean;
   /**
+   * Set the idea row's `archived_at` to an ISO timestamp so the
+   * archive race guard fires in both `queueGenerateArticleFromIdea`
+   * and `runGenerateArticleFromIdeaJob`. Defaults to `null`
+   * (active, unarchived idea).
+   */
+  ideaArchivedAt?: string | null;
+  /**
    * Override the blog's `settings` jsonb. Defaults to a minimal
    * identity block (which the normalizer fills out with defaults).
    * Tests that exercise the v8 image-picker gates pass a custom
@@ -2344,6 +2629,7 @@ function makeArticleOrchestrationClient(opts?: {
     : {
         ...ideaRowStub,
         status: opts?.ideaStatus ?? "approved",
+        archived_at: opts?.ideaArchivedAt ?? null,
       };
 
   const client = makeClient({
@@ -3595,6 +3881,30 @@ describe("queueGenerateArticleFromIdea", () => {
     ).rejects.toThrow(/idea_not_approved/);
   });
 
+  it("throws idea_archived when the approved idea has been archived since approval", async () => {
+    // Race guard: the user can archive an `approved` idea between
+    // listApprovedIdeasForBlog (autopilot) or the dashboard click
+    // (manual) and this enqueue. Bail rather than spawning a job for
+    // an idea the dashboard has stamped as "removed from backlog".
+    const archivedClient = makeArticleOrchestrationClient({
+      ideaArchivedAt: "2026-05-20T00:00:00.000Z",
+    });
+    await expect(
+      queueGenerateArticleFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: archivedClient as never,
+      }),
+    ).rejects.toThrow(/idea_archived/);
+    // No article placeholder + no article_jobs row created for
+    // archived ideas — the bail-out happens before any insert.
+    expect(archivedClient.__chains.articles!.insert).not.toHaveBeenCalled();
+    expect(archivedClient.__chains.article_jobs!.insert).not.toHaveBeenCalled();
+  });
+
   it("marks the job failed and propagates when the article placeholder insert fails", async () => {
     const client = makeArticleOrchestrationClient({
       insertArticleError: { message: "constraint violation" },
@@ -3835,6 +4145,29 @@ describe("runGenerateArticleFromIdeaJob", () => {
       }),
     ).rejects.toThrow(/idea_not_approved/);
     expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+  });
+
+  it("fails fast when the idea was archived between queue and run (race guard)", async () => {
+    // The user can archive an approved idea AFTER the job is queued
+    // but BEFORE the workflow picks it up. The workflow must bail
+    // before consuming tokens or calling the AI provider.
+    const client = makeArticleOrchestrationClient({
+      ideaArchivedAt: "2026-05-20T00:00:00.000Z",
+    });
+
+    await expect(
+      runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/idea_archived/);
+    expect(mockedConsumeTeamTokens).not.toHaveBeenCalled();
+    expect(mockedGenerateArticleDraft).not.toHaveBeenCalled();
   });
 
   it("propagates the idea-load supabase error", async () => {

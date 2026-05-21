@@ -485,47 +485,62 @@ function pickImageProvider(
   return fallback;
 }
 
-const READING_LEVELS = [
+/**
+ * Allowed enum value tuples for each closed-enum field on the blog
+ * settings. Exported so the AI editing guide
+ * (`buildBlogSettingsTemplateAiGuide`) can render them as the single
+ * source of truth — keeping the prompt in lockstep with the runtime
+ * normalizer below avoids "AI returned a value the app silently
+ * dropped" bug class.
+ *
+ * Kept as `readonly` tuples (with `satisfies` where the matching
+ * union type exists) so:
+ *   * `loadBlogSettings` can pass them straight into `pickEnum`,
+ *   * the AI-guide renderer can `for…of` them without a cast,
+ *   * accidental drift between the type and the runtime tuple
+ *     fails at the `satisfies` boundary instead of silently.
+ */
+export const READING_LEVELS = [
   "elementary",
   "intermediate",
   "advanced",
   "expert",
 ] as const satisfies readonly BlogReadingLevel[];
-const POVS = [
+export const POVS = [
   "first_person_singular",
   "first_person_plural",
   "second_person",
   "third_person",
   "editorial",
 ] as const satisfies readonly BlogPointOfView[];
-const FRESHNESS = [
+export const FRESHNESS = [
   "evergreen",
   "trending",
   "news",
   "tutorial",
 ] as const satisfies readonly BlogContentFreshness[];
-const KEYWORD_USAGE = ["natural", "balanced", "aggressive"] as const;
-const LINK_PREFS = ["none", "occasional", "aggressive"] as const;
-const SLUG_FORMATS = [
+export const KEYWORD_USAGE = ["natural", "balanced", "aggressive"] as const;
+export const LINK_PREFS = ["none", "occasional", "aggressive"] as const;
+export const SLUG_FORMATS = [
   "lowercase-hyphenated",
   "title-case",
   "short-id",
 ] as const;
-const FEATURED_IMG_PREFS = ["always", "when_relevant", "never"] as const;
-const PUB_DESTINATIONS = ["wordpress", "none"] as const;
-const PUB_STATUSES = [
+export const FEATURED_IMG_PREFS = ["always", "when_relevant", "never"] as const;
+export const PUB_DESTINATIONS = ["wordpress", "none"] as const;
+export const PUB_STATUSES = [
   "draft",
   "scheduled",
   "published",
 ] as const satisfies readonly BlogPublishStatus[];
-const IMAGE_SOURCES = [
+export const IMAGE_SOURCES = [
   "ai_generated",
   "stock_unsplash",
   "stock_pexels",
   "manual_upload",
   "none",
 ] as const satisfies readonly BlogImageSource[];
-const IMAGE_PROVIDERS = [
+export const IMAGE_PROVIDERS = [
   "pexels",
   "none",
 ] as const satisfies readonly BlogImageProvider[];
@@ -544,7 +559,7 @@ const IMAGE_PROVIDERS = [
 const LEGACY_IMAGE_PROVIDER_MAP: Record<string, BlogImageProvider> = {
   unsplash: "pexels",
 };
-const AUTOMATION_MODES = [
+export const AUTOMATION_MODES = [
   "manual",
   "autopilot",
 ] as const satisfies readonly BlogAutomationMode[];

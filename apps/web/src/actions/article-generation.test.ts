@@ -31,9 +31,11 @@ vi.mock("@/services/team-policy-service", () => {
 });
 
 vi.mock("@/services/article-generation-service", () => ({
+  archiveArticleIdea: vi.fn(),
   listActiveArticleJobsForUser: vi.fn(),
   queueGenerateArticleFromIdea: vi.fn(),
   queueGenerateArticleIdeas: vi.fn(),
+  unarchiveArticleIdea: vi.fn(),
   updateArticleIdeaStatus: vi.fn(),
 }));
 
@@ -59,17 +61,21 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertCan, TeamPermissionError } from "@/services/team-policy-service";
 import {
+  archiveArticleIdea,
   listActiveArticleJobsForUser,
   queueGenerateArticleFromIdea,
   queueGenerateArticleIdeas,
+  unarchiveArticleIdea,
   updateArticleIdeaStatus,
 } from "@/services/article-generation-service";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
 import { generateIdeasWorkflow } from "@/workflows/generate-ideas";
 import {
+  archiveIdea,
   getActiveTeamJobs,
   generateArticleFromIdea,
   generateIdeasManual,
+  unarchiveIdea,
   updateIdeaStatus,
 } from "./article-generation";
 
@@ -80,6 +86,8 @@ const mockedQueueGenerateIdeas = vi.mocked(queueGenerateArticleIdeas);
 const mockedListActiveJobs = vi.mocked(listActiveArticleJobsForUser);
 const mockedQueueGenerateArticle = vi.mocked(queueGenerateArticleFromIdea);
 const mockedUpdateArticleIdeaStatus = vi.mocked(updateArticleIdeaStatus);
+const mockedArchiveArticleIdea = vi.mocked(archiveArticleIdea);
+const mockedUnarchiveArticleIdea = vi.mocked(unarchiveArticleIdea);
 const mockedRevalidatePath = vi.mocked(revalidatePath);
 const mockedStart = vi.mocked(start);
 
@@ -139,17 +147,40 @@ describe("generateIdeasManual", () => {
     expect(mockedStart).not.toHaveBeenCalled();
   });
 
-  it("rejects out-of-range counts", async () => {
-    const tooLow = await generateIdeasManual("t1", "p1", "b1", { count: 0 });
-    expect(tooLow.error).toMatch(/between/);
+  it("clamps in-range counts that exceed the manual maximum", async () => {
+    await generateIdeasManual("t1", "p1", "b1", { count: 100 });
 
-    const tooHigh = await generateIdeasManual("t1", "p1", "b1", { count: 100 });
-    expect(tooHigh.error).toMatch(/between/);
+    // 100 is clamped to 20 (MANUAL_GENERATE_IDEAS_MAX_COUNT); the
+    // server action passes the clamped value through to the queue.
+    expect(mockedQueueGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 20 }),
+    );
+  });
 
+  it("clamps in-range counts that fall below the manual minimum", async () => {
+    await generateIdeasManual("t1", "p1", "b1", { count: 0 });
+
+    // 0 is clamped to 1 (MANUAL_GENERATE_IDEAS_MIN_COUNT).
+    expect(mockedQueueGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 1 }),
+    );
+  });
+
+  it("rejects hostile counts (NaN, negative, way-too-big)", async () => {
     const notFinite = await generateIdeasManual("t1", "p1", "b1", {
       count: Number.NaN,
     });
     expect(notFinite.error).toMatch(/between/);
+
+    const negative = await generateIdeasManual("t1", "p1", "b1", {
+      count: -1,
+    });
+    expect(negative.error).toMatch(/between/);
+
+    const huge = await generateIdeasManual("t1", "p1", "b1", {
+      count: 100_000,
+    });
+    expect(huge.error).toMatch(/between/);
 
     expect(mockedQueueGenerateIdeas).not.toHaveBeenCalled();
   });
@@ -722,6 +753,222 @@ describe("generateArticleFromIdea", () => {
 
     const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
     expect(result.error).toBe("Could not generate article.");
+  });
+
+  it("translates idea_archived into a friendly error", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedQueueGenerateArticle.mockRejectedValueOnce(
+      new Error("idea_archived"),
+    );
+
+    const result = await generateArticleFromIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toMatch(/archived/i);
+    expect(result.error).toMatch(/unarchive/i);
+  });
+});
+
+describe("archiveIdea", () => {
+  it("rejects requests with an empty idea id", async () => {
+    const result = await archiveIdea("t1", "p1", "b1", "");
+    expect(result.error).toBe("Idea id is required.");
+    expect(mockedArchiveArticleIdea).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated requests", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient(null) as never);
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("You must be signed in.");
+    expect(mockedAssertCan).not.toHaveBeenCalled();
+  });
+
+  it("calls assertCan with manage_blog", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockResolvedValueOnce({
+      id: "i1",
+      archived_at: "2026-05-20T00:00:00Z",
+    } as never);
+
+    await archiveIdea("t1", "p1", "b1", "i1");
+
+    expect(mockedAssertCan).toHaveBeenCalledWith(
+      "t1",
+      "u1",
+      "manage_blog",
+      expect.anything(),
+    );
+  });
+
+  it("returns Blog not found when the team→project→blog chain fails", async () => {
+    const { client } = makeAdminWithBlog(null);
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+
+    expect(result.error).toBe("Blog not found.");
+    expect(mockedArchiveArticleIdea).not.toHaveBeenCalled();
+  });
+
+  it("delegates to the service helper with the admin client", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockResolvedValueOnce({
+      id: "i1",
+      archived_at: "2026-05-20T00:00:00Z",
+    } as never);
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+
+    expect(mockedArchiveArticleIdea).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ideaId: "i1",
+        blogId: "b1",
+        client,
+      }),
+    );
+    expect(result.data).toEqual({
+      ideaId: "i1",
+      archivedAt: "2026-05-20T00:00:00Z",
+    });
+    expect(result.error).toBeNull();
+  });
+
+  it("revalidates the ideas + blog paths on success", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockResolvedValueOnce({
+      id: "i1",
+      archived_at: "2026-05-20T00:00:00Z",
+    } as never);
+
+    await archiveIdea("t1", "p1", "b1", "i1");
+
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs/b1/ideas",
+    );
+    expect(mockedRevalidatePath).toHaveBeenCalledWith(
+      "/teams/t1/projects/p1/blogs/b1",
+    );
+  });
+
+  it("translates idea_not_found into a friendly error", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockRejectedValueOnce(new Error("idea_not_found"));
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("Idea not found.");
+  });
+
+  it("returns the TeamPermissionError code when caller can't manage the blog", async () => {
+    mockedAssertCan.mockRejectedValueOnce(
+      new TeamPermissionError("forbidden", "manage_blog", "viewer" as never),
+    );
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("forbidden");
+  });
+
+  it("propagates the raw message for unknown service errors", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockRejectedValueOnce(new Error("db_offline"));
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("db_offline");
+  });
+
+  it("falls back to a default message when something non-Error throws", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedArchiveArticleIdea.mockRejectedValueOnce("string-failure");
+
+    const result = await archiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("Could not archive idea.");
+  });
+});
+
+describe("unarchiveIdea", () => {
+  it("rejects requests with an empty idea id", async () => {
+    const result = await unarchiveIdea("t1", "p1", "b1", "");
+    expect(result.error).toBe("Idea id is required.");
+    expect(mockedUnarchiveArticleIdea).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated requests", async () => {
+    mockedCreateClient.mockResolvedValue(makeAuthedClient(null) as never);
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("You must be signed in.");
+  });
+
+  it("delegates to the service helper with the admin client", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedUnarchiveArticleIdea.mockResolvedValueOnce({
+      id: "i1",
+      archived_at: null,
+    } as never);
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+
+    expect(mockedUnarchiveArticleIdea).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ideaId: "i1",
+        blogId: "b1",
+        client,
+      }),
+    );
+    expect(result.data).toEqual({ ideaId: "i1" });
+    expect(result.error).toBeNull();
+  });
+
+  it("translates idea_not_found into a friendly error", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedUnarchiveArticleIdea.mockRejectedValueOnce(
+      new Error("idea_not_found"),
+    );
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("Idea not found.");
+  });
+
+  it("returns Blog not found when the team→project→blog chain fails", async () => {
+    const { client } = makeAdminWithBlog(null);
+    mockedCreateAdmin.mockReturnValue(client as never);
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+
+    expect(result.error).toBe("Blog not found.");
+    expect(mockedUnarchiveArticleIdea).not.toHaveBeenCalled();
+  });
+
+  it("returns the TeamPermissionError code when caller can't manage the blog", async () => {
+    mockedAssertCan.mockRejectedValueOnce(
+      new TeamPermissionError("forbidden", "manage_blog", "viewer" as never),
+    );
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("forbidden");
+  });
+
+  it("propagates the raw message for unknown service errors", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedUnarchiveArticleIdea.mockRejectedValueOnce(new Error("db_offline"));
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("db_offline");
+  });
+
+  it("falls back to a default message when something non-Error throws", async () => {
+    const { client } = makeAdminWithBlog({ id: "b1" });
+    mockedCreateAdmin.mockReturnValue(client as never);
+    mockedUnarchiveArticleIdea.mockRejectedValueOnce("string-failure");
+
+    const result = await unarchiveIdea("t1", "p1", "b1", "i1");
+    expect(result.error).toBe("Could not unarchive idea.");
   });
 });
 

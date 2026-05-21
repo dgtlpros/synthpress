@@ -18,6 +18,7 @@ vi.mock("./team-billing-service", () => ({
 }));
 
 vi.mock("./article-generation-service", () => ({
+  countUsableIdeasForBacklog: vi.fn(),
   generateArticleIdeas: vi.fn(),
   queueGenerateArticleFromIdea: vi.fn(),
 }));
@@ -34,6 +35,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateArticleWorkflow } from "@/workflows/generate-article";
 import { getTeamPlan } from "./team-billing-service";
 import {
+  countUsableIdeasForBacklog,
   generateArticleIdeas,
   queueGenerateArticleFromIdea,
 } from "./article-generation-service";
@@ -70,6 +72,7 @@ const mockedStart = vi.mocked(start);
 const mockedGetTeamPlan = vi.mocked(getTeamPlan);
 const mockedGenerateIdeas = vi.mocked(generateArticleIdeas);
 const mockedQueueArticle = vi.mocked(queueGenerateArticleFromIdea);
+const mockedCountUsable = vi.mocked(countUsableIdeasForBacklog);
 const mockedCreateRun = vi.mocked(createBlogAutopilotRun);
 const mockedUpdateRun = vi.mocked(updateBlogAutopilotRunStatus);
 const mockedCompleteRun = vi.mocked(completeBlogAutopilotRun);
@@ -88,6 +91,7 @@ function makeChain<T>(result: ChainResult<T>) {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     lt: vi.fn().mockReturnThis(),
     gte: vi.fn().mockReturnThis(),
@@ -273,6 +277,16 @@ function makePerBlogClient(opts: PerBlogClientOpts = {}): MockClient {
     data: todayUsageEvents,
     error: null,
   });
+  // `countUsableIdeasForBacklog` is mocked at the module level (its
+  // service module is fully mocked) so the article_ideas chain above
+  // doesn't drive it — but it sits on the critical path now (deficit
+  // math for autopilot's idea top-up). Default the count to whatever
+  // `approvedIdeas` the test set up, so the legacy fixture contract
+  // ("the test says the backlog has N approved ideas") matches the
+  // new "usable backlog has N items" semantics. Tests that need a
+  // different count (e.g. exercising the top-up deficit) call
+  // `mockedCountUsable.mockResolvedValueOnce(...)` per-test.
+  mockedCountUsable.mockResolvedValue(approvedIdeas.length);
   return client;
 }
 
@@ -286,6 +300,12 @@ beforeEach(() => {
   mockedCompleteRun.mockResolvedValue(undefined);
   mockedFailRun.mockResolvedValue(undefined);
   mockedStart.mockResolvedValue({ id: "wf-run-1" } as never);
+  // Default usable-backlog count = 0 so the deficit equals the full
+  // `backlogThreshold` for any test that doesn't override. Tests that
+  // assert "no idea generation happens because backlog is full" must
+  // override this with `mockedCountUsable.mockResolvedValueOnce(N)`
+  // where N >= backlogThreshold.
+  mockedCountUsable.mockResolvedValue(0);
   mockedGetTeamPlan.mockResolvedValue({
     ownerId: "owner-1",
     planKey: "starter",
@@ -448,7 +468,11 @@ describe("runAutopilotForBlog — backlog top-up", () => {
         blogId: "blog-1",
         teamId: "t1",
         triggerSource: "autopilot",
-        jobMetadata: { autopilotRunId: "run-1" },
+        // `jobMetadata` now also carries the top-up math metrics
+        // (`backlogThreshold`, `usableBacklog`) so operators can see
+        // why a tick generated N ideas — keep the assertion forward-
+        // compatible by only pinning the autopilot run id.
+        jobMetadata: expect.objectContaining({ autopilotRunId: "run-1" }),
       }),
     );
     expect(out.ideasGenerated).toBe(2);
@@ -581,6 +605,120 @@ describe("runAutopilotForBlog — backlog top-up", () => {
         runId: "run-1",
         errorMessage: expect.stringContaining("Claude down"),
         output: expect.objectContaining({ stage: "generating_ideas" }),
+      }),
+    );
+  });
+});
+
+// ============================================================================
+// runAutopilotForBlog — deficit-based idea top-up math
+// ============================================================================
+
+describe("runAutopilotForBlog — deficit-based idea top-up", () => {
+  it("only requests the deficit when usableBacklog is below threshold", async () => {
+    // backlogThreshold=10, usableBacklog=7 → request 3 (NOT 10).
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 10 }),
+      },
+      approvedIdeas: [],
+    });
+    mockedCountUsable.mockResolvedValue(7);
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(mockedGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 3 }),
+    );
+  });
+
+  it("requests exactly MAX_AUTOPILOT_IDEAS_PER_RUN when deficit exceeds the per-run cap", async () => {
+    // backlogThreshold=50, usableBacklog=0 → deficit=50, but the
+    // per-run cap clamps it to MAX_AUTOPILOT_IDEAS_PER_RUN (10).
+    // Next cron tick keeps topping up.
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 50 }),
+      },
+      approvedIdeas: [],
+    });
+    mockedCountUsable.mockResolvedValue(0);
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(mockedGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 10 }),
+    );
+  });
+
+  it("does NOT call generateArticleIdeas when usableBacklog >= threshold (deficit=0)", async () => {
+    // backlogThreshold=5, usableBacklog=5 → deficit=0 → no top-up.
+    // The autopilot may still spawn article workflows from the
+    // approved-ideas list, so we don't assert on `mockedQueueArticle`
+    // here.
+    const ideas = Array.from({ length: 5 }, (_, i) => ({
+      id: `i-${i}`,
+      title: `Idea ${i}`,
+    }));
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 5 }),
+      },
+      approvedIdeas: ideas,
+    });
+    mockedCountUsable.mockResolvedValue(5);
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(mockedGenerateIdeas).not.toHaveBeenCalled();
+  });
+
+  it("stamps backlogThreshold and usableBacklog into the generate-ideas jobMetadata so operators can debug top-up math", async () => {
+    const client = makePerBlogClient({
+      blogRow: {
+        id: "blog-1",
+        name: "x",
+        settings: autopilotSettings({ backlogThreshold: 8 }),
+      },
+      approvedIdeas: [],
+    });
+    mockedCountUsable.mockResolvedValue(3);
+
+    await runAutopilotForBlog({
+      teamId: "t1",
+      projectId: "p1",
+      blogId: "blog-1",
+      client: client as never,
+    });
+
+    expect(mockedGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({
+        count: 5, // 8 - 3
+        jobMetadata: expect.objectContaining({
+          backlogThreshold: 8,
+          usableBacklog: 3,
+        }),
       }),
     );
   });

@@ -35,8 +35,6 @@ afterEach(cleanup);
  * scope queries to the right region so getByRole stays unambiguous.
  */
 function getDialog(): HTMLElement {
-  // The Modal atom uses native <dialog>, which has implicit role="dialog".
-  // jsdom doesn't always expose the role, so fall back to the tag selector.
   const byRole = screen.queryByRole("dialog");
   if (byRole) return byRole as HTMLElement;
   const dialog = document.querySelector("dialog");
@@ -59,16 +57,36 @@ function clickEmptyStateGenerate(): void {
   fireEvent.click(buttons[0]!);
 }
 
+function clickHeaderGenerate(): void {
+  // When ideas exist, the Generate button lives in the dashboard
+  // header. Same find-outside-dialog pattern; just a different
+  // matching string (the modal's submit button now says "Generate N
+  // ideas" so the bare "Generate ideas" search wouldn't disambiguate).
+  const buttons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>("button"),
+  ).filter(
+    (b) =>
+      b.textContent?.trim() === "Generate ideas" && !getDialog().contains(b),
+  );
+  if (buttons.length === 0) {
+    throw new Error("no header Generate ideas button");
+  }
+  fireEvent.click(buttons[0]!);
+}
+
 function clickModalSubmit(): void {
   const dialog = getDialog();
-  // jsdom doesn't expose dialog children to the a11y tree without a real
-  // showModal, so we opt into hidden nodes.
-  fireEvent.click(
-    within(dialog).getByRole("button", {
-      name: /generate ideas/i,
-      hidden: true,
-    }),
-  );
+  // The submit button label is now dynamic: "Generate 5 ideas" /
+  // "Generate 10 ideas" / "Generate 1 idea" depending on count.
+  const submit = within(dialog)
+    .getAllByRole("button", { hidden: true })
+    .find(
+      (b) =>
+        /^Generate \d+ idea/i.test(b.textContent?.trim() ?? "") &&
+        b.getAttribute("type") === "submit",
+    );
+  if (!submit) throw new Error("no modal submit button");
+  fireEvent.click(submit);
 }
 
 function clickModalCancel(): void {
@@ -88,7 +106,6 @@ const mockedUseIdeaActions = vi.mocked(useIdeaActions);
 const mockedUseGenerateArticleFromIdea = vi.mocked(useGenerateArticleFromIdea);
 
 beforeAll(() => {
-  // jsdom needs the dialog API stubbed.
   if (!HTMLDialogElement.prototype.showModal) {
     HTMLDialogElement.prototype.showModal = function showModal(
       this: HTMLDialogElement,
@@ -110,7 +127,7 @@ const baseProps = {
   projectId: "p1",
   blogId: "b1",
   initialIdeas: [],
-  defaultCount: 10,
+  defaultCount: 5,
   creditsCost: 1,
 };
 
@@ -118,6 +135,8 @@ const generate = vi.fn();
 const resetError = vi.fn();
 const approve = vi.fn();
 const reject = vi.fn();
+const archive = vi.fn();
+const unarchive = vi.fn();
 const resetIdeaError = vi.fn();
 const generateArticle = vi.fn();
 const resetGenerationError = vi.fn();
@@ -128,7 +147,10 @@ function defaultIdeaActions(
   return {
     approve,
     reject,
+    archive,
+    unarchive,
     pendingIdeaId: null,
+    pendingAction: null,
     pendingStatus: null,
     errorIdeaId: null,
     errorMessage: null,
@@ -171,11 +193,12 @@ describe("IdeasListConnector", () => {
     render(<IdeasListConnector {...baseProps} />);
 
     clickEmptyStateGenerate();
-    expect(screen.getByText("Generate 10 article ideas")).toBeVisible();
+    // The static title is the new copy.
+    expect(screen.getByText("Generate article ideas")).toBeVisible();
   });
 
-  it("calls the hook with the brief on submit", () => {
-    render(<IdeasListConnector {...baseProps} />);
+  it("submits the brief + count to the hook", () => {
+    render(<IdeasListConnector {...baseProps} defaultCount={5} />);
 
     clickEmptyStateGenerate();
     fireEvent.change(screen.getByLabelText(/topic or brief/i), {
@@ -183,21 +206,31 @@ describe("IdeasListConnector", () => {
     });
     clickModalSubmit();
 
-    expect(generate).toHaveBeenCalledWith({ brief: "ai agents" });
+    expect(generate).toHaveBeenCalledWith({ brief: "ai agents", count: 5 });
   });
 
-  it("submits with no brief when the textarea is empty", () => {
-    render(<IdeasListConnector {...baseProps} />);
+  it("submits with undefined brief when the textarea is empty", () => {
+    render(<IdeasListConnector {...baseProps} defaultCount={5} />);
 
     clickEmptyStateGenerate();
     clickModalSubmit();
 
-    expect(generate).toHaveBeenCalledWith({ brief: undefined });
+    expect(generate).toHaveBeenCalledWith({ brief: undefined, count: 5 });
+  });
+
+  it("submits the picked preset count when a chip is clicked", () => {
+    render(<IdeasListConnector {...baseProps} defaultCount={5} />);
+
+    clickEmptyStateGenerate();
+    fireEvent.click(
+      within(getDialog()).getByRole("radio", { name: "10", hidden: true }),
+    );
+    clickModalSubmit();
+
+    expect(generate).toHaveBeenCalledWith({ brief: undefined, count: 10 });
   });
 
   it("propagates the loading flag + error from the hook", () => {
-    // Use mockReturnValue (not Once) because the click triggers a re-render
-    // and we need the loading + error state to persist across both renders.
     mockedUseGenerateIdeas.mockReturnValue({
       generate,
       isGenerating: true,
@@ -231,7 +264,6 @@ describe("IdeasListConnector", () => {
     clickEmptyStateGenerate();
     clickModalCancel();
 
-    // Cancel button is disabled while generating; resetError must not fire.
     expect(resetError).not.toHaveBeenCalled();
   });
 
@@ -243,7 +275,7 @@ describe("IdeasListConnector", () => {
     expect(resetError).toHaveBeenCalled();
   });
 
-  it("clears the brief via the onSuccess callback after a successful generation", () => {
+  it("clears the brief + resets the count via onSuccess after a successful generation", () => {
     let capturedOnSuccess: (() => void) | undefined;
     mockedUseGenerateIdeas.mockImplementation(({ onSuccess }) => {
       capturedOnSuccess = onSuccess as (() => void) | undefined;
@@ -256,19 +288,26 @@ describe("IdeasListConnector", () => {
       };
     });
 
-    render(<IdeasListConnector {...baseProps} />);
+    render(<IdeasListConnector {...baseProps} defaultCount={5} />);
     clickEmptyStateGenerate();
     fireEvent.change(screen.getByLabelText(/topic or brief/i), {
       target: { value: "x" },
     });
+    // Bump count off the default so we can prove it resets.
+    fireEvent.click(
+      within(getDialog()).getByRole("radio", { name: "10", hidden: true }),
+    );
 
     capturedOnSuccess?.();
 
-    // Re-open the modal and check the textarea was reset.
     clickEmptyStateGenerate();
     expect(
       (screen.getByLabelText(/topic or brief/i) as HTMLTextAreaElement).value,
     ).toBe("");
+    // Count default is restored — the "5" preset is checked.
+    expect(
+      within(getDialog()).getByRole("radio", { name: "5", hidden: true }),
+    ).toHaveAttribute("aria-checked", "true");
   });
 
   it("renders the supplied initialIdeas + creditsCost", () => {
@@ -292,15 +331,7 @@ describe("IdeasListConnector", () => {
     );
 
     expect(screen.getByText("Existing idea")).toBeInTheDocument();
-    // With ideas present, the "Generate ideas" button lives in the
-    // IdeasList header, not the empty-state card.
-    const headerButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>("button"),
-    ).find(
-      (b) =>
-        /generate ideas/i.test(b.textContent ?? "") && !getDialog().contains(b),
-    );
-    fireEvent.click(headerButton!);
+    clickHeaderGenerate();
     const para = screen.getByText(/This will use/i);
     expect(para).toHaveTextContent("3 synth tokens");
   });
@@ -351,10 +382,59 @@ describe("IdeasListConnector", () => {
     expect(reject).toHaveBeenCalledWith("i1");
   });
 
+  it("forwards Archive clicks to the useIdeaActions hook", () => {
+    render(
+      <IdeasListConnector
+        {...baseProps}
+        initialIdeas={[
+          {
+            id: "i1",
+            title: "Idea 1",
+            status: "generated",
+            targetKeyword: null,
+            executiveSummary: null,
+            articleType: null,
+            estimatedWordCount: null,
+            createdAt: new Date().toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    expect(archive).toHaveBeenCalledWith("i1");
+  });
+
+  it("forwards Unarchive clicks to the useIdeaActions hook", () => {
+    render(
+      <IdeasListConnector
+        {...baseProps}
+        initialIdeas={[
+          {
+            id: "i1",
+            title: "Archived idea",
+            status: "generated",
+            targetKeyword: null,
+            executiveSummary: null,
+            articleType: null,
+            estimatedWordCount: null,
+            createdAt: new Date().toISOString(),
+            isArchived: true,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /archived/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
+    expect(unarchive).toHaveBeenCalledWith("i1");
+  });
+
   it("propagates the pending state from useIdeaActions to the matching card", () => {
     mockedUseIdeaActions.mockReturnValueOnce(
       defaultIdeaActions({
         pendingIdeaId: "i1",
+        pendingAction: "approved",
         pendingStatus: "approved",
       }),
     );
@@ -379,6 +459,36 @@ describe("IdeasListConnector", () => {
 
     const approveBtn = screen.getByRole("button", { name: /approve/i });
     expect(approveBtn).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("propagates an archive pending state to the matching card", () => {
+    mockedUseIdeaActions.mockReturnValueOnce(
+      defaultIdeaActions({
+        pendingIdeaId: "i1",
+        pendingAction: "archiving",
+      }),
+    );
+
+    render(
+      <IdeasListConnector
+        {...baseProps}
+        initialIdeas={[
+          {
+            id: "i1",
+            title: "Idea 1",
+            status: "generated",
+            targetKeyword: null,
+            executiveSummary: null,
+            articleType: null,
+            estimatedWordCount: null,
+            createdAt: new Date().toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    const archiveBtn = screen.getByRole("button", { name: /^archive$/i });
+    expect(archiveBtn).toHaveAttribute("aria-busy", "true");
   });
 
   it("renders the inline error from useIdeaActions on the failing card", () => {
@@ -407,6 +517,8 @@ describe("IdeasListConnector", () => {
       />,
     );
 
+    // Approved card lives in the Approved tab — switch to see it.
+    fireEvent.click(screen.getByRole("tab", { name: /^approved/i }));
     expect(screen.getByRole("alert")).toHaveTextContent(/can't be changed/i);
   });
 
@@ -429,6 +541,7 @@ describe("IdeasListConnector", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /^approved/i }));
     fireEvent.click(screen.getByRole("button", { name: /generate article/i }));
     expect(generateArticle).toHaveBeenCalledWith("i1");
   });
@@ -456,6 +569,7 @@ describe("IdeasListConnector", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /^approved/i }));
     const generateBtn = screen.getByRole("button", {
       name: /generate article/i,
     });
@@ -488,6 +602,7 @@ describe("IdeasListConnector", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /^approved/i }));
     expect(screen.getByRole("alert")).toHaveTextContent(/synth tokens/i);
   });
 
@@ -523,6 +638,7 @@ describe("IdeasListConnector", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /^approved/i }));
     expect(screen.getByRole("alert")).toHaveTextContent("actions error");
   });
 });
