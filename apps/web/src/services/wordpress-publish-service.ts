@@ -15,6 +15,12 @@ import { getImageProvider } from "./image-providers/registry";
 import { ImageSearchError } from "./image-providers/types";
 import { extractArticleSections } from "@/lib/extract-article-sections";
 import type { SectionImageForHtml } from "@/lib/markdown-to-html";
+import {
+  type BlogPublishingSettings,
+  loadBlogSettings,
+} from "@/lib/blog-settings";
+import type { Json } from "@/lib/supabase/database.types";
+import { resolvePublishingMetaForPost } from "./wordpress-publishing-defaults";
 
 /**
  * WordPress publishing helpers used by the Article detail page.
@@ -65,6 +71,7 @@ export interface BlogConnectionRow {
   wp_url: string | null;
   wp_username: string | null;
   wp_app_password: string | null;
+  settings: Json | null;
 }
 
 export interface WordPressSyncInput {
@@ -232,11 +239,17 @@ async function loadBlogConnection(
 ): Promise<BlogConnectionRow | null> {
   const { data, error } = await client
     .from("blogs")
-    .select("wp_url, wp_username, wp_app_password")
+    .select("wp_url, wp_username, wp_app_password, settings")
     .eq("id", blogId)
     .maybeSingle();
   if (error) throw error;
   return data ?? null;
+}
+
+function publishingSettingsFromBlogRow(
+  blog: BlogConnectionRow,
+): BlogPublishingSettings {
+  return loadBlogSettings(blog.settings).publishing;
 }
 
 /**
@@ -329,13 +342,23 @@ interface WordPressPayload extends Record<string, unknown> {
    * blow away a remote-set featured image on update.
    */
   featured_media?: number;
+  categories?: number[];
+  tags?: number[];
+  author?: number;
 }
 
-function buildWordPressPayload(
+export interface WordPressPayloadPublishingMeta {
+  categoryIds: number[];
+  tagIds: number[];
+  authorId: number | null;
+}
+
+export function buildWordPressPayload(
   article: ArticleForPublish,
   html: string,
   status: "draft" | "publish",
   featuredMediaId: number | null,
+  publishingMeta?: WordPressPayloadPublishingMeta,
 ): WordPressPayload {
   const payload: WordPressPayload = {
     title: article.title,
@@ -348,6 +371,18 @@ function buildWordPressPayload(
   }
   if (featuredMediaId !== null) {
     payload.featured_media = featuredMediaId;
+  }
+  if (publishingMeta?.categoryIds.length) {
+    payload.categories = publishingMeta.categoryIds;
+  }
+  if (publishingMeta?.tagIds.length) {
+    payload.tags = publishingMeta.tagIds;
+  }
+  if (
+    publishingMeta?.authorId !== null &&
+    publishingMeta?.authorId !== undefined
+  ) {
+    payload.author = publishingMeta.authorId;
   }
   return payload;
 }
@@ -491,12 +526,23 @@ async function syncArticleToWordPress(
   // (image_fetch_failed, image_invalid_content_type,
   // wp_media_upload_failed, wp_invalid_media_response) — we let
   // them propagate so the caller's UI surfaces the friendly copy.
-  const featuredMediaId = await ensureFeaturedMediaUploaded({
-    article,
+  const publishing = publishingSettingsFromBlogRow(blog);
+
+  const featuredMediaId = publishing.uploadFeaturedImage
+    ? await ensureFeaturedMediaUploaded({
+        article,
+        wpUrl,
+        auth,
+        fetchImpl,
+        client,
+      })
+    : null;
+
+  const resolvedMeta = await resolvePublishingMetaForPost({
     wpUrl,
     auth,
+    publishing,
     fetchImpl,
-    client,
   });
 
   // Section-image upload. Three steps:
@@ -552,6 +598,11 @@ async function syncArticleToWordPress(
     html,
     wpStatus,
     featuredMediaId,
+    {
+      categoryIds: resolvedMeta.categoryIds,
+      tagIds: resolvedMeta.tagIds,
+      authorId: resolvedMeta.authorId,
+    },
   );
 
   const method: "POST" | "PUT" = mode === "create_draft" ? "POST" : "PUT";

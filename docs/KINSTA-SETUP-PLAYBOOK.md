@@ -1,8 +1,10 @@
 # Kinsta MSN Autopilot Site — Setup Playbook
 
-> **Purpose**: This document is the complete setup guide for building one "golden template" WordPress site on Kinsta that connects the SynthPress Dashboard (AI publishing) to MSN Partner Hub (syndication). Once this site is working end-to-end, it gets cloned 19 times.
+> **Purpose**: Complete setup for one "golden template" WordPress site on Kinsta: SynthPress Dashboard → WordPress → MSN Partner Hub. Clone across the network once validated.
 >
-> **Who this is for**: An AI assistant in a new Cursor workspace (the DevKinsta local copy of the Kinsta site). Give it this file as context so it knows what to build.
+> **Boilerplate source of truth:** Copy from **`wordpress/wp-content/`** in this monorepo — see **[`wordpress/README.md`](../wordpress/README.md)**. Do **not** treat **`wordpress-devkinsta/`** as authoritative (local DevKinsta copy; may include uploads, site-only plugins, or experiments).
+>
+> **Publishing reference:** **[`PUBLISHING-API-SPEC.md`](./PUBLISHING-API-SPEC.md)** (REST behavior; section images; draft vs live).
 
 ---
 
@@ -83,18 +85,25 @@ Copy the entire `wp-content` boilerplate into the new site, or cherry-pick the f
 
 ## Phase 3: Theme Setup
 
-### 3.1 Pick a lightweight theme
+### 3.1 Theme in this repo
 
-Recommended options (all free, fast, MSN-compatible):
-- **GeneratePress** — lightweight, fast, good for content sites
-- **Flavor** — minimal, block-based
-- **Twenty Twenty-Five** (WordPress default) — zero dependencies
+The canonical boilerplate ships **Twenty Twenty-Five** (active) and **Twenty Twenty-Four** (fallback) — stock block themes, no child theme in git.
 
-For MSN compatibility, the theme just needs to output clean HTML with proper heading hierarchy. Any of these work.
+Other lightweight themes (GeneratePress, etc.) also work if they output clean heading hierarchy for MSN.
 
-### 3.2 Create a child theme
+### 3.2 MU-plugins vs child theme (important)
 
-Create a child theme with the critical customizations ported from the reference site. The child theme needs:
+**In `wordpress/wp-content/` today**, featured-image enforcement and author login restrictions live as **mu-plugins**, not in a child theme:
+
+- `mu-plugins/featured-image-requirement.php`
+- `mu-plugins/restrict-author-login.php`
+- `mu-plugins/auto-enable-msn-syndication.php`
+
+You do **not** need to create a child theme for a standard deploy from this boilerplate. Sections **3.3–3.7** below are **legacy reference** only if you maintain a separate child-theme-based site — avoid duplicating the same logic in both places.
+
+### 3.3 Legacy: child theme layout (optional)
+
+If you maintain a child theme on a site that does **not** use the mu-plugins above, the child theme might look like:
 
 ```
 wp-content/themes/{parent-theme}-child/
@@ -106,7 +115,7 @@ wp-content/themes/{parent-theme}-child/
     └── user-profile.php (optional — for E-E-A-T author schema)
 ```
 
-### 3.3 Child theme: `style.css`
+### 3.4 Legacy child theme: `style.css`
 
 ```css
 /*
@@ -117,7 +126,7 @@ Version: 1.0
 */
 ```
 
-### 3.4 Child theme: `functions.php`
+### 3.5 Legacy child theme: `functions.php`
 
 ```php
 <?php
@@ -131,7 +140,7 @@ include_once('inc/restrict-author-login.php');
 // include_once('inc/user-profile.php');
 ```
 
-### 3.5 Child theme: `inc/featured-image-requirement.php`
+### 3.6 Legacy child theme: `inc/featured-image-requirement.php`
 
 This is CRITICAL — prevents publishing posts without a featured image (MSN requires images for auto-publish).
 
@@ -172,9 +181,9 @@ function display_missing_featured_image_notice() {
 add_action('admin_notices', 'display_missing_featured_image_notice');
 ```
 
-### 3.6 Child theme: `inc/restrict-author-login.php`
+### 3.7 Legacy child theme: `inc/restrict-author-login.php`
 
-Prevents the bot user (Author role) from accessing wp-admin unless explicitly allowed.
+Prevents **Author**-role users from accessing wp-admin unless explicitly allowed. The SynthPress bot should use **Editor** (`synthpress-bot`), not Author — see Phase 4.1.
 
 ```php
 <?php
@@ -300,22 +309,26 @@ Visit: `https://your-domain.com/feed/msn:article`
 
 ### 5.1 How a post flows (the full lifecycle)
 
+**SynthPress dashboard (typical):**
+
 ```
-1. SynthPress Dashboard generates an article via AI
-2. Dashboard POSTs to: https://your-domain.com/wp-json/wp/v2/media (featured image)
-3. Dashboard POSTs to: https://your-domain.com/wp-json/wp/v2/posts
-   - Body: { title, content, status: "publish", featured_media: <id> }
-   - Auth: HTTP Basic (synthpress-bot : app-password)
-4. WordPress saves the post
-5. featured-image-requirement.php checks for thumbnail
-   - No thumbnail → reverts to draft (safety net)
-6. auto-enable-msn-syndication.php sets syndication meta automatically
-7. Kinsta's cache auto-purges → post is live on the public site
-8. MSN's crawler hits /feed/msn:article (every few minutes)
-   - Picks up the new post (if syndication_tool_enabled = true)
-   - Validates images, metadata, AI disclosure
-   - Auto-publishes to MSN.com / Edge / Bing
+1. SynthPress generates an article (manual or autopilot)
+2. Optional: autopilot auto-sends WordPress DRAFT (autoSendToWordPressDraft)
+3. Dashboard POSTs featured + section images → /wp-json/wp/v2/media
+4. Dashboard POST or PUT post → status "draft" (create/update) or "publish" (publish live from article page)
+5. Auth: HTTP Basic (synthpress-bot : application password)
 ```
+
+**WordPress + MSN (when post reaches status `publish`):**
+
+```
+6. featured-image-requirement.php — no thumbnail → reverts to draft
+7. auto-enable-msn-syndication.php — sets syndication meta on first publish
+8. Kinsta cache purge → public site updated
+9. MSN crawler → /feed/msn:article (posts with syndication_tool_enabled)
+```
+
+Drafts sent from SynthPress do **not** appear in the MSN feed until they are **published** on WordPress (manual publish live in SynthPress or in WP Admin).
 
 ### 5.2 MSN meta fields (handled automatically)
 
@@ -378,11 +391,11 @@ MSN will crawl your feed and validate. Common checks:
 
 ### Test 2: REST API publish (simulating SynthPress Dashboard)
 
-1. Use curl or the SynthPress Dashboard to POST a new article via REST API
-2. Check WP Admin → Posts — confirm it arrived as "Published"
-3. Check Media Library — confirm external images were re-hosted locally
-4. Check `https://your-domain.com/feed/msn:article` — confirm it's in the feed
-5. Syndication meta should be auto-enabled by the mu-plugin
+1. In SynthPress: **Send to WordPress draft** — confirm draft in WP Admin (`status: draft`)
+2. Upload featured image + section images land in Media Library
+3. **Publish to WordPress** (live) from SynthPress — confirm `status: publish`
+4. Check `https://your-domain.com/feed/msn:article` — post appears after live publish
+5. Syndication meta auto-enabled by mu-plugin on publish (not on draft-only sync)
 
 ### Test 3: Safety net check
 

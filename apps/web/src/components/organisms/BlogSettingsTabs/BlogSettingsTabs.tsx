@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
@@ -72,6 +72,13 @@ const TAB_DEFS = [
 
 type TabValue = (typeof TAB_DEFS)[number]["value"];
 
+const TAB_VALUES = new Set<string>(TAB_DEFS.map((t) => t.value));
+
+function tabFromLocationHash(hash: string): TabValue | null {
+  const id = hash.replace(/^#/, "");
+  return TAB_VALUES.has(id) ? (id as TabValue) : null;
+}
+
 export function BlogSettingsTabs({
   initialValue,
   isSaving,
@@ -83,6 +90,24 @@ export function BlogSettingsTabs({
 }: BlogSettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("general");
   const [value, setValue] = useState<BlogSettingsTabsValue>(initialValue);
+
+  // Deep links such as `…/settings#automation` (Autopilot panel helper).
+  useEffect(() => {
+    function syncTabFromHash() {
+      const fromHash = tabFromLocationHash(window.location.hash);
+      if (fromHash) setTab(fromHash);
+    }
+    syncTabFromHash();
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
+  }, []);
+
+  function handleTabChange(next: string) {
+    const tabValue = next as TabValue;
+    setTab(tabValue);
+    const nextUrl = `${window.location.pathname}${window.location.search}#${tabValue}`;
+    window.history.replaceState(null, "", nextUrl);
+  }
   // Reset state when a "fresh load" (different fingerprint) arrives — the
   // React docs' recommended pattern instead of an effect.
   // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
@@ -115,7 +140,7 @@ export function BlogSettingsTabs({
     <div className={cn("space-y-4", className)}>
       <Tabs
         value={tab}
-        onValueChange={(v) => setTab(v as TabValue)}
+        onValueChange={handleTabChange}
         orientation="vertical"
         className="md:!flex-row"
       >
@@ -164,7 +189,11 @@ export function BlogSettingsTabs({
             />
           </TabsContent>
 
-          <TabsContent value="automation" className="space-y-6">
+          <TabsContent
+            value="automation"
+            id="automation"
+            className="space-y-6"
+          >
             <AutomationTab
               value={value.settings.automation}
               onChange={(p) => patchSettings("automation", p)}
@@ -363,7 +392,7 @@ function GeneralTab({
           <Field
             label="Niche / category"
             htmlFor="blog-niche"
-            hint="e.g. Indie SaaS, AI productivity, sustainable fashion."
+            hint="Used as high-level context for generated ideas and articles. e.g. Indie SaaS, AI productivity."
           >
             <Input
               id="blog-niche"
@@ -389,7 +418,7 @@ function GeneralTab({
           <Field
             label="Primary keywords"
             htmlFor="blog-keywords"
-            hint="Comma-separated. The AI will weave these into outlines and metadata."
+            hint="Used as topic and SEO guidance for idea and article generation. SynthPress uses them naturally — not every keyword in every post."
           >
             <Textarea
               id="blog-keywords"
@@ -781,7 +810,7 @@ function AiTab({
         <Field
           label="Legacy AI prompt template"
           htmlFor="ai-template"
-          hint="Power users only. Used as a final wrapper around the rest of these settings."
+          hint="Legacy prompt guidance appended after other instructions. Prefer Advanced → Custom system prompt for new setup."
         >
           <Textarea
             id="ai-template"
@@ -1169,52 +1198,27 @@ function PublishingTab({
   return (
     <>
       <Section
-        title="Default publishing destination"
-        description="Pick where new posts should land. CMS connections live in the Connections tab."
+        title="WordPress draft defaults"
+        description="Applied when you send or update a WordPress draft from SynthPress (including autopilot auto-send). Connect your site in the Connections tab. Live publishing stays manual from the article page."
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Destination" htmlFor="publishing-destination">
-            <Select
-              id="publishing-destination"
-              value={value.defaultDestination}
-              onChange={(e) =>
-                onChange({
-                  defaultDestination: e.target
-                    .value as BlogSettings["publishing"]["defaultDestination"],
-                })
-              }
-              options={[
-                { value: "none", label: "None — copy / export only" },
-                { value: "wordpress", label: "WordPress" },
-              ]}
-            />
-          </Field>
-          <Field label="Default status" htmlFor="publishing-status">
-            <Select
-              id="publishing-status"
-              value={value.defaultStatus}
-              onChange={(e) =>
-                onChange({
-                  defaultStatus: e.target
-                    .value as BlogSettings["publishing"]["defaultStatus"],
-                })
-              }
-              options={[
-                { value: "draft", label: "Draft" },
-                { value: "scheduled", label: "Scheduled" },
-                { value: "published", label: "Published" },
-              ]}
-            />
-          </Field>
-          <Field label="Default author (CMS)" htmlFor="publishing-author">
+          <Field
+            label="Default author (WordPress login)"
+            htmlFor="publishing-author"
+            hint="WordPress user slug or display name. Leave blank to use the connected account."
+          >
             <Input
               id="publishing-author"
               value={value.defaultAuthor}
               onChange={(e) => onChange({ defaultAuthor: e.target.value })}
-              placeholder="The username on the CMS to attribute posts to."
+              placeholder="e.g. editor"
             />
           </Field>
-          <Field label="Default category" htmlFor="publishing-category">
+          <Field
+            label="Default category"
+            htmlFor="publishing-category"
+            hint="Category name on your WordPress site. We match or create it when sending drafts."
+          >
             <Input
               id="publishing-category"
               value={value.defaultCategory}
@@ -1226,7 +1230,7 @@ function PublishingTab({
         <Field
           label="Default tags"
           htmlFor="publishing-tags"
-          hint="Comma-separated. Applied to every published post."
+          hint="Comma-separated tag names. We match or create each tag when sending drafts."
         >
           <Input
             id="publishing-tags"
@@ -1243,28 +1247,22 @@ function PublishingTab({
           />
         </Field>
         <ToggleField
-          label="Upload featured image"
-          description="If a featured image is generated, push it to the CMS along with the post."
+          label="Upload featured image to WordPress"
+          description="When on, the article's featured image is uploaded and set on the WordPress post. Section images in the body are unaffected."
           checked={value.uploadFeaturedImage}
           onChange={(uploadFeaturedImage) => onChange({ uploadFeaturedImage })}
-        />
-        <ToggleField
-          label="Update existing posts"
-          description="If a post with the same slug exists, update it instead of creating a duplicate."
-          checked={value.updateExistingPosts}
-          onChange={(updateExistingPosts) => onChange({ updateExistingPosts })}
         />
       </Section>
 
       <Section
-        title="Autopilot delivery"
-        description="What should happen with articles after autopilot generates them?"
+        title="WordPress draft automation"
+        description="Autopilot always sends WordPress drafts only — never live posts. Use Publish Live on the article page when you are ready to go live."
       >
         <ToggleField
           label="Automatically send autopilot articles to WordPress drafts"
           description={
             hasWordPressConnection
-              ? "When enabled, autopilot-generated articles are sent to WordPress as drafts after generation. They will not be published live."
+              ? "When enabled, autopilot-generated articles are sent to WordPress as drafts after generation. Live publishing remains manual."
               : "Connect WordPress before enabling automatic draft sending."
           }
           checked={value.autoSendToWordPressDraft}
@@ -1287,20 +1285,17 @@ function MediaTab({
   value: BlogSettings["media"];
   onChange: (p: Partial<BlogSettings["media"]>) => void;
 }) {
+  const autoPickDisabled =
+    !value.autoPickImages || value.imageProvider === "none";
+
   return (
     <Section
-      title="Featured image & media"
-      description="What images should ship with each post?"
+      title="Stock images (Pexels)"
+      description="Automatically choose a featured image and section images from Pexels for AI-generated articles. You can replace images before publishing."
     >
-      {/* Autopilot image-picker controls live at the top of the
-          tab because they're what users reach for first (and what
-          they want to disable when picks aren't landing on-brand).
-          The legacy AI-image toggles below are kept for the
-          future AI-generated-image PR but don't drive any
-          behavior today. */}
       <ToggleField
         label="Automatically choose images for AI-generated articles"
-        description="When enabled, SynthPress picks a featured image and section images from the selected image provider. You can still replace them before publishing."
+        description="When enabled, SynthPress picks stock images from the provider below after each article is generated."
         checked={value.autoPickImages}
         onChange={(autoPickImages) => onChange({ autoPickImages })}
       />
@@ -1320,75 +1315,19 @@ function MediaTab({
           ]}
         />
       </Field>
-
       <ToggleField
-        label="Generate a featured image"
-        description="Generate one image per post and attach it as the featured image."
-        checked={value.generateFeaturedImage}
-        onChange={(generateFeaturedImage) =>
-          onChange({ generateFeaturedImage })
-        }
-      />
-      <ToggleField
-        label="Generate alt text"
-        description="Generate descriptive alt text for accessibility and SEO."
-        checked={value.generateAltText}
-        onChange={(generateAltText) => onChange({ generateAltText })}
-      />
-      <ToggleField
-        label="Inline images in body"
-        description="Add 1–3 images throughout the body, not just the header."
+        label="Add images above article sections"
+        description="When enabled, SynthPress picks section images for H2 sections. Featured images can still be picked automatically."
         checked={value.includeInlineImages}
         onChange={(includeInlineImages) => onChange({ includeInlineImages })}
+        disabled={autoPickDisabled}
       />
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Image source" htmlFor="media-source">
-          <Select
-            id="media-source"
-            value={value.imageSource}
-            onChange={(e) =>
-              onChange({
-                imageSource: e.target
-                  .value as BlogSettings["media"]["imageSource"],
-              })
-            }
-            options={[
-              { value: "ai_generated", label: "AI-generated" },
-              {
-                value: "stock_unsplash",
-                label: "Unsplash (coming soon)",
-              },
-              { value: "stock_pexels", label: "Pexels (coming soon)" },
-              { value: "manual_upload", label: "Manual upload only" },
-              { value: "none", label: "No images" },
-            ]}
-          />
-        </Field>
-        <Field label="Default image dimensions" htmlFor="media-dimensions">
-          <Input
-            id="media-dimensions"
-            value={value.defaultImageDimensions}
-            onChange={(e) =>
-              onChange({ defaultImageDimensions: e.target.value })
-            }
-            placeholder="1200x630"
-          />
-        </Field>
-      </div>
-      <Field
-        label="Image style prompt"
-        htmlFor="media-style-prompt"
-        hint="Used as the seed for every image generation."
-      >
-        <Textarea
-          id="media-style-prompt"
-          value={value.imageStylePrompt}
-          onChange={(e) => onChange({ imageStylePrompt: e.target.value })}
-          rows={3}
-          placeholder="Soft gradients, minimal type, brand purple accent."
-        />
-      </Field>
+      {autoPickDisabled ? (
+        <p className="text-xs text-muted">
+          Turn on automatic image picking and choose Pexels to configure section
+          images.
+        </p>
+      ) : null}
     </Section>
   );
 }

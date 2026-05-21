@@ -1374,7 +1374,7 @@ describe("pickImagesForArticle — auto-pick diversity", () => {
     // or top up the provider's library.
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings.join(" ")).toMatch(
-      /no unused images found in recent blog history/i,
+      /no usable image found after dedupe/i,
     );
 
     // Exactly ONE attribution-row insert happened (the featured pick).
@@ -1617,6 +1617,7 @@ describe("pickImagesForArticle — cross-article diversity (recent blog history)
         excludeArticleId: "a1",
         // Default provider id from the registry mock.
         providerId: "pexels",
+        role: "featured",
         sinceDays: 30,
         limit: 250,
       }),
@@ -1708,7 +1709,55 @@ describe("pickImagesForArticle — cross-article diversity (recent blog history)
     );
   });
 
-  it("warns 'no unused images found in recent blog history' when ALL candidates collide with the recent seed", async () => {
+  it("allows section picks when only a recent featured image is seeded (section images on other articles are ignored)", async () => {
+    // Cross-article seed is featured-only. Another article's section
+    // photo is NOT in the seed — only a featured id is blocked.
+    mockedListRecentKeys.mockResolvedValueOnce(
+      new Set(["pexels:other-featured-only"]),
+    );
+    const OTHER_FEATURED = sampleResult({
+      providerPhotoId: "other-featured-only",
+      regularUrl: "https://x.com/other-featured.jpg",
+    });
+    const SECTION_REUSABLE = sampleResult({
+      providerPhotoId: "section-reused-on-other-article",
+      regularUrl: "https://x.com/section-reused.jpg",
+    });
+    const FRESH_FEATURED = sampleResult({
+      providerPhotoId: "fresh-featured",
+      regularUrl: "https://x.com/fresh-featured.jpg",
+    });
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [OTHER_FEATURED, FRESH_FEATURED],
+      totalResults: 2,
+    });
+    mockedSearchImages.mockResolvedValueOnce({
+      results: [SECTION_REUSABLE],
+      totalResults: 1,
+    });
+    mockedSearchImages.mockResolvedValue({ results: [], totalResults: 0 });
+    const client = makeClient();
+
+    const result = await pickImagesForArticle({
+      articleId: "a1",
+      blogId: "b1",
+      client: client as never,
+    });
+
+    expect(result.featuredSelected).toBe(true);
+    expect(client.__articleUpdates[0]?.featured_image_url).toBe(
+      "https://x.com/fresh-featured.jpg",
+    );
+    expect(result.sectionImagesSelected).toBe(1);
+    const sectionInserts = mockedRecord.mock.calls.filter(
+      (c) => c[0]?.role === "section",
+    );
+    expect(sectionInserts[0]?.[0]?.metadata?.imageUrl).toBe(
+      "https://x.com/section-reused.jpg",
+    );
+  });
+
+  it("warns when featured candidates collide with recent featured-image seed", async () => {
     // Recent seed contains both candidates; Pexels has nothing
     // else for this query.
     mockedListRecentKeys.mockResolvedValueOnce(
@@ -1743,12 +1792,9 @@ describe("pickImagesForArticle — cross-article diversity (recent blog history)
     });
 
     expect(result.featuredSelected).toBe(false);
-    // Expected `Skipped featured image: no unused images found
-    // in recent blog history.` AND a similar message per section
-    // (intro + faq).
     expect(
       result.warnings.some((w) =>
-        /no unused images found in recent blog history/i.test(w),
+        /no unused featured image found in recent blog history/i.test(w),
       ),
     ).toBe(true);
     // No article update for the featured columns.
@@ -1774,7 +1820,7 @@ describe("pickImagesForArticle — cross-article diversity (recent blog history)
     // No "all-used" copy when nothing was even considered.
     expect(
       result.warnings.some((w) =>
-        /no unused images found in recent blog history/i.test(w),
+        /no unused featured image found in recent blog history/i.test(w),
       ),
     ).toBe(false);
     // Original "no results for X after N attempts" copy.

@@ -22,8 +22,10 @@ import {
   IDEA_DEFAULT_COUNT,
   generateArticleDraft,
   generateIdeas,
-  isStructuredArticleGenerationSchemaError,
+  getArticleGenerationFailureKind,
   SchemaRetryFailedError,
+  TruncatedArticleOutputError,
+  TruncationRetryFailedError,
 } from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 import {
@@ -368,6 +370,12 @@ export interface BlogGenerationContext {
     description: string;
     slug: string;
     projectId: string;
+    /** High-level niche/category from `blogs.niche`. */
+    niche: string;
+    /** Parsed `blogs.keywords` array (may be empty). */
+    keywords: string[];
+    /** Legacy `blogs.ai_prompt_template` — optional extra prompt guidance. */
+    aiPromptTemplate: string;
   };
   project: {
     id: string;
@@ -402,7 +410,9 @@ export async function getBlogGenerationContext(
 
   const { data: blog, error: blogErr } = await supabase
     .from("blogs")
-    .select("id, name, description, slug, project_id, settings")
+    .select(
+      "id, name, description, slug, niche, keywords, ai_prompt_template, project_id, settings",
+    )
     .eq("id", blogId)
     .maybeSingle();
 
@@ -434,6 +444,9 @@ export async function getBlogGenerationContext(
       description: blog.description,
       slug: blog.slug,
       projectId: blog.project_id,
+      niche: blog.niche ?? "",
+      keywords: blog.keywords ?? [],
+      aiPromptTemplate: blog.ai_prompt_template ?? "",
     },
     project: {
       id: project.id,
@@ -1189,6 +1202,9 @@ async function _executeArticleIdeasJob(
     const batch = await generateIdeas({
       blogName: ctx.blog.name,
       blogDescription: ctx.blog.description || undefined,
+      blogNiche: ctx.blog.niche || undefined,
+      blogKeywords: ctx.blog.keywords.length ? ctx.blog.keywords : undefined,
+      legacyAiPromptTemplate: ctx.blog.aiPromptTemplate || undefined,
       settings: ctx.settings,
       brief: input.brief,
       count,
@@ -1704,6 +1720,9 @@ export async function runGenerateArticleFromIdeaJob(
     const draft: GeneratedArticleDraft = await generateArticleDraft({
       blogName: ctx.blog.name,
       blogDescription: ctx.blog.description || undefined,
+      blogNiche: ctx.blog.niche || undefined,
+      blogKeywords: ctx.blog.keywords.length ? ctx.blog.keywords : undefined,
+      legacyAiPromptTemplate: ctx.blog.aiPromptTemplate || undefined,
       settings: ctx.settings,
       brief: buildBriefFromIdea(idea),
       anthropicProvider: input.anthropicProvider,
@@ -1777,6 +1796,8 @@ export async function runGenerateArticleFromIdeaJob(
           articleId: input.articleId,
           blogId: input.blogId,
           providerId: mediaSettings.imageProvider,
+          includeFeatured: true,
+          includeSections: mediaSettings.includeInlineImages,
           client: supabase,
         });
         /* v8 ignore start -- defensive: pickImagesForArticle never throws by contract; this catch is a future-regression guard so an image bug can't accidentally refund tokens */
@@ -1916,21 +1937,19 @@ export async function runGenerateArticleFromIdeaJob(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // If the error is a schema-mismatch failure (the AI SDK's
-    // `NoObjectGeneratedError` survived our one-shot repair retry
-    // OR a future SDK upgrade re-threw under a different class
-    // shape that the message-pattern detector still recognizes),
-    // stamp structured metadata onto the job's `output` BEFORE
-    // marking it failed. The recent-jobs queue + autopilot run
-    // drawer surface these keys so an operator can tell at a
-    // glance whether a retry was attempted and which Claude error
-    // shape we're actually hitting.
+    // If the error is one of the recognized structured-output
+    // failures (schema-mismatch OR truncated output), stamp
+    // structured metadata onto the job's `output` BEFORE marking
+    // it failed. The recent-jobs queue + autopilot run drawer
+    // surface these keys so an operator can tell at a glance which
+    // failure mode hit and whether a retry was attempted.
     //
     // Best-effort: a transient supabase blip on the merge would
     // mask the original `err` from the outer caller. We swallow
     // metadata-write failures in the same posture as the existing
     // refund + fail-marking blocks below.
-    if (isStructuredArticleGenerationSchemaError(err)) {
+    const failureKind = getArticleGenerationFailureKind(err);
+    if (failureKind === "schema_mismatch") {
       const isRetryFailure = err instanceof SchemaRetryFailedError;
       const originalErrorMessage = isRetryFailure
         ? err.originalErrorMessage
@@ -1945,6 +1964,56 @@ export async function runGenerateArticleFromIdeaJob(
           retryCount: isRetryFailure ? err.retryCount : 0,
           originalErrorMessage,
           finalErrorMessage,
+        });
+        /* v8 ignore start -- defensive: secondary failure during failure-metadata stamp */
+      } catch {
+        // Swallow.
+      }
+      /* v8 ignore stop */
+    } else if (failureKind === "truncated_output") {
+      // failureKind === "truncated_output" is only returned for these
+      // two error classes (see `getArticleGenerationFailureKind`), so
+      // the casts below are total. `truncationErr` is the FINAL
+      // attempt's error (drives the top-level detection fields);
+      // `originalTruncation` is the first attempt's, surfaced only on
+      // the retry path so an operator can see how the two attempts
+      // differed (e.g. one finishReason=length, one finishReason=stop).
+      const isRetryFailure = err instanceof TruncationRetryFailedError;
+      const truncationErr: TruncatedArticleOutputError = isRetryFailure
+        ? err.retryError
+        : (err as TruncatedArticleOutputError);
+      const originalTruncation: TruncatedArticleOutputError = isRetryFailure
+        ? err.originalError
+        : truncationErr;
+      try {
+        await mergeArticleJobOutput(supabase, input.jobId, {
+          failureKind: "truncated_output",
+          retried: isRetryFailure,
+          retryCount: isRetryFailure ? err.retryCount : 0,
+          originalErrorMessage: isRetryFailure
+            ? err.originalErrorMessage
+            : message,
+          finalErrorMessage: isRetryFailure ? err.finalErrorMessage : message,
+          // Detection metadata is the high-value signal — surfacing it
+          // here lets ops see WHY the guard fired without having to
+          // grep Vercel logs for the matching `console.warn` line.
+          truncationDetection: {
+            finishReason: truncationErr.finishReason,
+            actualWords: truncationErr.actualWords,
+            expectedWords: truncationErr.expectedWords,
+            contentMarkdownPreview: truncationErr.contentMarkdownPreview,
+            ...(isRetryFailure
+              ? {
+                  originalAttempt: {
+                    finishReason: originalTruncation.finishReason,
+                    actualWords: originalTruncation.actualWords,
+                    expectedWords: originalTruncation.expectedWords,
+                    contentMarkdownPreview:
+                      originalTruncation.contentMarkdownPreview,
+                  },
+                }
+              : {}),
+          },
         });
         /* v8 ignore start -- defensive: secondary failure during failure-metadata stamp */
       } catch {

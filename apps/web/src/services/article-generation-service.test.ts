@@ -54,18 +54,90 @@ vi.mock("@/lib/ai/provider", () => {
     /\bschema validation (failed|failure)\b/i,
     /\binvalid structured output\b/i,
   ];
+  // Truncation error stand-ins. Mirrors the real classes well enough
+  // for the orchestrator's `getArticleGenerationFailureKind` branch to
+  // stamp `truncated_output` metadata without dragging the real
+  // provider module (and its `ai` import) into the test bundle.
+  class TruncatedArticleOutputError extends Error {
+    readonly kind = "truncated_output" as const;
+    readonly actualWords: number;
+    readonly expectedWords: number;
+    readonly finishReason: string | null;
+    readonly contentMarkdownPreview: string;
+    constructor(opts: {
+      actualWords: number;
+      expectedWords: number;
+      finishReason: string | null;
+      contentMarkdownPreview: string;
+    }) {
+      super(
+        `Article generation produced a truncated body (` +
+          `finishReason=${opts.finishReason ?? "unknown"}, ` +
+          `actualWords=${opts.actualWords}, ` +
+          `expectedWords=${opts.expectedWords}).`,
+      );
+      this.name = "TruncatedArticleOutputError";
+      this.actualWords = opts.actualWords;
+      this.expectedWords = opts.expectedWords;
+      this.finishReason = opts.finishReason;
+      this.contentMarkdownPreview = opts.contentMarkdownPreview;
+    }
+  }
+  class TruncationRetryFailedError extends Error {
+    readonly kind = "truncated_output" as const;
+    readonly retried = true as const;
+    readonly retryCount: number;
+    readonly originalError: TruncatedArticleOutputError;
+    readonly retryError: TruncatedArticleOutputError;
+    readonly originalErrorMessage: string;
+    readonly finalErrorMessage: string;
+    constructor(opts: {
+      originalError: TruncatedArticleOutputError;
+      retryError: TruncatedArticleOutputError;
+      retryCount: number;
+    }) {
+      const originalErrorMessage = opts.originalError.message;
+      const finalErrorMessage = opts.retryError.message;
+      super(
+        `Article truncation retry failed (attempt ${opts.retryCount + 1}). ` +
+          `Original: ${originalErrorMessage} Final: ${finalErrorMessage}`,
+      );
+      this.name = "TruncationRetryFailedError";
+      this.retryCount = opts.retryCount;
+      this.originalError = opts.originalError;
+      this.retryError = opts.retryError;
+      this.originalErrorMessage = originalErrorMessage;
+      this.finalErrorMessage = finalErrorMessage;
+    }
+  }
   const isStructuredArticleGenerationSchemaError = (err: unknown): boolean => {
+    if (err instanceof TruncatedArticleOutputError) return false;
+    if (err instanceof TruncationRetryFailedError) return false;
     if (err instanceof SchemaRetryFailedError) return true;
     if (err instanceof Error)
       return SCHEMA_PATTERNS.some((p) => p.test(err.message));
     return false;
+  };
+  const isTruncatedArticleOutputError = (err: unknown): boolean =>
+    err instanceof TruncatedArticleOutputError ||
+    err instanceof TruncationRetryFailedError;
+  const getArticleGenerationFailureKind = (
+    err: unknown,
+  ): "schema_mismatch" | "truncated_output" | null => {
+    if (isTruncatedArticleOutputError(err)) return "truncated_output";
+    if (isStructuredArticleGenerationSchemaError(err)) return "schema_mismatch";
+    return null;
   };
   return {
     generateIdeas: vi.fn(),
     generateArticleDraft: vi.fn(),
     IDEA_DEFAULT_COUNT: 10,
     isStructuredArticleGenerationSchemaError,
+    isTruncatedArticleOutputError,
+    getArticleGenerationFailureKind,
     SchemaRetryFailedError,
+    TruncatedArticleOutputError,
+    TruncationRetryFailedError,
   };
 });
 
@@ -116,6 +188,8 @@ import {
   generateArticleDraft,
   generateIdeas,
   SchemaRetryFailedError,
+  TruncatedArticleOutputError,
+  TruncationRetryFailedError,
 } from "@/lib/ai/provider";
 import { consumeTeamTokens, refundTeamTokens } from "./team-billing-service";
 import { pickImagesForArticle } from "./article-image-picker-service";
@@ -822,6 +896,9 @@ describe("getBlogGenerationContext", () => {
     name: "Acme",
     description: "A workflow blog",
     slug: "acme",
+    niche: "Indie SaaS",
+    keywords: ["micro-saas", "bootstrapping"],
+    ai_prompt_template: "Legacy tone: upbeat.",
     project_id: "p1",
     settings: { identity: { audience: "engineers" } },
   };
@@ -844,6 +921,9 @@ describe("getBlogGenerationContext", () => {
       description: "A workflow blog",
       slug: "acme",
       projectId: "p1",
+      niche: "Indie SaaS",
+      keywords: ["micro-saas", "bootstrapping"],
+      aiPromptTemplate: "Legacy tone: upbeat.",
     });
     expect(ctx!.project).toEqual({
       id: "p1",
@@ -1085,6 +1165,9 @@ const blogRow = {
   name: "Acme",
   description: "A workflow blog",
   slug: "acme",
+  niche: "Workflow automation",
+  keywords: ["durable execution", "cron"],
+  ai_prompt_template: "",
   project_id: "p1",
   settings: { identity: { audience: "engineers" } },
 };
@@ -1195,8 +1278,39 @@ describe("generateArticleIdeas", () => {
       expect.objectContaining({
         blogName: "Acme",
         blogDescription: "A workflow blog",
+        blogNiche: "Workflow automation",
+        blogKeywords: ["durable execution", "cron"],
         brief: "How to ship faster",
         count: 10,
+      }),
+    );
+  });
+
+  it("omits blogKeywords and legacyAiPromptTemplate when the blog row has none", async () => {
+    const client = makeOrchestrationClient();
+    client.__chains.blogs!.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        ...blogRow,
+        niche: "",
+        keywords: [],
+        ai_prompt_template: "",
+      },
+      error: null,
+    });
+
+    await generateArticleIdeas({
+      blogId: "b1",
+      teamId: "t1",
+      userId: "u1",
+      triggerSource: "manual",
+      client: client as never,
+    });
+
+    expect(mockedGenerateIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blogNiche: undefined,
+        blogKeywords: undefined,
+        legacyAiPromptTemplate: undefined,
       }),
     );
   });
@@ -2217,6 +2331,9 @@ function makeArticleOrchestrationClient(opts?: {
     name: "Acme",
     description: "A workflow blog",
     slug: "acme",
+    niche: "B2B marketing",
+    keywords: ["content ops", "editorial calendar"],
+    ai_prompt_template: "Legacy: keep examples concrete.",
     project_id: "p1",
     settings: opts?.blogSettings ?? { identity: { audience: "engineers" } },
   };
@@ -2384,10 +2501,16 @@ describe("generateArticleDraftFromIdea", () => {
     const call = mockedGenerateArticleDraft.mock.calls[0]![0] as {
       brief: string;
       blogName: string;
+      blogNiche?: string;
+      blogKeywords?: string[];
+      legacyAiPromptTemplate?: string;
     };
     expect(call.blogName).toBe("Acme");
     expect(call.brief).toContain(ideaRowStub.title);
     expect(call.brief).toContain(ideaRowStub.target_keyword!);
+    expect(call.blogNiche).toBe("B2B marketing");
+    expect(call.blogKeywords).toEqual(["content ops", "editorial calendar"]);
+    expect(call.legacyAiPromptTemplate).toBe("Legacy: keep examples concrete.");
   });
 
   it("passes blogDescription as undefined when the blog row has none", async () => {
@@ -2401,6 +2524,9 @@ describe("generateArticleDraftFromIdea", () => {
         name: "Acme",
         description: "",
         slug: "acme",
+        niche: null,
+        keywords: null,
+        ai_prompt_template: null,
         project_id: "p1",
         settings: {},
       },
@@ -2910,6 +3036,124 @@ describe("generateArticleDraftFromIdea", () => {
     expect(schemaUpdate).toBeUndefined();
     // Refund still fires.
     expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+  });
+
+  it("stamps failureKind=truncated_output + retried=true + truncationDetection metadata when TruncationRetryFailedError reaches the catch block", async () => {
+    // Mirrors the prod regression (article f22abd10): Claude returned
+    // a structured-output JSON whose body was cut off mid-sentence.
+    // Both attempts truncate → the helper surfaces a
+    // TruncationRetryFailedError, the orchestrator stamps structured
+    // metadata + refunds tokens.
+    const client = makeArticleOrchestrationClient();
+    const firstTruncation = new TruncatedArticleOutputError({
+      actualWords: 140,
+      expectedWords: 2180,
+      finishReason: "stop",
+      contentMarkdownPreview: "# How to give feedback\n\nSaying ",
+    });
+    const secondTruncation = new TruncatedArticleOutputError({
+      actualWords: 160,
+      expectedWords: 2180,
+      finishReason: "length",
+      contentMarkdownPreview: "# How to give feedback\n\nThe model again ",
+    });
+    mockedGenerateArticleDraft.mockRejectedValueOnce(
+      new TruncationRetryFailedError({
+        originalError: firstTruncation,
+        retryError: secondTruncation,
+        retryCount: 1,
+      }),
+    );
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/truncation retry failed/i);
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+    const truncationUpdate = updateCalls.find((u) => {
+      const out = u.output as Record<string, unknown> | undefined;
+      return out?.failureKind === "truncated_output";
+    });
+    expect(truncationUpdate).toBeDefined();
+    const out = truncationUpdate!.output as Record<string, unknown>;
+    expect(out.failureKind).toBe("truncated_output");
+    expect(out.retried).toBe(true);
+    expect(out.retryCount).toBe(1);
+    expect(typeof out.originalErrorMessage).toBe("string");
+    expect(typeof out.finalErrorMessage).toBe("string");
+    const detection = out.truncationDetection as Record<string, unknown>;
+    expect(detection).toMatchObject({
+      finishReason: "length",
+      actualWords: 160,
+      expectedWords: 2180,
+    });
+    expect(detection.originalAttempt).toMatchObject({
+      finishReason: "stop",
+      actualWords: 140,
+      expectedWords: 2180,
+    });
+    expect(typeof detection.contentMarkdownPreview).toBe("string");
+
+    // Article + job still marked failed.
+    expect(client.__chains.articles!.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(updateCalls.some((u) => u.status === "failed")).toBe(true);
+    // Refund still fires (consume happened before the AI call).
+    expect(mockedRefundTeamTokens).toHaveBeenCalledOnce();
+  });
+
+  it("stamps failureKind=truncated_output + retried=false when a bare TruncatedArticleOutputError surfaces (no retry happened — defensive future path)", async () => {
+    const client = makeArticleOrchestrationClient();
+    mockedGenerateArticleDraft.mockRejectedValueOnce(
+      new TruncatedArticleOutputError({
+        actualWords: 50,
+        expectedWords: 1500,
+        finishReason: "length",
+        contentMarkdownPreview: "# Truncated…",
+      }),
+    );
+
+    await expect(
+      generateArticleDraftFromIdea({
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        triggerSource: "manual",
+        client: client as never,
+      }),
+    ).rejects.toThrow(/truncated body/);
+
+    const updateCalls = client.__chains.article_jobs!.update.mock.calls.map(
+      (c) => c[0],
+    );
+    const truncationUpdate = updateCalls.find((u) => {
+      const out = u.output as Record<string, unknown> | undefined;
+      return out?.failureKind === "truncated_output";
+    });
+    expect(truncationUpdate).toBeDefined();
+    const out = truncationUpdate!.output as Record<string, unknown>;
+    expect(out.retried).toBe(false);
+    expect(out.retryCount).toBe(0);
+    // Single-attempt truncation: detection metadata reflects the one
+    // attempt; no `originalAttempt` envelope.
+    const detection = out.truncationDetection as Record<string, unknown>;
+    expect(detection.originalAttempt).toBeUndefined();
+    expect(detection).toMatchObject({
+      finishReason: "length",
+      actualWords: 50,
+      expectedWords: 1500,
+    });
   });
 
   it("does NOT duplicate the article placeholder row on schema-retry failure (queue inserts once, run doesn't re-insert)", async () => {
@@ -3828,6 +4072,60 @@ describe("runGenerateArticleFromIdeaJob", () => {
       });
       expect(mockedPickImages).toHaveBeenCalledWith(
         expect.objectContaining({ providerId: "pexels" }),
+      );
+    });
+
+    it("passes includeSections=false when settings.media.includeInlineImages is false", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: {
+          media: {
+            autoPickImages: true,
+            imageProvider: "pexels",
+            includeInlineImages: false,
+          },
+        },
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          includeFeatured: true,
+          includeSections: false,
+        }),
+      );
+    });
+
+    it("passes includeSections=true when settings.media.includeInlineImages is true", async () => {
+      const client = makeArticleOrchestrationClient({
+        blogSettings: {
+          media: {
+            autoPickImages: true,
+            imageProvider: "pexels",
+            includeInlineImages: true,
+          },
+        },
+      });
+      await runGenerateArticleFromIdeaJob({
+        jobId: "job-1",
+        articleId: "article-1",
+        blogId: "b1",
+        teamId: "t1",
+        userId: "u1",
+        ideaId: "idea-1",
+        client: client as never,
+      });
+      expect(mockedPickImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          includeFeatured: true,
+          includeSections: true,
+        }),
       );
     });
 

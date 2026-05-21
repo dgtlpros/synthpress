@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BLOG_SETTINGS, type BlogSettings } from "@/lib/blog-settings";
 
 // Mock the AI SDK + Anthropic provider BEFORE importing the module under test.
@@ -54,20 +54,31 @@ vi.mock("@ai-sdk/anthropic", () => ({
 }));
 
 import {
+  ARTICLE_MAX_OUTPUT_TOKENS,
+  ARTICLE_TRUNCATION_WORD_FLOOR,
+  assertArticleNotTruncated,
   buildArticlePromptParts,
   buildIdeasPromptParts,
+  countArticleBodyWords,
   createAnthropicProvider,
   generateArticleDraft,
   generateIdeas,
+  getArticleGenerationFailureKind,
   IDEA_DEFAULT_COUNT,
   isStructuredArticleGenerationSchemaError,
+  isTruncatedArticleOutputError,
   NoObjectGeneratedError,
   resolveAnthropic,
   SchemaRetryFailedError,
   STRICT_SCHEMA_REPAIR_INSTRUCTION,
+  TruncatedArticleOutputError,
+  TruncationRetryFailedError,
 } from "./provider";
 import { AI_MODELS } from "./models";
 
+// 320-word stub body — kept above ARTICLE_TRUNCATION_WORD_FLOOR (300)
+// so the truncation guard treats this as a healthy draft. Tests that
+// exercise the truncation path build their own short-body stub.
 const draftStub = {
   title: "How to launch a B2B blog in 30 days",
   slug: "how-to-launch-a-b2b-blog-in-30-days",
@@ -75,11 +86,17 @@ const draftStub = {
   metaDescription:
     "Step-by-step playbook for launching a B2B blog in 30 days, with weekly milestones.",
   contentMarkdown:
-    "# How to launch a B2B blog in 30 days\n\nLaunching a B2B blog is mostly about discipline. " +
-    "Here's the four-week plan we use with our clients to ship the first ten posts.\n\n" +
-    "## Week 1: positioning\n\nStart by clarifying the audience...\n",
+    "# How to launch a B2B blog in 30 days\n\n" +
+    "Launching a B2B blog is mostly about discipline. Here is the four-week plan we use with our clients to ship the first ten posts on schedule and at a quality bar that builds reader trust from day one. " +
+    "The plan assumes a single dedicated owner, one strategic editor, and a freelance writer or two for surge weeks. Adjust the cadence to your team size, but keep the order of weeks intact because each builds on the work from the previous one.\n\n" +
+    "## Week 1: positioning\n\n" +
+    "Start by clarifying the audience and the editorial voice. Write a short positioning brief that names the target reader, the three pains they wake up worrying about, and the words they use when they describe those pains to a peer. Pin the brief on the docs wiki and reference it whenever an idea feels off-strategy. Run a one-hour voice workshop with the team to align on tone, reading level, and the kind of language you will never use. Capture the workshop output as five do-and-don't pairs in the brief.\n\n" +
+    "## Week 2: research\n\n" +
+    "Build the keyword and topic map. Pull a hundred head terms from Search Console or a competitor crawl, cluster them by intent, and pick the ten clusters that map cleanly to your positioning. Identify the top three competitors in each cluster and note what they consistently miss. Save the cluster sheet in the wiki and use it as the source for every brief you write in weeks three and four. Treat the map as a living doc that you revisit every month after launch.\n",
   targetKeyword: "launch a b2b blog",
-  wordCount: 1234,
+  // Aligned to actual body word count so the truncation guard never trips
+  // on the happy-path stub. Tests that need a divergent number override.
+  wordCount: 320,
   outline: [
     { heading: "Week 1: positioning", summary: "Clarify audience + voice." },
     { heading: "Week 2: research", summary: "Build the keyword + topic map." },
@@ -280,8 +297,221 @@ describe("buildArticlePromptParts", () => {
     expect(system).not.toContain("DO:");
     expect(system).not.toContain("DO NOT:");
     expect(system).not.toContain("Additional instructions from the blog owner");
+    expect(system).not.toContain("Prefer these terms/phrases");
+    expect(system).not.toContain("Avoid these terms/phrases");
     expect(prompt).not.toContain("Topics the blog wants covered");
     expect(prompt).not.toContain("Topics to avoid");
+    expect(prompt).not.toContain("FAQ section");
+    expect(prompt).not.toContain("call-to-action");
+    expect(prompt).not.toContain("disclaimer");
+  });
+
+  it("includes approved and banned terminology when set", () => {
+    const settings = buildSettings({
+      ai: {
+        ...DEFAULT_BLOG_SETTINGS.ai,
+        approvedTerminology: "ship fast, learn in public",
+        bannedTerminology: "synergy, leverage",
+      },
+    });
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(system).toContain("Prefer these terms/phrases");
+    expect(system).toContain("ship fast, learn in public");
+    expect(system).toContain("Avoid these terms/phrases");
+    expect(system).toContain("synergy, leverage");
+  });
+
+  it("includes article structure, CTA, headings, and meta description style when set", () => {
+    const settings = buildSettings({
+      ai: {
+        ...DEFAULT_BLOG_SETTINGS.ai,
+        defaultArticleStructure: "Hook → problem → steps → FAQ → CTA",
+        preferredCta: "Start your free trial",
+      },
+      seo: {
+        ...DEFAULT_BLOG_SETTINGS.seo,
+        defaultHeadingsStructure: "H2 per major step; H3 for substeps only",
+        metaDescriptionStyle:
+          "Action-oriented, under 155 chars, include keyword",
+      },
+    });
+    const { system, prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(system).toContain("Hook → problem → steps → FAQ → CTA");
+    expect(prompt).toContain("H2 per major step");
+    expect(prompt).toContain("Action-oriented, under 155 chars");
+    expect(prompt).toContain("Start your free trial");
+  });
+
+  it("adds FAQ instruction when faqSection is true and omits it when false", () => {
+    const withFaq = buildSettings({
+      seo: { ...DEFAULT_BLOG_SETTINGS.seo, faqSection: true },
+    });
+    const withoutFaq = buildSettings({
+      seo: { ...DEFAULT_BLOG_SETTINGS.seo, faqSection: false },
+    });
+    const { prompt: promptOn } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings: withFaq,
+    });
+    const { prompt: promptOff } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings: withoutFaq,
+    });
+    expect(promptOn).toContain("concise FAQ section");
+    expect(promptOff).not.toContain("concise FAQ section");
+  });
+
+  it("includes disclaimer, affiliate disclosure, and competitors to avoid when set", () => {
+    const settings = buildSettings({
+      advanced: {
+        ...DEFAULT_BLOG_SETTINGS.advanced,
+        defaultDisclaimer: "Not financial advice.",
+        affiliateDisclosure: "We earn commissions from links.",
+        competitorsToAvoid: "CompetitorX, RivalCo",
+      },
+    });
+    const { system, prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(prompt).toContain("Not financial advice.");
+    expect(system).toContain("We earn commissions from links.");
+    expect(system).toContain("CompetitorX, RivalCo");
+  });
+
+  it("includes aggressive internal-linking guidance when preference is aggressive", () => {
+    const settings = buildSettings({
+      seo: {
+        ...DEFAULT_BLOG_SETTINGS.seo,
+        internalLinkingPreference: "aggressive",
+        externalLinkingPreference: "none",
+      },
+    });
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(system).toContain("Include several Markdown internal-link");
+  });
+
+  it("includes internal-linking guidance when preference is not none", () => {
+    const settings = buildSettings({
+      seo: {
+        ...DEFAULT_BLOG_SETTINGS.seo,
+        internalLinkingPreference: "occasional",
+        externalLinkingPreference: "none",
+      },
+      advanced: {
+        ...DEFAULT_BLOG_SETTINGS.advanced,
+        internalLinksToPrioritize: "pricing, onboarding checklist",
+      },
+    });
+    const { system, prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(system).toContain("Internal links:");
+    expect(system).toContain("placeholder");
+    expect(prompt).toContain("pricing, onboarding checklist");
+    expect(system).not.toContain("External references:");
+  });
+
+  it("includes external-linking guidance when preference is not none", () => {
+    const settings = buildSettings({
+      seo: {
+        ...DEFAULT_BLOG_SETTINGS.seo,
+        externalLinkingPreference: "aggressive",
+        internalLinkingPreference: "none",
+      },
+    });
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings,
+    });
+    expect(system).toContain("External references:");
+    expect(system).not.toContain("Internal links:");
+  });
+
+  it("includes blog niche in the system prompt when set", () => {
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      blogNiche: "Indie SaaS",
+      settings: buildSettings(),
+    });
+    expect(system).toContain("Blog niche/category: Indie SaaS.");
+  });
+
+  it("includes blog keywords in the user prompt with natural-use guidance", () => {
+    const { prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      blogKeywords: ["micro-saas", " bootstrapping "],
+      settings: buildSettings(),
+      brief: "Target keyword: launch checklist",
+    });
+    expect(prompt).toContain("Blog-level SEO keywords");
+    expect(prompt).toContain("micro-saas, bootstrapping");
+    expect(prompt).toContain("do not force all of them");
+    expect(prompt).toContain("primary keyword for this article");
+    expect(prompt).toContain("launch checklist");
+  });
+
+  it("omits niche and blog-keyword lines when unset", () => {
+    const { system, prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+    expect(system).not.toContain("Blog niche/category:");
+    expect(prompt).not.toContain("Blog-level SEO keywords");
+  });
+
+  it("omits blog-keyword line when all keywords are blank after trim", () => {
+    const { prompt } = buildArticlePromptParts({
+      blogName: "Acme",
+      blogKeywords: ["  ", "\t"],
+      settings: buildSettings(),
+    });
+    expect(prompt).not.toContain("Blog-level SEO keywords");
+  });
+
+  it("appends legacy template without lower-priority note when custom system prompt is empty", () => {
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      legacyAiPromptTemplate: "Keep titles punchy.",
+      settings: buildSettings(),
+    });
+    expect(system).toContain("Legacy blog-level prompt guidance:");
+    expect(system).toContain("Keep titles punchy.");
+    expect(system).not.toContain("lower priority than Advanced");
+  });
+
+  it("appends legacy ai_prompt_template after custom system prompt with lower-priority note", () => {
+    const settings = buildSettings({
+      advanced: {
+        ...DEFAULT_BLOG_SETTINGS.advanced,
+        customSystemPrompt: "Use British spelling.",
+      },
+    });
+    const { system } = buildArticlePromptParts({
+      blogName: "Acme",
+      legacyAiPromptTemplate: "Always mention our newsletter.",
+      settings,
+    });
+    expect(system).toContain("Additional instructions from the blog owner");
+    expect(system).toContain("British spelling");
+    expect(system).toContain("Legacy blog-level prompt guidance");
+    expect(system).toContain("lower priority than Advanced");
+    expect(system).toContain("Always mention our newsletter.");
+    const legacyIdx = system.indexOf("Legacy blog-level prompt guidance");
+    const customIdx = system.indexOf(
+      "Additional instructions from the blog owner",
+    );
+    expect(customIdx).toBeLessThan(legacyIdx);
   });
 });
 
@@ -391,6 +621,7 @@ describe("generateArticleDraft", () => {
     expect(result).toEqual({
       ...draftStub,
       model: AI_MODELS.articleGeneration,
+      finishReason: null,
       promptTokens: 1500,
       completionTokens: 850,
       cachedReadTokens: 500,
@@ -508,6 +739,7 @@ describe("generateArticleDraft — schema-repair retry", () => {
     expect(result).toEqual({
       ...draftStub,
       model: AI_MODELS.articleGeneration,
+      finishReason: null,
       promptTokens: 1500,
       completionTokens: 850,
       cachedReadTokens: 500,
@@ -677,6 +909,425 @@ describe("isStructuredArticleGenerationSchemaError", () => {
     );
     expect(isStructuredArticleGenerationSchemaError(42)).toBe(false);
     expect(isStructuredArticleGenerationSchemaError({})).toBe(false);
+  });
+
+  it("returns false for truncation errors (kept orthogonal so failureKind doesn't leak)", () => {
+    const truncation = new TruncatedArticleOutputError({
+      actualWords: 42,
+      expectedWords: 2000,
+      finishReason: "length",
+      contentMarkdownPreview: "…",
+    });
+    expect(isStructuredArticleGenerationSchemaError(truncation)).toBe(false);
+    const retry = new TruncationRetryFailedError({
+      originalError: truncation,
+      retryError: truncation,
+      retryCount: 1,
+    });
+    expect(isStructuredArticleGenerationSchemaError(retry)).toBe(false);
+  });
+});
+
+// ============================================================================
+// Truncation guard — prod regression: Claude returned a structured-output
+// JSON whose `contentMarkdown` was cut off mid-sentence after only ~700
+// completion tokens. The guard catches that before the article is saved
+// with an incomplete body.
+// ============================================================================
+
+describe("countArticleBodyWords", () => {
+  it("counts whitespace-separated tokens", () => {
+    expect(countArticleBodyWords("one two three four")).toBe(4);
+  });
+
+  it("collapses repeated whitespace and newlines", () => {
+    // `#` is counted as a token by the simple whitespace split — that's
+    // fine, the truncation guard compares against the model's own word
+    // claim (a rough number too) so token-level precision doesn't matter.
+    expect(countArticleBodyWords("# heading\n\nline one  two\tthree")).toBe(6);
+  });
+
+  it("returns 0 for an empty / whitespace-only body", () => {
+    expect(countArticleBodyWords("")).toBe(0);
+    expect(countArticleBodyWords("   \n\t")).toBe(0);
+  });
+});
+
+describe("assertArticleNotTruncated", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  function bodyOfWords(count: number): string {
+    return Array.from({ length: count }, (_, i) => `word${i}`).join(" ");
+  }
+
+  it("passes when actual word count comfortably matches the model claim", () => {
+    expect(() =>
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(1500), wordCount: 1500 },
+        "stop",
+      ),
+    ).not.toThrow();
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes when actual word count is above the floor even if model claim is much higher", () => {
+    // 400 actual words, 2000 claimed → ratio 0.2, but above the floor →
+    // not truncated. We only flag pieces that are objectively short.
+    expect(() =>
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(400), wordCount: 2000 },
+        "stop",
+      ),
+    ).not.toThrow();
+  });
+
+  it("passes when body is short but ratio is healthy (legitimate short article)", () => {
+    // 80 actual, 100 claimed → ratio 0.8 → not truncated.
+    expect(() =>
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(80), wordCount: 100 },
+        "stop",
+      ),
+    ).not.toThrow();
+  });
+
+  it("throws when finishReason === 'length' regardless of word count", () => {
+    expect(() =>
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(1500), wordCount: 1500 },
+        "length",
+      ),
+    ).toThrow(TruncatedArticleOutputError);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0]![0]).toBe(
+      "article_generation_truncation_detected",
+    );
+    expect(warnSpy.mock.calls[0]![1]).toMatchObject({
+      finishReason: "length",
+      reason: "finish_reason_length",
+    });
+  });
+
+  it("throws when body is below the floor AND below half the claimed word count (the prod regression shape)", () => {
+    // 140 actual words, 2180 claimed — the exact f22abd10 truncation.
+    let caught: unknown;
+    try {
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(140), wordCount: 2180 },
+        "stop",
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(TruncatedArticleOutputError);
+    const err = caught as TruncatedArticleOutputError;
+    expect(err.kind).toBe("truncated_output");
+    expect(err.actualWords).toBe(140);
+    expect(err.expectedWords).toBe(2180);
+    expect(err.finishReason).toBe("stop");
+    expect(err.contentMarkdownPreview).toContain("word0");
+    expect(warnSpy.mock.calls[0]![1]).toMatchObject({
+      reason: "body_too_short",
+      actualWords: 140,
+      expectedWords: 2180,
+    });
+  });
+
+  it("carries a null finishReason through when the SDK didn't report one", () => {
+    try {
+      assertArticleNotTruncated(
+        { contentMarkdown: bodyOfWords(50), wordCount: 1500 },
+        null,
+      );
+    } catch (err) {
+      expect((err as TruncatedArticleOutputError).finishReason).toBeNull();
+      expect((err as Error).message).toContain("finishReason=unknown");
+    }
+  });
+
+  it("caps the contentMarkdownPreview at 160 chars for log readability", () => {
+    const longBody = "x".repeat(500);
+    try {
+      assertArticleNotTruncated(
+        { contentMarkdown: longBody, wordCount: 5000 },
+        "length",
+      );
+    } catch (err) {
+      expect(
+        (err as TruncatedArticleOutputError).contentMarkdownPreview.length,
+      ).toBe(160);
+    }
+  });
+});
+
+describe("isTruncatedArticleOutputError", () => {
+  it("recognizes both TruncatedArticleOutputError and TruncationRetryFailedError", () => {
+    const truncation = new TruncatedArticleOutputError({
+      actualWords: 10,
+      expectedWords: 1500,
+      finishReason: "length",
+      contentMarkdownPreview: "x",
+    });
+    expect(isTruncatedArticleOutputError(truncation)).toBe(true);
+    const retry = new TruncationRetryFailedError({
+      originalError: truncation,
+      retryError: truncation,
+      retryCount: 1,
+    });
+    expect(isTruncatedArticleOutputError(retry)).toBe(true);
+  });
+
+  it("does NOT match schema errors, plain errors, or non-Error values", () => {
+    expect(isTruncatedArticleOutputError(new Error("rate_limit"))).toBe(false);
+    expect(
+      isTruncatedArticleOutputError(makeNoObjectGeneratedError("bad")),
+    ).toBe(false);
+    expect(
+      isTruncatedArticleOutputError(
+        new SchemaRetryFailedError({
+          originalError: new Error("a"),
+          retryError: new Error("b"),
+          retryCount: 1,
+        }),
+      ),
+    ).toBe(false);
+    expect(isTruncatedArticleOutputError(undefined)).toBe(false);
+    expect(isTruncatedArticleOutputError("anything")).toBe(false);
+  });
+});
+
+describe("getArticleGenerationFailureKind", () => {
+  it("returns 'truncated_output' for truncation errors", () => {
+    const err = new TruncatedArticleOutputError({
+      actualWords: 5,
+      expectedWords: 1500,
+      finishReason: "length",
+      contentMarkdownPreview: "x",
+    });
+    expect(getArticleGenerationFailureKind(err)).toBe("truncated_output");
+  });
+
+  it("returns 'schema_mismatch' for schema errors", () => {
+    expect(
+      getArticleGenerationFailureKind(makeNoObjectGeneratedError("bad")),
+    ).toBe("schema_mismatch");
+  });
+
+  it("prefers 'truncated_output' over 'schema_mismatch' so the retry class drives the label", () => {
+    // TruncationRetryFailedError is what generateArticleDraft surfaces
+    // when at least the final attempt was a truncation. The
+    // orchestrator must stamp `failureKind: "truncated_output"` for
+    // these (NOT schema_mismatch) so dashboards/alerts can tell the
+    // two failure modes apart.
+    const truncation = new TruncatedArticleOutputError({
+      actualWords: 5,
+      expectedWords: 1500,
+      finishReason: "length",
+      contentMarkdownPreview: "x",
+    });
+    const retry = new TruncationRetryFailedError({
+      originalError: truncation,
+      retryError: truncation,
+      retryCount: 1,
+    });
+    expect(getArticleGenerationFailureKind(retry)).toBe("truncated_output");
+  });
+
+  it("returns null for unrelated errors", () => {
+    expect(
+      getArticleGenerationFailureKind(new Error("rate_limit_exceeded")),
+    ).toBeNull();
+    expect(getArticleGenerationFailureKind(undefined)).toBeNull();
+  });
+});
+
+describe("TruncationRetryFailedError", () => {
+  it("carries both inner errors and exposes the retry metadata", () => {
+    const first = new TruncatedArticleOutputError({
+      actualWords: 100,
+      expectedWords: 2000,
+      finishReason: "stop",
+      contentMarkdownPreview: "first preview",
+    });
+    const second = new TruncatedArticleOutputError({
+      actualWords: 80,
+      expectedWords: 2000,
+      finishReason: "length",
+      contentMarkdownPreview: "second preview",
+    });
+    const err = new TruncationRetryFailedError({
+      originalError: first,
+      retryError: second,
+      retryCount: 1,
+    });
+    expect(err.kind).toBe("truncated_output");
+    expect(err.retried).toBe(true);
+    expect(err.retryCount).toBe(1);
+    expect(err.originalError).toBe(first);
+    expect(err.retryError).toBe(second);
+    expect(err.originalErrorMessage).toContain("actualWords=100");
+    expect(err.finalErrorMessage).toContain("actualWords=80");
+    expect(err.message).toContain("Original:");
+    expect(err.message).toContain("Final:");
+  });
+});
+
+describe("generateArticleDraft — truncation retry", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  /** Builds a truncated draft (~30 words, claims 2000 words). */
+  function truncatedDraftStub() {
+    return {
+      ...draftStub,
+      contentMarkdown:
+        "# Truncated\n\nThe model started writing this article and then stopped mid-sentence which is exactly what the production hiccup looked like and",
+      wordCount: 2000,
+    };
+  }
+
+  it("retries with the stricter system suffix when the first attempt is truncated, returning retried=true on success", async () => {
+    // First call → truncated draft. Second call → healthy default.
+    generateTextMock
+      .mockResolvedValueOnce({
+        output: truncatedDraftStub(),
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 200,
+          inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: {},
+        },
+        finishReason: "length",
+      })
+      .mockResolvedValueOnce({
+        output: draftStub,
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 850,
+          inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: {},
+        },
+        finishReason: "stop",
+      });
+
+    const result = await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.retryCount).toBe(1);
+    expect(result.finishReason).toBe("stop");
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+    // Truncation should have logged exactly one structured warn line
+    // for the first attempt; the successful retry must NOT warn.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]![0]).toBe(
+      "article_generation_truncation_detected",
+    );
+  });
+
+  it("throws TruncationRetryFailedError when both attempts are truncated, carrying both inner errors", async () => {
+    generateTextMock
+      .mockResolvedValueOnce({
+        output: truncatedDraftStub(),
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 200,
+          inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: {},
+        },
+        finishReason: "length",
+      })
+      .mockResolvedValueOnce({
+        output: truncatedDraftStub(),
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 250,
+          inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: {},
+        },
+        finishReason: "length",
+      });
+
+    let caught: unknown;
+    try {
+      await generateArticleDraft({
+        blogName: "Acme",
+        settings: buildSettings(),
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(TruncationRetryFailedError);
+    const err = caught as TruncationRetryFailedError;
+    expect(err.retried).toBe(true);
+    expect(err.retryCount).toBe(1);
+    expect(err.originalError).toBeInstanceOf(TruncatedArticleOutputError);
+    expect(err.retryError).toBeInstanceOf(TruncatedArticleOutputError);
+  });
+
+  it("escalates a schema-then-truncation sequence as TruncationRetryFailedError (final attempt drives the label)", async () => {
+    generateTextMock
+      .mockRejectedValueOnce(makeNoObjectGeneratedError("response did not match schema"))
+      .mockResolvedValueOnce({
+        output: truncatedDraftStub(),
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 200,
+          inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: {},
+        },
+        finishReason: "length",
+      });
+
+    let caught: unknown;
+    try {
+      await generateArticleDraft({
+        blogName: "Acme",
+        settings: buildSettings(),
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(TruncationRetryFailedError);
+  });
+
+  it("passes ARTICLE_MAX_OUTPUT_TOKENS as maxOutputTokens to every Claude call", async () => {
+    await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+    const call = generateTextMock.mock.calls[0]![0] as {
+      maxOutputTokens: number;
+    };
+    expect(call.maxOutputTokens).toBe(ARTICLE_MAX_OUTPUT_TOKENS);
+  });
+
+  it("does NOT trip the truncation guard on a healthy short article (just above the floor)", async () => {
+    // 320-word draftStub with wordCount=320 → ratio 1.0, above floor.
+    // This is the default happy path but explicit so a future floor
+    // bump can't silently break legitimate short articles.
+    void ARTICLE_TRUNCATION_WORD_FLOOR; // keep import live
+    const result = await generateArticleDraft({
+      blogName: "Acme",
+      settings: buildSettings(),
+    });
+    expect(result.retried).toBe(false);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -890,6 +1541,101 @@ describe("buildIdeasPromptParts", () => {
 
     expect(system).toContain("any of the supported types");
     expect(system).toContain("general thought leadership");
+  });
+
+  it("includes selected AI/SEO/advanced guidance when set", () => {
+    const settings = buildSettings({
+      ai: {
+        ...DEFAULT_BLOG_SETTINGS.ai,
+        approvedTerminology: "workflow, durable",
+        bannedTerminology: "hack",
+        defaultArticleStructure: "Problem → solution → checklist",
+        preferredCta: "Book a demo",
+      },
+      seo: {
+        ...DEFAULT_BLOG_SETTINGS.seo,
+        defaultHeadingsStructure: "Question-style H2s",
+        faqSection: true,
+      },
+      advanced: {
+        ...DEFAULT_BLOG_SETTINGS.advanced,
+        competitorsToAvoid: "BigCorp",
+        internalLinksToPrioritize: "docs/getting-started",
+      },
+    });
+    const { system, prompt } = buildIdeasPromptParts({
+      blogName: "Acme",
+      settings,
+      count: 5,
+    });
+    expect(system).toContain("workflow, durable");
+    expect(system).toContain("Avoid these terms/phrases");
+    expect(system).toContain("hack");
+    expect(system).toContain("Problem → solution → checklist");
+    expect(system).toContain("Book a demo");
+    expect(system).toContain("Question-style H2s");
+    expect(system).toContain("FAQ section");
+    expect(system).toContain("BigCorp");
+    expect(prompt).toContain("docs/getting-started");
+  });
+
+  it("omits idea guidance bullets when related settings are blank", () => {
+    const { system, prompt } = buildIdeasPromptParts({
+      blogName: "Acme",
+      settings: buildSettings({
+        seo: { ...DEFAULT_BLOG_SETTINGS.seo, faqSection: false },
+      }),
+      count: 5,
+    });
+    expect(system).not.toContain("Prefer these terms/phrases");
+    expect(system).not.toContain("Typical article shape");
+    expect(system).not.toContain("FAQ section");
+    expect(prompt).not.toContain("internal themes");
+  });
+
+  it("includes blog niche and keywords in the ideas system prompt when set", () => {
+    const { system } = buildIdeasPromptParts({
+      blogName: "Acme",
+      blogNiche: "AI productivity",
+      blogKeywords: ["prompt engineering", "agents"],
+      settings: buildSettings(),
+      count: 5,
+    });
+    expect(system).toContain("Blog niche/category: AI productivity.");
+    expect(system).toContain("Primary keywords to consider");
+    expect(system).toContain("prompt engineering, agents");
+    expect(system).toContain("do not stuff every keyword");
+  });
+
+  it("omits niche and keyword lines from ideas prompt when unset", () => {
+    const { system } = buildIdeasPromptParts({
+      blogName: "Acme",
+      settings: buildSettings(),
+      count: 5,
+    });
+    expect(system).not.toContain("Blog niche/category:");
+    expect(system).not.toContain("Primary keywords to consider");
+  });
+
+  it("omits keyword line from ideas prompt when all keywords are blank", () => {
+    const { system } = buildIdeasPromptParts({
+      blogName: "Acme",
+      blogKeywords: ["  "],
+      settings: buildSettings(),
+      count: 5,
+    });
+    expect(system).not.toContain("Primary keywords to consider");
+  });
+
+  it("appends legacy ai_prompt_template to ideas system prompt when set", () => {
+    const { system } = buildIdeasPromptParts({
+      blogName: "Acme",
+      legacyAiPromptTemplate: "Prefer listicle angles.",
+      settings: buildSettings(),
+      count: 5,
+    });
+    expect(system).toContain("Legacy blog-level prompt guidance");
+    expect(system).toContain("Prefer listicle angles.");
   });
 });
 

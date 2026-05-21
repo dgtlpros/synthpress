@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DEFAULT_BLOG_SETTINGS } from "@/lib/blog-settings";
 import {
   BlogSettingsTabs,
   type BlogSettingsTabsValue,
 } from "./BlogSettingsTabs";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.location.hash = "";
+});
 
 function makeValue(
   overrides: Partial<BlogSettingsTabsValue> = {},
@@ -31,6 +34,34 @@ describe("BlogSettingsTabs", () => {
     expect(
       screen.getByRole("tab", { name: "General", selected: true }),
     ).toBeInTheDocument();
+  });
+
+  it("selects the Automation tab when the URL hash is #automation", async () => {
+    window.location.hash = "#automation";
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: "Automation", selected: true }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Mode")).toBeInTheDocument();
+  });
+
+  it("switches to Automation when hashchange fires with #automation", async () => {
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+    expect(
+      screen.getByRole("tab", { name: "General", selected: true }),
+    ).toBeInTheDocument();
+
+    window.location.hash = "#automation";
+    fireEvent(window, new HashChangeEvent("hashchange"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: "Automation", selected: true }),
+      ).toBeInTheDocument();
+    });
   });
 
   it("disables Save when the form is pristine", () => {
@@ -80,10 +111,10 @@ describe("BlogSettingsTabs", () => {
     expect(screen.getByLabelText("Mode")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
-    expect(screen.getByLabelText("Destination")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Default category/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Media" }));
-    expect(screen.getByLabelText("Image source")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Image provider/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
     expect(screen.getByLabelText("Custom system prompt")).toBeInTheDocument();
@@ -536,19 +567,16 @@ describe("BlogSettingsTabs", () => {
 
   // ─── Publishing tab ──────────────────────────────────────────────────────
 
-  it("edits Publishing tab fields and toggles", () => {
+  it("edits Publishing tab WordPress draft default fields", () => {
     const onSave = vi.fn();
     render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
     fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
-    fireEvent.change(screen.getByLabelText("Destination"), {
-      target: { value: "wordpress" },
-    });
-    fireEvent.change(screen.getByLabelText("Default status"), {
-      target: { value: "scheduled" },
-    });
-    fireEvent.change(screen.getByLabelText(/Default author \(CMS\)/), {
-      target: { value: "alice" },
-    });
+    fireEvent.change(
+      screen.getByLabelText(/Default author \(WordPress login\)/),
+      {
+        target: { value: "alice" },
+      },
+    );
     fireEvent.change(screen.getByLabelText(/Default category/), {
       target: { value: "tech" },
     });
@@ -556,15 +584,12 @@ describe("BlogSettingsTabs", () => {
       target: { value: " ai , tooling , , growth " },
     });
     fireEvent.click(
-      screen.getByRole("switch", { name: /Upload featured image/ }),
-    );
-    fireEvent.click(
-      screen.getByRole("switch", { name: /Update existing posts/ }),
+      screen.getByRole("switch", {
+        name: /Upload featured image to WordPress/,
+      }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
-    expect(v.settings.publishing.defaultDestination).toBe("wordpress");
-    expect(v.settings.publishing.defaultStatus).toBe("scheduled");
     expect(v.settings.publishing.defaultAuthor).toBe("alice");
     expect(v.settings.publishing.defaultCategory).toBe("tech");
     expect(v.settings.publishing.defaultTags).toEqual([
@@ -573,7 +598,28 @@ describe("BlogSettingsTabs", () => {
       "growth",
     ]);
     expect(v.settings.publishing.uploadFeaturedImage).toBe(false);
-    expect(v.settings.publishing.updateExistingPosts).toBe(true);
+  });
+
+  it("Publishing tab explains draft-only autopilot and manual live publish", () => {
+    render(
+      <BlogSettingsTabs
+        initialValue={makeValue()}
+        onSave={vi.fn()}
+        hasWordPressConnection
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Publishing" }));
+    expect(
+      screen.getByText(/Autopilot always sends WordPress drafts only/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Live publishing stays manual from the article page/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Destination")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Default status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Update existing posts/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("Publishing tab renders the autopilot WP-draft toggle DISABLED when no WordPress connection", () => {
@@ -611,7 +657,7 @@ describe("BlogSettingsTabs", () => {
     expect(toggle).not.toBeDisabled();
     expect(
       screen.getByText(
-        /When enabled, autopilot-generated articles are sent to WordPress as drafts/i,
+        /When enabled, autopilot-generated articles are sent to WordPress as drafts after generation/i,
       ),
     ).toBeInTheDocument();
   });
@@ -639,34 +685,41 @@ describe("BlogSettingsTabs", () => {
 
   // ─── Media tab ───────────────────────────────────────────────────────────
 
-  it("edits Media tab fields and toggles", () => {
+  it("edits Media tab Pexels controls", () => {
     const onSave = vi.fn();
     render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
     fireEvent.click(screen.getByRole("tab", { name: "Media" }));
     fireEvent.click(
-      screen.getByRole("switch", { name: /Generate a featured image/ }),
+      screen.getByRole("switch", {
+        name: /Add images above article sections/,
+      }),
     );
-    fireEvent.click(screen.getByRole("switch", { name: /Generate alt text/ }));
-    fireEvent.click(
-      screen.getByRole("switch", { name: /Inline images in body/ }),
-    );
-    fireEvent.change(screen.getByLabelText(/Image source/), {
-      target: { value: "manual_upload" },
-    });
-    fireEvent.change(screen.getByLabelText(/Default image dimensions/), {
-      target: { value: "800x600" },
-    });
-    fireEvent.change(screen.getByLabelText(/Image style prompt/), {
-      target: { value: "Soft pastels" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const v = onSave.mock.calls[0][0];
-    expect(v.settings.media.generateFeaturedImage).toBe(true);
-    expect(v.settings.media.generateAltText).toBe(false);
-    expect(v.settings.media.includeInlineImages).toBe(true);
-    expect(v.settings.media.imageSource).toBe("manual_upload");
-    expect(v.settings.media.defaultImageDimensions).toBe("800x600");
-    expect(v.settings.media.imageStylePrompt).toBe("Soft pastels");
+    expect(v.settings.media.includeInlineImages).toBe(false);
+  });
+
+  it("Media tab does not show legacy AI image controls", () => {
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    expect(screen.queryByLabelText(/Image source/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Default image dimensions/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Image style prompt/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Generate a featured image/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Generate alt text/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Automatically choose a featured image and section images from Pexels/i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("Media tab renders the autopilot image picker controls with defaults", () => {
@@ -675,9 +728,13 @@ describe("BlogSettingsTabs", () => {
     const autoPick = screen.getByRole("switch", {
       name: /Automatically choose images for AI-generated articles/,
     });
+    const sectionImages = screen.getByRole("switch", {
+      name: /Add images above article sections/,
+    });
     expect(autoPick).toBeInTheDocument();
     // Default = on.
     expect(autoPick).toHaveAttribute("aria-checked", "true");
+    expect(sectionImages).toHaveAttribute("aria-checked", "true");
     const providerSelect = screen.getByLabelText(
       /Image provider/,
     ) as HTMLSelectElement;
@@ -725,6 +782,33 @@ describe("BlogSettingsTabs", () => {
     // not the raw provider id.
     const optionLabels = Array.from(select.options).map((o) => o.text);
     expect(optionLabels).toContain("Pexels");
+  });
+
+  it("disables section-image toggle when auto-pick is off or provider is none", () => {
+    const onSave = vi.fn();
+    render(<BlogSettingsTabs initialValue={makeValue()} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Media" }));
+    const sectionToggle = screen.getByRole("switch", {
+      name: /Add images above article sections/,
+    });
+    expect(sectionToggle).not.toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: /Automatically choose images for AI-generated articles/,
+      }),
+    );
+    expect(sectionToggle).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: /Automatically choose images for AI-generated articles/,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText(/Image provider/), {
+      target: { value: "none" },
+    });
+    expect(sectionToggle).toBeDisabled();
   });
 
   // ─── Advanced tab ────────────────────────────────────────────────────────

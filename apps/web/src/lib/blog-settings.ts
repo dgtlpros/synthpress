@@ -208,11 +208,21 @@ export interface BlogPublishingSettings {
 }
 
 export interface BlogMediaSettings {
+  /** Stored for backward compatibility; not shown in Media tab (MVP uses Pexels stock). */
   generateFeaturedImage: boolean;
+  /** Stored for backward compatibility; not shown in Media tab. */
   imageStylePrompt: string;
+  /** Legacy axis (ai_generated, etc.); MVP picker uses `imageProvider` instead. */
   imageSource: BlogImageSource;
+  /** Stored for backward compatibility; Pexels supplies alt text today. */
   generateAltText: boolean;
+  /** Stored for backward compatibility; not shown in Media tab. */
   defaultImageDimensions: string;
+  /**
+   * When `autoPickImages` is on, also pick stock images above each H2
+   * section (`includeSections` in the picker). When `false`, only the
+   * featured image is picked automatically.
+   */
   includeInlineImages: boolean;
   /**
    * Run the autopilot image picker after every AI-generated article.
@@ -332,7 +342,9 @@ export const DEFAULT_BLOG_SETTINGS: BlogSettings = {
     imageSource: "ai_generated",
     generateAltText: true,
     defaultImageDimensions: "1200x630",
-    includeInlineImages: false,
+    // MVP Pexels picker places images above H2 sections when
+    // `autoPickImages` is on. `false` = featured image only.
+    includeInlineImages: true,
     // Autopilot picker defaults on with Pexels. Existing blogs
     // (rows without these keys in `settings.media`) inherit the
     // same posture via the normalizer's fallback.

@@ -1,7 +1,8 @@
 <?php
 /**
- * Prevent Author-role users (e.g. Confleko bot) from accessing wp-admin
- * unless explicitly allowed via a per-user checkbox.
+ * Prevent Author-role users from accessing wp-admin unless explicitly
+ * allowed via a per-user checkbox. SynthPress publishing uses an Editor
+ * bot (e.g. synthpress-bot) via Application Passwords — REST is unaffected.
  */
 if (!defined('ABSPATH')) exit;
 

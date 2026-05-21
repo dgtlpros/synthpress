@@ -12,6 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { markdownToHtml } from "@/lib/markdown-to-html";
 import {
   buildBasicAuthHeader,
+  buildWordPressPayload,
   buildWordPressMediaEndpoint,
   buildWordPressPostsEndpoint,
   clearWordPressLink,
@@ -45,6 +46,7 @@ interface BlogConnRow {
   wp_url: string | null;
   wp_username: string | null;
   wp_app_password: string | null;
+  settings?: Record<string, unknown> | null;
 }
 
 interface PublishedAtRow {
@@ -283,6 +285,7 @@ const defaultBlog: BlogConnRow = {
   wp_url: "https://example.com",
   wp_username: "wpuser",
   wp_app_password: "abcd efgh ijkl mnop",
+  settings: null,
 };
 
 function makeOkResponse(
@@ -639,6 +642,110 @@ describe("publishArticleToWordPressDraft", () => {
     });
 
     expect(result.wpPostUrl).toBeNull();
+  });
+
+  it("omits featured_media when uploadFeaturedImage is false (no media upload)", async () => {
+    const { client } = makeClient({
+      articleReads: [
+        {
+          ...defaultArticle,
+          featured_image_url: "https://cdn.example.com/x.png",
+          featured_image_alt: "A photo",
+          wp_featured_media_id: 55,
+        },
+      ],
+      blog: {
+        ...defaultBlog,
+        settings: { publishing: { uploadFeaturedImage: false } },
+      },
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(makeOkResponse());
+
+    await publishArticleToWordPressDraft({
+      articleId: "a1",
+      blogId: "b1",
+      client,
+      fetchImpl: fetchImpl as never,
+    });
+
+    const postCall = fetchImpl.mock.calls.find(
+      (call) =>
+        String(call[0]).includes("/wp/v2/posts") &&
+        (call[1] as { method?: string })?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    const body = JSON.parse(postCall![1]!.body as string);
+    expect(body.featured_media).toBeUndefined();
+    expect(
+      fetchImpl.mock.calls.some((call) =>
+        String(call[0]).includes("/wp/v2/media"),
+      ),
+    ).toBe(false);
+  });
+
+  it("includes category, tags, and author from publishing settings on the post payload", async () => {
+    const { client } = makeClient({
+      blog: {
+        ...defaultBlog,
+        settings: {
+          publishing: {
+            defaultCategory: "Tech",
+            defaultTags: ["ai", "news"],
+            defaultAuthor: "editor",
+          },
+        },
+      },
+    });
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/categories?")) {
+        return {
+          ok: true,
+          json: async () => [{ id: 3, name: "Tech", slug: "tech" }],
+        };
+      }
+      if (url.includes("/tags?") && url.includes("search=ai")) {
+        return {
+          ok: true,
+          json: async () => [{ id: 10, name: "ai", slug: "ai" }],
+        };
+      }
+      if (url.includes("/tags?") && url.includes("search=news")) {
+        return {
+          ok: true,
+          json: async () => [{ id: 11, name: "news", slug: "news" }],
+        };
+      }
+      if (url.includes("/users?slug=editor")) {
+        return {
+          ok: true,
+          json: async () => [{ id: 7, slug: "editor", name: "editor" }],
+        };
+      }
+      if (
+        url.includes("/wp/v2/posts") &&
+        (!init?.method || init.method === "POST")
+      ) {
+        return makeOkResponse();
+      }
+      return { ok: false, status: 404, text: async () => "" };
+    });
+
+    await publishArticleToWordPressDraft({
+      articleId: "a1",
+      blogId: "b1",
+      client,
+      fetchImpl: fetchImpl as never,
+    });
+
+    const postCall = fetchImpl.mock.calls.find(
+      (call) =>
+        String(call[0]).includes("/wp/v2/posts") &&
+        (call[1] as { method?: string })?.method === "POST",
+    );
+    const body = JSON.parse(postCall![1]!.body as string);
+    expect(body.categories).toEqual([3]);
+    expect(body.tags).toEqual([10, 11]);
+    expect(body.author).toBe(7);
   });
 
   it("translates fetch network errors into wp_request_failed", async () => {

@@ -63,12 +63,12 @@ import {
  *
  *   Cross-article diversity (v13): the `usedImageKeys` set is
  *   ALSO seeded at the start of `pickImagesForArticle` from
- *   `article_image_uploads` rows belonging to OTHER recent
- *   articles in the same blog (see
+ *   OTHER articles' recent **featured** images only (see
  *   {@link RECENT_IMAGE_DIVERSITY_WINDOW_DAYS} +
- *   {@link RECENT_IMAGE_DIVERSITY_LIMIT}). Without that seed,
- *   Pexels' top result for a recurring keyword could land on
- *   five articles in a row.
+ *   {@link RECENT_IMAGE_DIVERSITY_LIMIT}). Section images on
+ *   other articles do not enter the cross-article seed. Without
+ *   that seed, Pexels' top hit for a recurring keyword could land
+ *   as the featured image on five posts in a row.
  *
  * Query derivation:
  *   * Featured: `article.target_keyword` → `article.title` → `blog.niche`.
@@ -94,10 +94,10 @@ export const AUTO_IMAGE_SEARCH_PER_PAGE = 15;
 
 /**
  * Lookback window (in days) used to seed `usedImageKeys` with
- * images already chosen for OTHER recent articles in the same
- * blog. Stops Pexels' top hit for a recurring keyword (e.g. a
- * blog's target niche) from landing as the featured image on
- * five consecutive posts.
+ * **featured** images already chosen for OTHER recent articles
+ * in the same blog. Stops Pexels' top hit for a recurring keyword
+ * from landing as the featured image on five consecutive posts.
+ * Section images on other articles are intentionally excluded.
  *
  * 30 days balances diversity against the provider's library
  * size: too short and the same photo cycles back too quickly;
@@ -537,10 +537,11 @@ async function pickSectionImages(opts: {
         );
       } else if (outcome.reason === "all_used") {
         // Provider returned candidates but they all matched the
-        // dedupe set — typically because the recent-blog seed
-        // has consumed the provider's top hits for this niche.
+        // dedupe set — recent featured images from other articles
+        // and/or images already used for this article (featured
+        // + prior sections).
         warnings.push(
-          `Skipped section "${section.sectionHeading}": no unused images found in recent blog history.`,
+          `Skipped section "${section.sectionHeading}": no usable image found after dedupe.`,
         );
       } else {
         warnings.push(
@@ -661,10 +662,10 @@ export async function pickImagesForArticle(
   // `pickFeaturedImageInner` and `pickSectionImages` so they pick
   // disjoint photos. Three sources of seed data feed this set:
   //
-  //   1. Cross-article diversity (this PR, v13): every image
-  //      already chosen for ANOTHER recent article in the same
-  //      blog. Stops Pexels' top hit for a recurring keyword
-  //      from landing on five posts in a row. Bounded by
+  //   1. Cross-article diversity (v13): featured images from
+  //      OTHER recent articles in the same blog (`role: "featured"`
+  //      rows only). Stops the same hero appearing on five posts
+  //      in a row. Bounded by
   //      {@link RECENT_IMAGE_DIVERSITY_WINDOW_DAYS} +
   //      {@link RECENT_IMAGE_DIVERSITY_LIMIT} so the read stays
   //      cheap on busy blogs.
@@ -688,6 +689,7 @@ export async function pickImagesForArticle(
       blogId: input.blogId,
       excludeArticleId: input.articleId,
       providerId: input.providerId ?? providerId,
+      role: "featured",
       sinceDays: RECENT_IMAGE_DIVERSITY_WINDOW_DAYS,
       limit: RECENT_IMAGE_DIVERSITY_LIMIT,
       client,
@@ -818,7 +820,7 @@ async function pickFeaturedImageInner(opts: {
       );
     } else if (outcome.reason === "all_used") {
       warnings.push(
-        "Skipped featured image: no unused images found in recent blog history.",
+        "Skipped featured image: no unused featured image found in recent blog history.",
       );
     } else {
       warnings.push(

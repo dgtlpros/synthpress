@@ -125,11 +125,6 @@ final class FeedController
 			return;
 		}
 
-		if (isset($_GET['debug_feed_query'])) {
-			global $wp_query;
-			echo '<!--- ' . $wp_query->request . '--->';
-		}
-
 		while (have_posts()) : the_post();
 			$this->generator->add_item(get_post());
 		endwhile;

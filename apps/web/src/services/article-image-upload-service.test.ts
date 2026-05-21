@@ -1204,6 +1204,47 @@ describe("listRecentImageKeysForBlog", () => {
     expect(chain.eq).toHaveBeenCalledWith("provider", "pexels");
   });
 
+  it("filters by role='featured' when supplied (cross-article diversity seed)", async () => {
+    const client = makeClient({
+      article_image_uploads: {
+        data: [
+          {
+            provider: "pexels",
+            provider_photo_id: "feat-only",
+            image_url: "https://images.pexels.com/photos/feat/large.jpg",
+            article_id: "other-article",
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const keys = await listRecentImageKeysForBlog({
+      blogId: "b1",
+      role: "featured",
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    expect(chain.eq).toHaveBeenCalledWith("role", "featured");
+    expect(keys.has("pexels:feat-only")).toBe(true);
+  });
+
+  it("does NOT filter by role when role is omitted (all roles returned)", async () => {
+    const client = makeClient({
+      article_image_uploads: { data: [], error: null },
+    });
+
+    await listRecentImageKeysForBlog({
+      blogId: "b1",
+      client: client as never,
+    });
+
+    const chain = client.__chains.article_image_uploads!;
+    const roleEqCalls = chain.eq.mock.calls.filter((c) => c[0] === "role");
+    expect(roleEqCalls).toHaveLength(0);
+  });
+
   it("sorts by created_at desc and caps at the supplied limit", async () => {
     const client = makeClient({
       article_image_uploads: { data: [], error: null },

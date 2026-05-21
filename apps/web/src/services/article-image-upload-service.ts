@@ -285,6 +285,13 @@ export interface ListRecentImageKeysForBlogInput {
    * provider hosts coincidentally). Default unfiltered.
    */
   providerId?: string;
+  /**
+   * When set, only rows with this `role` are included. Autopilot
+   * cross-article diversity passes `role: "featured"` so section
+   * images on other articles do not shrink the candidate pool.
+   * Omit to include both featured and section rows (legacy behavior).
+   */
+  role?: ArticleImageRole;
   /** Lookback window in days. Defaults to 30 (~1 month of posts). */
   sinceDays?: number;
   /**
@@ -305,7 +312,8 @@ export interface ListRecentImageKeysForBlogInput {
 /**
  * Returns the dedupe-key set the autopilot image picker should
  * seed `usedImageKeys` with so it doesn't pick photos the blog
- * already used in another recent article.
+ * already used as featured images on other recent articles (when
+ * called with `role: "featured"`).
  *
  * Keys mirror what `pickImagesForArticle` builds per candidate
  * photo (see `imageDedupeKeys` in `article-image-picker-service.ts`):
@@ -349,6 +357,9 @@ export async function listRecentImageKeysForBlog(
   }
   if (input.providerId) {
     query = query.eq("provider", input.providerId);
+  }
+  if (input.role) {
+    query = query.eq("role", input.role);
   }
   const { data, error } = await query
     .order("created_at", { ascending: false })

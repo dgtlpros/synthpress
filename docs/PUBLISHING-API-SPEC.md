@@ -1,31 +1,34 @@
 # SynthPress Publishing API — Integration Spec
 
-> **Purpose**: This is the definitive reference for how the SynthPress Dashboard publishes content to WordPress sites. It documents every API call, the exact order of operations, content formatting rules, and what WordPress handles automatically so we never duplicate work.
+> **Purpose**: Reference for how the SynthPress Dashboard publishes to WordPress via REST. For boilerplate deploy and new-site setup, see **[`wordpress/README.md`](../wordpress/README.md)** (canonical `wordpress/` folder; `wordpress-devkinsta/` is local/dev only).
 
 ---
 
 ## Overview
 
-SynthPress publishes to WordPress using **only the built-in REST API**. No custom WordPress plugin is required. The WordPress site has mu-plugins and standard plugins that handle everything post-publish (MSN syndication, SEO, cache purge).
+SynthPress publishes using **only the built-in REST API** and **Application Passwords**. **No custom SynthPress WordPress plugin is required** for MVP.
+
+Sites deployed with the [`wordpress/`](../wordpress/) boilerplate add mu-plugins and plugins for MSN syndication, SEO, and publish guardrails. Those run **on WordPress after** SynthPress writes the post — SynthPress does not send MSN or Rank Math meta today.
 
 ```
-SynthPress Dashboard
+SynthPress Dashboard (wordpress-publish-service.ts)
   │
-  │  1. Upload featured image ──► POST /wp-json/wp/v2/media
-  │  2. Upload inline images ───► POST /wp-json/wp/v2/media (repeat per image)
-  │  3. Build HTML with local URLs
-  │  4. Create post ────────────► POST /wp-json/wp/v2/posts
-  │  5. Verify publish ────────► GET  /wp-json/wp/v2/posts/{id}
+  │  1. Upload featured image (if configured) ──► POST /wp-json/wp/v2/media
+  │  2. Upload section images (per H2, if any) ───► POST /wp-json/wp/v2/media
+  │  3. Build HTML (markdown → sanitized HTML + section <figure>s)
+  │  4. Resolve category / tags / author (optional) ──► GET/POST categories, tags, users
+  │  5. Create or update post ─────────────────────► POST or PUT /wp-json/wp/v2/posts
   │
   ▼
-WordPress (autopilot from here)
-  ├── auto-enable-msn-syndication.php sets syndication meta
-  ├── featured-image-requirement.php blocks posts without images
-  ├── msn-syndication-2 adds post to /feed/msn:article
-  ├── Rank Math injects Article schema + sitemap
-  ├── Auto Image Attributes fills alt text from filename
-  └── Kinsta purges cache → post is live
+WordPress (when using the boilerplate kit, on live publish)
+  ├── auto-enable-msn-syndication.php sets syndication meta (status → publish only)
+  ├── featured-image-requirement.php blocks publish without featured image
+  ├── msn-syndication-2 serves /feed/msn:article
+  ├── Rank Math, Auto Image Attributes, etc.
+  └── Kinsta cache purge (Kinsta hosts)
 ```
+
+**Dashboard behavior today:** create/update **drafts**, manual **publish live** from the article page, autopilot **draft-only** auto-send (`autoSendToWordPressDraft`). Autopilot does **not** auto live-publish.
 
 ---
 
@@ -53,6 +56,8 @@ Authorization: Basic {credentials}
 ```
 
 A `200` response with the bot user's data = connection works. A `401` = bad credentials.
+
+> **Note:** The SynthPress dashboard does **not** yet call this endpoint when saving credentials. Use curl or your browser until an in-app health check ships. See [`wordpress/README.md`](../wordpress/README.md#testing-the-connection).
 
 ---
 
@@ -88,24 +93,23 @@ Save `id` (you'll need it for `featured_media`) and `source_url` (if you want to
 
 **Filename matters:** The Auto Image Attributes plugin generates alt text from the filename. Use descriptive, hyphenated filenames like `golden-retriever-puppy-playing-fetch.jpg` — not `img_001.jpg` or `DALL-E-output.png`.
 
-### Step 2: Upload inline images (if any)
+### Step 2: Upload section images (if any)
 
-If the article has images in the body (not just the featured image), upload each one the same way:
+The dashboard uploads **section images** tied to article H2s (`article_image_uploads` with `role = 'section'`). Each is uploaded via the same media endpoint, then injected into HTML as:
 
-```http
-POST https://{site-url}/wp-json/wp/v2/media
-Authorization: Basic {credentials}
-Content-Type: image/jpeg
-Content-Disposition: attachment; filename="descriptive-image-name.jpg"
-
-{binary image data}
+```html
+<figure class="synthpress-section-image">
+  <img class="wp-image-{id}" src="..." alt="...">
+</figure>
 ```
 
-Collect the `source_url` from each response. You'll use these when building the HTML.
+**Generic inline markdown images** (`![alt](url)`) are **not** uploaded to WordPress media today — they remain external `https://` URLs in the post body (sanitizer allows http/https only).
+
+If you need every body image in the Media Library, use section images or a future inline-upload feature — do not assume Step 2 covers arbitrary markdown images.
 
 ### Step 3: Build the article HTML
 
-Construct the post body using **only local WordPress URLs** for images. Never include external URLs — every image must already be in the WordPress Media Library from Steps 1-2.
+For **featured and section images**, use WordPress media URLs from Steps 1–2. MSN-oriented sites should avoid relying on long-lived external image URLs in published content.
 
 **Required HTML structure:**
 
@@ -216,7 +220,7 @@ Fires on `save_post`. If a post is published without a `featured_media`, it reve
 
 ### `restrict-author-login.php` (mu-plugin)
 
-Blocks the bot user from logging into wp-admin. The bot only needs REST API access, which Application Passwords provide. This is a security hardening measure.
+Blocks **Author**-role users from logging into wp-admin (unless an admin enables per-user access). The SynthPress bot should use the **Editor** role (`synthpress-bot`); Application Passwords provide REST access without wp-admin. This mu-plugin does **not** block REST API requests.
 
 ### `msn-syndication-2` (plugin)
 
@@ -274,65 +278,26 @@ SynthPress should handle these cases:
 
 ---
 
-## Minimum Viable Publish (code pseudocode)
+## Minimum Viable Publish (aligned with current app)
+
+The implementation lives in `apps/web/src/services/wordpress-publish-service.ts`. Modes: `create_draft` (POST), `update_draft` (PUT), `publish_live` (PUT with `status: "publish"`).
 
 ```typescript
-async function publishArticle(project: Project, article: Article) {
-  const auth = btoa(`${project.wpUsername}:${project.wpAppPassword}`);
-  const headers = { Authorization: `Basic ${auth}` };
+// Simplified — see wordpress-publish-service.ts for full error handling
+async function syncArticleToWordPress(mode: "create_draft" | "update_draft" | "publish_live") {
+  const auth = buildBasicAuthHeader(wpUsername, wpAppPassword);
 
-  // Step 1: Upload featured image
-  const imageResponse = await fetch(`${project.wpUrl}/wp-json/wp/v2/media`, {
-    method: "POST",
-    headers: {
-      ...headers,
-      "Content-Type": "image/jpeg",
-      "Content-Disposition": `attachment; filename="${article.featuredImageFilename}"`,
-    },
-    body: article.featuredImageBuffer,
-  });
-  const media = await imageResponse.json();
+  const featuredMediaId = await ensureFeaturedMediaUploaded(/* ... */);
+  const sectionImagesByKey = await ensureSectionMediaUploaded(/* ... */);
+  const html = markdownToHtml(article.content_markdown, { sectionImagesByKey });
+  const publishingMeta = await resolvePublishingMetaForPost(/* categories, tags, author */);
 
-  // Step 2: Upload inline images and rewrite URLs in content
-  let content = article.htmlContent;
-  for (const image of article.inlineImages) {
-    const inlineResponse = await fetch(`${project.wpUrl}/wp-json/wp/v2/media`, {
-      method: "POST",
-      headers: {
-        ...headers,
-        "Content-Type": image.mimeType,
-        "Content-Disposition": `attachment; filename="${image.filename}"`,
-      },
-      body: image.buffer,
-    });
-    const inlineMedia = await inlineResponse.json();
-    content = content.replace(image.placeholderUrl, inlineMedia.source_url);
-  }
+  const payload = buildWordPressPayload(article, html, mode === "publish_live" ? "publish" : "draft", featuredMediaId, publishingMeta);
 
-  // Step 3: Create the post
-  const postResponse = await fetch(`${project.wpUrl}/wp-json/wp/v2/posts`, {
-    method: "POST",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: article.title,
-      content: content,
-      status: "publish",
-      featured_media: media.id,
-      excerpt: article.excerpt,
-    }),
-  });
-  const post = await postResponse.json();
-
-  // Step 4: Verify
-  if (post.status !== "publish") {
-    throw new Error(`Post ${post.id} was not published — status: ${post.status}`);
-  }
-
-  return {
-    wpPostId: post.id,
-    wpPostUrl: post.link,
-    publishedAt: new Date(),
-  };
+  const method = mode === "create_draft" ? "POST" : "PUT";
+  const endpoint = mode === "create_draft" ? "/wp-json/wp/v2/posts" : `/wp-json/wp/v2/posts/${wpPostId}`;
+  const post = await performWordPressRequest(endpoint, method, payload, auth);
+  // Stamp wp_post_id / wp_post_url; publish_live also sets local article status published
 }
 ```
 
@@ -342,11 +307,11 @@ async function publishArticle(project: Project, article: Article) {
 
 | Action | Method | Endpoint | When |
 |---|---|---|---|
-| Test connection | GET | `/wp-json/wp/v2/users/me` | On project setup / health check |
-| Upload image | POST | `/wp-json/wp/v2/media` | Before creating each post |
-| Create post | POST | `/wp-json/wp/v2/posts` | After all images are uploaded |
-| Verify post | GET | `/wp-json/wp/v2/posts/{id}` | After creating the post |
-| List categories | GET | `/wp-json/wp/v2/categories` | On project setup (to map categories) |
-| Create category | POST | `/wp-json/wp/v2/categories` | If a needed category doesn't exist |
-| List posts | GET | `/wp-json/wp/v2/posts` | For dashboard article history / sync |
-| Site info | GET | `/wp-json/` | On project setup (verify REST API is available) |
+| Test connection | GET | `/wp-json/wp/v2/users/me` | Manual / future health check (not in dashboard yet) |
+| Upload image | POST | `/wp-json/wp/v2/media` | Featured + section images before post sync |
+| Update media alt | PUT | `/wp-json/wp/v2/media/{id}` | Optional after upload |
+| Create draft | POST | `/wp-json/wp/v2/posts` | `create_draft` / autopilot auto-send |
+| Update draft | PUT | `/wp-json/wp/v2/posts/{id}` | `update_draft` |
+| Publish live | PUT | `/wp-json/wp/v2/posts/{id}` | `publish_live` from article page |
+| Categories / tags | GET, POST | `/wp-json/wp/v2/categories`, `/tags` | Resolve blog publishing defaults |
+| Authors | GET | `/wp-json/wp/v2/users` | Resolve `defaultAuthor` by slug/search |

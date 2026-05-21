@@ -211,6 +211,7 @@ describe("loadBlogSettings", () => {
   it("defaults autopilot image picker to ON with Pexels", () => {
     expect(DEFAULT_BLOG_SETTINGS.media.autoPickImages).toBe(true);
     expect(DEFAULT_BLOG_SETTINGS.media.imageProvider).toBe("pexels");
+    expect(DEFAULT_BLOG_SETTINGS.media.includeInlineImages).toBe(true);
   });
 
   it("coerces legacy media.imageProvider='unsplash' to 'pexels'", () => {
