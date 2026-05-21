@@ -338,15 +338,13 @@ describe("testWordPressConnection", () => {
     // Branch coverage for `input.fetchImpl ?? globalThis.fetch`.
     // We stub the real `fetch` for one call rather than threading a
     // mock through, so we exercise the `??` fallback path.
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          id: 1,
-          name: "Real",
-          roles: ["administrator"],
-        }) as Response,
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 1,
+        name: "Real",
+        roles: ["administrator"],
+      }) as Response,
+    );
     try {
       const result = await testWordPressConnection({
         wpUrl: "https://example.com",

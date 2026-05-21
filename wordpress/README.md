@@ -13,7 +13,7 @@ Canonical **wp-content site kit** for WordPress sites that integrate with the Sy
 ## 1. Purpose
 
 - **`wordpress/`** is the SynthPress WordPress boilerplate: a tracked `wp-content` tree (plugins, mu-plugins, themes) you deploy onto fresh WordPress installs.
-- SynthPress publishes articles via the **stock WordPress REST API** and **Application Passwords**. **No custom SynthPress companion plugin is required** for MVP.
+- SynthPress publishes articles via the **stock WordPress REST API** and **Application Passwords**. The bundled **`synthpress/` companion plugin** is **optional but recommended** — it adds a Settings → SynthPress page with a readiness checklist and a one-click connection-package export, but does not change how publishing works.
 - This kit is **especially useful** for the documented **Kinsta + MSN syndication** network (RSS feeds, SEO plugins, publish-time guardrails).
 - For **basic draft/live publishing only**, you can connect any compatible WordPress site in SynthPress without copying this folder.
 
@@ -45,14 +45,22 @@ Use this when you already have WordPress and only need SynthPress to create/upda
 - **Application Password** for that user (`Users → Profile → Application Passwords`)
 - Capabilities: create/edit/publish posts, upload media; create categories/tags; assign author as allowed by your site policy
 
-**SynthPress connection:**
+**SynthPress connection (recommended path, using the bundled companion plugin):**
 
-1. Open the blog in SynthPress → **Connections** (or blog settings).
-2. Enter **WordPress URL** (site root or full `/wp-json` base if non-standard).
-3. Enter **username** and **application password** (spaces in the password are stripped on save).
-4. Save. The dashboard does **not** yet run an automatic `GET /wp/v2/users/me` health check — verify manually (see [Testing the connection](#testing-the-connection) below).
+1. Install/activate the **SynthPress** plugin (ships with this kit at `wordpress/wp-content/plugins/synthpress/`).
+2. Open **Settings → SynthPress** in WP Admin. Fix any failing readiness rows. Confirm or create the `synthpress-bot` user.
+3. Generate an Application Password named `SynthPress` on the bot user's profile. Copy the password WordPress shows you exactly once.
+4. Click **Copy connection package** on the plugin page.
+5. In SynthPress → **Connections**, click **Paste connection package** → paste the JSON → click **Review package** → click **Use this connection**. The site URL and a suggested username pre-fill from the package. The package never contains your Application Password.
+6. Paste the Application Password into the dashboard's password field.
+7. Click **Save**, then **Test connection** — the dashboard runs `GET /wp-json/wp/v2/users/me?context=edit` against the saved credentials (not unsaved form values) and renders one of three panels:
+   - **Connection looks healthy** — green; user + role + capabilities returned by WordPress.
+   - **Connected with warnings** — amber; the user authenticated, but the capability map suggests they can't publish, upload media, or create categories/tags. Autopilot drafts will still work; live publish may not.
+   - **Connection failed** — red; mapped error code with a friendly message (bad credentials, REST 404 at `/wp-json`, network error, etc.). The application password is never echoed back to the browser by the test action.
 
-**You do not need to copy `wordpress/wp-content`** for Path A.
+**Manual path (no companion plugin):** skip steps 1–2 and 4 above; enter the WordPress URL by hand in step 5 (skip the package import), then continue with Save + Test connection. The companion plugin is a setup convenience, not a requirement.
+
+**You do not need to copy `wordpress/wp-content`** for Path A — the companion plugin can be installed standalone from a release zip if you don't want the full Kinsta/MSN kit.
 
 ### Path B — Full SynthPress / Kinsta / MSN boilerplate
 
@@ -106,7 +114,7 @@ Auth: `Authorization: Basic` with username + application password.
 | **Section images** (per H2) | Uploaded to WP media; injected as `<figure class="synthpress-section-image">` with `wp-image-{id}` |
 | **Inline markdown images** (`![alt](url)`) | Stay as **external URLs** in HTML; **not** uploaded to WP media |
 | Blog setting `defaultStatus` / `updateExistingPosts` | Stored in UI; **not wired** into publish payload yet |
-| In-app connection test (`GET /users/me`) | **Not implemented** — test manually |
+| In-app connection test (`GET /users/me`) | **Yes** — Connections tab → **Test connection** button; uses saved credentials and renders healthy / warnings / error panels |
 | MSN syndication meta from SynthPress | **No** — set by `auto-enable-msn-syndication.php` when post becomes `publish` on sites using this kit |
 
 MSN feed inclusion only matters after a post is **published** on WordPress (not while it remains a draft).
@@ -130,6 +138,7 @@ Deployable under [`wp-content/`](./wp-content/):
 
 | Folder | Purpose |
 |--------|---------|
+| `synthpress/` | **SynthPress connector (first-party)** — Settings → SynthPress with readiness checklist, bot user detection, App Password setup steps, and a connection-package JSON export. Authenticated read-only REST route `/wp-json/synthpress/v1/readiness`. No remote calls, no options stored, no secrets handled. |
 | `msn-syndication-2/` | MSN RSS at `/feed/msn:article`, `/feed/msn:gallery` |
 | `seo-by-rank-math/` | SEO, schema, sitemap |
 | `auto-image-attributes-from-filename-with-bulk-updater/` | Alt text from upload filename |
@@ -173,7 +182,15 @@ Deployable under [`wp-content/`](./wp-content/):
 
 ### Testing the connection
 
-Until the dashboard ships an in-app check, verify manually:
+**Preferred:** in SynthPress, open the blog → **Connections** tab → click **Test connection**. The dashboard calls `GET /wp-json/wp/v2/users/me?context=edit` with Basic auth using the saved credentials and shows:
+
+- **Connection looks healthy** — credentials work, user has the capabilities autopilot needs.
+- **Connected with warnings** — credentials work, but the user may not be able to publish, upload media, or create categories/tags. Drafts still flow; live publish may fail.
+- **Connection failed** — one of `missing_url`, `missing_username`, `missing_password`, `invalid_url`, `unauthorized` (401), `forbidden` (403), `rest_not_found` (404 — wrong site URL or REST disabled), `not_wordpress` (response wasn't a WP user payload), `network_error`, or `unexpected` (other 5xx).
+
+The app password is read server-side and **never** returned to the browser by the test action — only the test result, capability map, and error code travel back to the client.
+
+**Out-of-band check** (useful when triaging a 401 outside the dashboard):
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \
@@ -196,16 +213,37 @@ Expect `200`. `401` = bad credentials.
 
 ---
 
-## 9. Future companion plugin
+## 9. Companion plugin (`synthpress/`)
 
-No SynthPress companion plugin is required today. One may be added later if we need:
+The first version of the **SynthPress companion plugin** now ships in `wp-content/plugins/synthpress/`. Scope is intentionally minimal — it is a setup-helper, not a publishing layer.
 
-- Custom REST endpoints or webhooks (WP → SynthPress)
-- Rank Math / SEO meta sync from the dashboard
-- Scheduled publish hooks or status sync
-- Site telemetry or health callbacks
+**What it does today (v0.1.0):**
 
-Until then, keep integration in the dashboard service layer + this wp-content kit.
+- Adds **Settings → SynthPress** (visible only to `manage_options`).
+- Runs a readiness checklist: REST API reachable, Application Passwords supported, HTTPS, pretty permalinks, current-user capability gates (`edit_posts` / `publish_posts` / `upload_files` / `manage_categories`), and `synthpress-bot` user detection.
+- Tells you exactly how to generate an Application Password named `SynthPress`; never stores or displays the password itself.
+- Provides a read-only **connection package** JSON (site URL, REST URL, admin URL, WordPress version, recommended user, readiness snapshot) with a Copy-to-clipboard button.
+- Registers `GET /wp-json/synthpress/v1/readiness` (authenticated — `edit_posts` or `manage_options`) so a future SynthPress app version can pre-flight a connection without scraping HTML.
+
+**What it deliberately does not do:**
+
+- No custom auth layer — Application Passwords stay the only credential.
+- No write endpoints, no AI inside WordPress, no Rank Math / MSN / scheduling sync.
+- No outbound HTTP calls. No options stored. No telemetry.
+- No app-password / bot-user creation on the admin's behalf — every step is performed by the admin in WordPress core UI.
+
+**Dashboard support (shipped):**
+
+- The SynthPress Connections form has an **Import connection package** section. Paste the JSON the plugin exports, click **Review package**, then **Use this connection** to pre-fill the WordPress URL and suggest the `synthpress-bot` username (only if the plugin reported the bot user exists). The Application Password is **always** pasted separately — the package never contains secrets, and the import flow never touches the password field. Parser source: [`apps/web/src/lib/wordpress-connection-package.ts`](../apps/web/src/lib/wordpress-connection-package.ts).
+
+**Roadmap (not implemented yet, mentioned for context):**
+
+- Deep-link button from the WP plugin to the SynthPress Connections page (URL fragment, still no remote call from WP).
+- Optional bot-user / Application Password creation wizards in the plugin.
+- App-side pre-flight against `/synthpress/v1/readiness`.
+- Optional Rank Math / SEO meta sync and post-publish callbacks (separately scoped review).
+
+For plugin internals, see [wordpress/wp-content/plugins/synthpress/readme.txt](./wp-content/plugins/synthpress/readme.txt).
 
 ---
 

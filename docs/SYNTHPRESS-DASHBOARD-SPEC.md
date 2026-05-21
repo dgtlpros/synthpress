@@ -109,7 +109,7 @@ You don't need to do anything else. The WordPress site handles the rest:
 | niche | string | Topic/niche (e.g. "fitness", "tech", "pets") |
 | wp_url | string | WordPress site URL (e.g. "https://synthpress01.kinsta.cloud") |
 | wp_username | string | Bot username (e.g. "synthpress-bot") |
-| wp_app_password | string (encrypted) | WordPress Application Password |
+| wp_app_password | string (plaintext today; encryption-at-rest planned — see Security Notes) | WordPress Application Password |
 | ai_prompt_template | text | System prompt for AI article generation |
 | keywords | string[] | Target keywords/topics for this niche |
 | articles_per_day | int | How many articles to auto-generate per day (default: 1) |
@@ -218,11 +218,12 @@ Options for implementation:
 
 ## Security Notes
 
-- WordPress Application Passwords must be encrypted at rest in the database (never stored in plain text)
+- **Application Password storage — current vs. planned.** `blogs.wp_app_password` is a plaintext `text` column today (see `supabase/migrations/00001_initial_schema.sql` / `00014_blogs_optional_wp.sql`). The `pgcrypto` extension is already enabled in the database, so adding column-level encryption-at-rest is a follow-up PR — track it before claiming "credentials are encrypted at rest" anywhere in product copy. Until then, the credential row is protected by RLS + the service-role boundary: only server actions (and the autopilot scheduler) read it; the column is never selected into responses sent to the browser.
+- **No app password ever crosses to the client.** The connection-test action (`testBlogWordPressConnection`) loads the credentials server-side, builds the Basic auth header for the test fetch, and only forwards a sanitized `WordPressConnectionTestResult` — a defensive assertion in the action fails closed if a future refactor accidentally adds the password to the result shape.
 - All WordPress API calls use HTTPS (Kinsta forces this)
 - The bot user on each WordPress site is an Editor (limited capabilities, no admin access)
 - The `restrict-author-login.php` mu-plugin blocks the bot from wp-admin login (REST API only)
-- Dashboard auth should use secure session management (NextAuth handles this)
+- Dashboard auth uses Supabase Auth + RLS — `blogs` is row-scoped by project membership, so an unauthorized user requesting the connection test gets `"Blog not found."` (no enumeration).
 
 ---
 
@@ -246,7 +247,8 @@ The app only needs to: **generate content, upload image (locally via REST API), 
 2. Projects CRUD (create, edit, list projects with WP credentials)
 3. Manual article generation (pick project → generate with AI → preview → publish)
 4. Publish history (list of all published articles per project)
-5. Connection test (verify WP credentials work before saving a project)
+5. Connection test — **shipped.** Connections tab → **Test connection** button hits `GET /wp-json/wp/v2/users/me?context=edit` against the saved credentials and renders healthy / warnings / error panels. Stock WordPress REST API + Application Passwords only; no SynthPress companion plugin required. Tests **saved** values — save first, then test.
+6. Connection package import — **shipped.** Connections tab → **Paste connection package** lets users paste the JSON exported by the SynthPress WordPress plugin (Settings → SynthPress). Pre-fills site URL and (when the plugin reports the bot user exists) suggests a username. The Application Password is **always** pasted separately by the user; package parsing strips any credential-shaped fields with an explicit warning. Parser + types live in `apps/web/src/lib/wordpress-connection-package.ts`; UI in `apps/web/src/components/molecules/WordPressConnectionPackageImporter/`.
 
 ### After MVP
 

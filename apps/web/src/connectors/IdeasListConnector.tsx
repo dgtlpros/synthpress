@@ -5,7 +5,7 @@ import {
   MANUAL_GENERATE_IDEAS_DEFAULT_COUNT,
   MANUAL_GENERATE_IDEAS_MAX_COUNT,
   MANUAL_GENERATE_IDEAS_MIN_COUNT,
-} from "@/actions/article-generation";
+} from "@/lib/manual-generate-ideas";
 import {
   GenerateIdeasModal,
   type GenerateIdeasModalProps,

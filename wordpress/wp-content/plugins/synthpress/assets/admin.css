@@ -1,0 +1,134 @@
+/*
+ * SynthPress connector — admin page styling.
+ *
+ * Intentionally minimal — relies on core WordPress admin classes
+ * (`.wrap`, `.button`, `.widefat`, `.screen-reader-text`) for the
+ * heavy lifting. The custom rules only add card spacing, the
+ * checklist look, and the status glyph color states.
+ */
+
+.synthpress-wrap {
+    max-width: 880px;
+}
+
+.synthpress-intro {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #1d2327;
+    margin: 0 0 24px;
+}
+
+.synthpress-card {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin: 0 0 16px;
+}
+
+.synthpress-card h2 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    line-height: 1.4;
+}
+
+.synthpress-card-help {
+    color: #50575e;
+    margin: 0 0 12px;
+    font-size: 13px;
+}
+
+.synthpress-checks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.synthpress-check {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    grid-column-gap: 10px;
+    align-items: start;
+    padding: 8px 0;
+    border-top: 1px solid #f0f0f1;
+}
+
+.synthpress-check:first-child {
+    border-top: 0;
+}
+
+.synthpress-check-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-weight: 700;
+    color: #fff;
+    background: #8c8f94;
+}
+
+.synthpress-check--pass .synthpress-check-status {
+    background: #00a32a;
+}
+
+.synthpress-check--warning .synthpress-check-status {
+    background: #dba617;
+    color: #1d2327;
+}
+
+.synthpress-check--fail .synthpress-check-status {
+    background: #d63638;
+}
+
+.synthpress-check-label {
+    display: block;
+    font-weight: 600;
+    color: #1d2327;
+    grid-column: 2;
+}
+
+.synthpress-check-message {
+    display: block;
+    color: #50575e;
+    font-size: 13px;
+    grid-column: 2;
+    margin-top: 2px;
+}
+
+.synthpress-table {
+    margin-bottom: 12px;
+}
+
+.synthpress-steps {
+    margin: 0 0 12px 18px;
+    padding: 0;
+    color: #1d2327;
+}
+
+.synthpress-steps li {
+    margin: 0 0 6px;
+}
+
+.synthpress-warning {
+    background: #fff8e5;
+    border-left: 4px solid #dba617;
+    padding: 8px 12px;
+    margin: 0;
+    color: #1d2327;
+    font-size: 13px;
+}
+
+.synthpress-package-textarea {
+    width: 100%;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.synthpress-copy-feedback {
+    margin-left: 12px;
+    color: #00a32a;
+    font-weight: 600;
+}

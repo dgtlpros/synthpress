@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/atoms/Card";
+import { WordPressConnectionPackageImporter } from "@/components/molecules/WordPressConnectionPackageImporter";
 import type { WordPressConnectionTestResult } from "@/lib/wordpress-connection-test-types";
 
 export interface WordPressConnectionFormProps {
@@ -82,6 +83,7 @@ export function WordPressConnectionForm({
   const [username, setUsername] = useState(initialUsername ?? "");
   const [appPassword, setAppPassword] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   const isConnected = Boolean(initialUrl && initialUsername);
   // We can only test what's persisted server-side — the action
@@ -117,6 +119,27 @@ export function WordPressConnectionForm({
     });
   }
 
+  /**
+   * Pulled in from the importer molecule. We deliberately
+   * *don't* call `onSubmit` here — the user still has to paste
+   * their Application Password and click Save. The notice line
+   * tells them exactly that.
+   */
+  function applyImportedPackage(input: { wpUrl: string; wpUsername?: string }) {
+    setLocalError(null);
+    setUrl(input.wpUrl);
+    if (input.wpUsername !== undefined) {
+      setUsername(input.wpUsername);
+      setImportNotice(
+        "Filled site URL and username. Paste the Application Password from WordPress, then click Save changes.",
+      );
+    } else {
+      setImportNotice(
+        "Filled site URL. Choose an Editor-capable WordPress username, paste the Application Password, then click Save changes.",
+      );
+    }
+  }
+
   const message = error ?? localError;
 
   return (
@@ -137,6 +160,24 @@ export function WordPressConnectionForm({
       </CardHeader>
 
       <CardContent>
+        <WordPressConnectionPackageImporter
+          currentUrl={url}
+          currentUsername={username}
+          onApply={applyImportedPackage}
+          disabled={isSaving}
+          className="mb-4"
+        />
+
+        {importNotice ? (
+          <p
+            className="mb-4 rounded-[var(--sp-radius-md)] border border-success/40 bg-success/10 px-3 py-2 text-xs text-foreground"
+            role="status"
+            data-testid="wp-import-notice"
+          >
+            {importNotice}
+          </p>
+        ) : null}
+
         <form
           id="wordpress-connection-form"
           onSubmit={handleSubmit}

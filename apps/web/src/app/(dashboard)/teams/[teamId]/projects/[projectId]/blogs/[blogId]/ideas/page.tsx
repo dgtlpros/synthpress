@@ -9,7 +9,7 @@ import {
 } from "@/services/article-generation-service";
 import { getArticleIdsByIdeaIds } from "@/services/article-service";
 import { getCreditCost } from "@/lib/ai/config";
-import { MANUAL_GENERATE_IDEAS_DEFAULT_COUNT } from "@/actions/article-generation";
+import { MANUAL_GENERATE_IDEAS_DEFAULT_COUNT } from "@/lib/manual-generate-ideas";
 import { IdeasListConnector } from "@/connectors/IdeasListConnector";
 import type { IdeaCardIdea } from "@/components/molecules/IdeaCard";
 import type { IdeaStatus } from "@/components/atoms/IdeaStatusBadge";

@@ -48,16 +48,49 @@ Authorization: Basic {base64(username:app-password)}
 
 The SynthPress Dashboard stores these per-project (one WordPress site = one project).
 
+### Optional: importing a connection package
+
+The SynthPress WordPress companion plugin (`wordpress/wp-content/plugins/synthpress/`) renders a JSON **connection package** containing the site URL, REST URL, recommended bot username, and readiness checks. The dashboard's Connections tab can import that package via **Paste connection package** → **Review package** → **Use this connection** to pre-fill the WordPress URL and a username hint in one click.
+
+Security invariants of the import flow:
+
+- The package never contains an Application Password, API key, or any other secret — the WordPress plugin refuses to emit one, and the dashboard parser (`apps/web/src/lib/wordpress-connection-package.ts`) additionally strips any credential-shaped field (`password`, `applicationPassword`, `wp_app_password`, `token`, `apiKey`, etc.) and emits a single warning when one is found.
+- The importer **only** writes `wpUrl` and (optionally) `wpUsername`. It never touches the Application Password field.
+- Importing does not save or test the connection — the user must still paste the Application Password, click **Save changes**, and then **Test connection**.
+
 ### Testing the connection
 
+The dashboard ships a built-in health check on the **Connections** tab of every blog. Clicking **Test connection** runs:
+
 ```
-GET https://{site-url}/wp-json/wp/v2/users/me
+GET https://{site-url}/wp-json/wp/v2/users/me?context=edit
 Authorization: Basic {credentials}
 ```
 
-A `200` response with the bot user's data = connection works. A `401` = bad credentials.
+against the **saved** credentials (the action reads `wp_url`, `wp_username`, `wp_app_password` from `public.blogs` — unsaved form values are not tested; save first, then test). The implementation lives in:
 
-> **Note:** The SynthPress dashboard does **not** yet call this endpoint when saving credentials. Use curl or your browser until an in-app health check ships. See [`wordpress/README.md`](../wordpress/README.md#testing-the-connection).
+- `apps/web/src/services/wordpress-connection-test-service.ts` — pure helper, accepts an injected `fetch` so it's unit-testable.
+- `apps/web/src/actions/wordpress-connection-test.ts` — `testBlogWordPressConnection` server action; loads credentials via RLS and hands plain fields to the helper.
+- `apps/web/src/hooks/useWordPressConnectionTest.ts` + `apps/web/src/connectors/BlogConnectionsConnector.tsx` — wire the button into the Connections page.
+
+The response shape (`WordPressConnectionTestResult` in `apps/web/src/lib/wordpress-connection-test-types.ts`) carries:
+
+- `ok: boolean`
+- `siteUrl: string` (normalized — trailing slashes stripped)
+- `user?: { id, name?, slug?, roles? }`
+- `capabilities?: { canCreatePosts?, canPublishPosts?, canUploadMedia?, canCreateTerms? }` — built best-effort from WP's `capabilities` block when present, or from a conservative role-name heuristic (administrator / editor / author / contributor / subscriber) as a fallback.
+- `warnings: string[]` — surfaced when capabilities suggest the user can't publish, can't upload media, or can't create terms.
+- `error?: { code, message }` for failures — `missing_url`, `missing_username`, `missing_password`, `invalid_url`, `unauthorized` (401), `forbidden` (403), `rest_not_found` (404 — wrong site URL or REST disabled), `not_wordpress` (response wasn't a WP user payload), `invalid_json`, `network_error`, `unexpected`.
+
+The application password is **never** returned to the client — the server action defensively asserts the helper's result has no `appPassword` field before forwarding it.
+
+Out-of-band, you can hit the same endpoint with `curl` — useful for triaging a 401 outside the dashboard:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -u 'synthpress-bot:YOUR_APP_PASSWORD' \
+  'https://your-site.example/wp-json/wp/v2/users/me'
+```
 
 ---
 
@@ -307,7 +340,7 @@ async function syncArticleToWordPress(mode: "create_draft" | "update_draft" | "p
 
 | Action | Method | Endpoint | When |
 |---|---|---|---|
-| Test connection | GET | `/wp-json/wp/v2/users/me` | Manual / future health check (not in dashboard yet) |
+| Test connection | GET | `/wp-json/wp/v2/users/me?context=edit` | **Connections** tab → **Test connection** button (saved credentials only) |
 | Upload image | POST | `/wp-json/wp/v2/media` | Featured + section images before post sync |
 | Update media alt | PUT | `/wp-json/wp/v2/media/{id}` | Optional after upload |
 | Create draft | POST | `/wp-json/wp/v2/posts` | `create_draft` / autopilot auto-send |

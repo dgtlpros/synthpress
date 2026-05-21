@@ -48,6 +48,7 @@ Activate in WP Admin → Plugins:
 - [ ] **Auto Image Attributes From Filename With Bulk Updater**
 - [ ] **Disable Comments**
 - [ ] **User Role Editor**
+- [ ] **SynthPress** (`synthpress/`) — optional but recommended; adds Settings → SynthPress with readiness checks + connection-package export
 
 MU-plugins in `mu-plugins/` load automatically (no activation).
 
@@ -68,6 +69,7 @@ MU-plugins in `mu-plugins/` load automatically (no activation).
 
 | Plugin | Purpose |
 |--------|---------|
+| `synthpress/` | **SynthPress connector (first-party).** Settings → SynthPress: readiness checklist, bot-user detection, Application Password setup steps, connection-package JSON export, and an authenticated read-only `/wp-json/synthpress/v1/readiness` endpoint. **Optional** — minimal REST publishing still works without it; **recommended** for faster, more auditable setup. |
 | `msn-syndication-2/` | MSN RSS: `/feed/msn:article`, `/feed/msn:gallery` |
 | `seo-by-rank-math/` | SEO, Article schema, sitemap |
 | `auto-image-attributes-from-filename-with-bulk-updater/` | Alt text from filename on REST uploads |

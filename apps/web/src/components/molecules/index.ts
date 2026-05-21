@@ -77,6 +77,9 @@ export type { BlogHeaderProps } from "./BlogHeader";
 export { WordPressConnectionForm } from "./WordPressConnectionForm";
 export type { WordPressConnectionFormProps } from "./WordPressConnectionForm";
 
+export { WordPressConnectionPackageImporter } from "./WordPressConnectionPackageImporter";
+export type { WordPressConnectionPackageImporterProps } from "./WordPressConnectionPackageImporter";
+
 export { WordPressPublishCard } from "./WordPressPublishCard";
 export type {
   WordPressArticleLocalStatus,

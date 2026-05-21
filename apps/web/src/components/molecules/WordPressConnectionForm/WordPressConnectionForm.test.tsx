@@ -1,8 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  WORDPRESS_CONNECTION_PACKAGE_KIND,
+  WORDPRESS_CONNECTION_PACKAGE_SCHEMA_VERSION,
+} from "@/lib/wordpress-connection-package";
 import { WordPressConnectionForm } from "./WordPressConnectionForm";
 
 afterEach(cleanup);
+
+function samplePackage(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    kind: WORDPRESS_CONNECTION_PACKAGE_KIND,
+    schemaVersion: WORDPRESS_CONNECTION_PACKAGE_SCHEMA_VERSION,
+    site: { url: "https://imported.example", name: "Imported Blog" },
+    recommendedUser: { login: "synthpress-bot", exists: true },
+    ...overrides,
+  });
+}
 
 describe("WordPressConnectionForm", () => {
   it("renders not-connected state", () => {
@@ -428,6 +442,140 @@ describe("WordPressConnectionForm", () => {
         />,
       );
       expect(screen.getByText("Blog not found.")).toBeInTheDocument();
+    });
+  });
+
+  describe("connection-package import section", () => {
+    it("always renders the Import section heading", () => {
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername={null}
+          hasStoredPassword={false}
+          onSubmit={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("heading", { name: /import connection package/i }),
+      ).toBeInTheDocument();
+    });
+
+    function importPackage(json: string) {
+      fireEvent.click(
+        screen.getByRole("button", { name: /paste connection package/i }),
+      );
+      fireEvent.change(screen.getByTestId("wp-import-textarea"), {
+        target: { value: json },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /review package/i }));
+      fireEvent.click(
+        screen.getByRole("button", { name: /use this connection/i }),
+      );
+    }
+
+    it("fills site URL + username from the package without touching the password field", () => {
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername={null}
+          hasStoredPassword={false}
+          onSubmit={vi.fn()}
+        />,
+      );
+      importPackage(samplePackage());
+
+      expect(screen.getByLabelText(/Site URL/)).toHaveValue(
+        "https://imported.example",
+      );
+      expect(screen.getByLabelText(/REST username/)).toHaveValue(
+        "synthpress-bot",
+      );
+      // Password field stays empty.
+      expect(screen.getByLabelText(/Application password/)).toHaveValue("");
+      expect(screen.getByTestId("wp-import-notice")).toHaveTextContent(
+        /paste the Application Password/i,
+      );
+    });
+
+    it("fills URL only when the package's recommended user is missing in WordPress", () => {
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername="alice"
+          hasStoredPassword={false}
+          onSubmit={vi.fn()}
+        />,
+      );
+      importPackage(
+        samplePackage({
+          recommendedUser: { login: "synthpress-bot", exists: false },
+        }),
+      );
+      expect(screen.getByLabelText(/Site URL/)).toHaveValue(
+        "https://imported.example",
+      );
+      // Existing username is preserved when the package's bot doesn't exist.
+      expect(screen.getByLabelText(/REST username/)).toHaveValue("alice");
+      expect(screen.getByTestId("wp-import-notice")).toHaveTextContent(
+        /Choose an Editor-capable WordPress username/i,
+      );
+    });
+
+    it("submitting after import sends the imported URL + the user-typed password (still on the standard onSubmit path)", () => {
+      const onSubmit = vi.fn();
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername={null}
+          hasStoredPassword={false}
+          onSubmit={onSubmit}
+        />,
+      );
+      importPackage(samplePackage());
+      fireEvent.change(screen.getByLabelText(/Application password/), {
+        target: { value: "user-typed-secret" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+      expect(onSubmit).toHaveBeenCalledWith({
+        wpUrl: "https://imported.example",
+        wpUsername: "synthpress-bot",
+        wpAppPassword: "user-typed-secret",
+      });
+    });
+
+    it("clears local validation errors when the user imports a package", () => {
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername={null}
+          hasStoredPassword={false}
+          onSubmit={vi.fn()}
+        />,
+      );
+      // Trigger the "required" error.
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+      expect(
+        screen.getByText(/Site URL and username are required/i),
+      ).toBeInTheDocument();
+      importPackage(samplePackage());
+      expect(
+        screen.queryByText(/Site URL and username are required/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("disables the Import section while the form is saving", () => {
+      render(
+        <WordPressConnectionForm
+          initialUrl={null}
+          initialUsername={null}
+          hasStoredPassword={false}
+          onSubmit={vi.fn()}
+          isSaving
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: /paste connection package/i }),
+      ).toBeDisabled();
     });
   });
 });
